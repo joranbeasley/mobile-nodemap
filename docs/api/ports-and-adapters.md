@@ -8,7 +8,7 @@ The standard interfaces between the core and everything else ([ADR 0002](../adr/
 
 | Port | Shape | Direction |
 | --- | --- | --- |
-| `GraphPort` | `nodes`, `edges`, `registry`; `addNode`, `removeNode`, `moveNode`, `setParam`, `canConnect`, `connect`, `disconnect`, `incoming`, `outgoing`, `topoSort`, `toJSON`, `load`, `on`/`off` | core |
+| `GraphPort` | `nodes`, `edges`, `registry`; `addNode`, `removeNode`, `moveNode`, `setParam`, `setLabel`, `canConnect`, `connect`, `disconnect`, `incoming`, `outgoing`, `topoSort`, `toJSON`, `load`, `on`/`off` | core |
 | `NodeDefinition` | `= NodeType` ([nodes](nodes.md)) | core |
 | `CompilerPort` | `compile(graph, registry) → (inputs?) => Promise<outputs>`; `emit?(graph, registry, { name?, lang? }) → string` | driving |
 | `RenderPort` | `mount(container, { graph, registry, … }) → RenderHandle` (`fit`, `autoLayout`, `destroy`) | driving |

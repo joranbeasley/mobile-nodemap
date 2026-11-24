@@ -650,6 +650,7 @@ function renderHelp() {
     <li><b>Graph type</b> the picker next to the logo switches what you are building: maths, a network, or colour palettes from a third-party pack</li>
     <li><b>Pan</b> drag the background · <b>Zoom</b> pinch, or scroll with a trackpad</li>
     <li><b>Move</b> drag any node · <b>Select</b> tap it, then use the toolbar</li>
+    <li><b>Edit</b> double-tap a node (or select it and tap the pencil) for big controls: rename it and change every setting</li>
     <li><b>Connect</b> drag from a port to a port, or tap one port and then another (or a node)</li>
     <li><b>Add</b> long-press the background, or press <kbd>+</kbd>. With a node, port or wire selected, <kbd>+</kbd> adds a node wired to it and nudges its neighbours aside</li>
     <li><b>Tidy</b> the layout button (or <kbd>L</kbd>) arranges the map; wires route around nodes</li>

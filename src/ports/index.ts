@@ -32,6 +32,7 @@ export interface GraphPort extends Pick<Emitter<GraphEvents>, 'on' | 'off'> {
   removeNode(id: string): void;
   moveNode(id: string, x: number, y: number): void;
   setParam(id: string, name: string, value: unknown): void;
+  setLabel(id: string, label?: string): void;
   canConnect(from: PortRef, to: PortRef): string | null;
   connect(from: PortRef, to: PortRef, id?: string): Edge;
   disconnect(edgeId: string): void;

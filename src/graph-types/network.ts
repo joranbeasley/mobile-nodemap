@@ -1,8 +1,8 @@
 import { defineGraphType } from '../core/graph-type.js';
 import type { GraphJSON } from '../core/types.js';
-import { networkEngine, networkPack } from '../packs/network.js';
+import { ipIssues, networkEngine, networkPack } from '../packs/network.js';
 
-const N = (id: string, type: string, params: Record<string, unknown> = {}) => ({ id, type, x: 0, y: 0, params });
+const N = (id: string, type: string, params: Record<string, unknown> = {}, label?: string) => ({ id, type, x: 0, y: 0, params, ...(label ? { label } : {}) });
 const OUT_PORT: Record<string, string> = { 'net/internet': 'wan', 'net/router': 'lan', 'net/firewall': 'protected', 'net/switch': 'ports', 'net/ap': 'clients' };
 /** Build a network map from "a → b" links; ports are picked from the device types. */
 function net(nodes: ReturnType<typeof N>[], links: [string, string][]): GraphJSON {
@@ -28,6 +28,7 @@ export const networkGraph = defineGraphType({
   engine: networkEngine,
   rules: {
     allowCycles: true,
+    validate: (graph) => [...ipIssues(graph.nodes.values())].map(([node, message]) => ({ level: 'warning' as const, message, node })),
     canConnect: (from, to, graph) => {
       const role = (id: string) => graph.registry?.get(graph.nodes.get(id)!.type)?.meta?.role;
       if (role(from.node) === 'internet' && role(to.node) === 'endpoint') return 'Connect devices to the internet through a router';
@@ -38,18 +39,18 @@ export const networkGraph = defineGraphType({
     {
       id: 'home',
       name: 'Home',
-      description: 'Turn the access point off, or a firewall’s “allow traffic”, and watch who goes offline.',
+      description: 'Double-tap a device (or select it and tap the pencil) to rename it, set its IP or power it off.',
       graph: net(
         [
           N('isp', 'net/internet', { latency: 12 }),
-          N('router', 'net/router'),
+          N('router', 'net/router', { ip: '192.168.1.1' }, 'Home router'),
           N('fw', 'net/firewall'),
           N('sw', 'net/switch'),
           N('ap', 'net/ap'),
-          N('nas', 'net/server', { latency: 0.5 }),
-          N('desk', 'net/laptop'),
-          N('lap', 'net/laptop', { bandwidth: '300' }),
-          N('phone', 'net/phone'),
+          N('nas', 'net/server', { latency: 0.5, ip: '192.168.1.10' }, 'NAS'),
+          N('desk', 'net/laptop', { ip: '192.168.1.20' }, 'Desk laptop'),
+          N('lap', 'net/laptop', { bandwidth: '300', ip: '192.168.1.21' }, 'Sofa laptop'),
+          N('phone', 'net/phone', { ip: '192.168.1.22' }, 'Phone'),
         ],
         [
           ['isp', 'router'],
@@ -71,14 +72,14 @@ export const networkGraph = defineGraphType({
         [
           N('isp1', 'net/internet', { latency: 8 }),
           N('isp2', 'net/internet', { latency: 20 }),
-          N('r1', 'net/router'),
-          N('r2', 'net/router'),
-          N('s1', 'net/switch'),
-          N('s2', 'net/switch'),
-          N('web', 'net/server'),
-          N('db', 'net/server'),
+          N('r1', 'net/router', { ip: '10.0.0.1' }, 'Router A'),
+          N('r2', 'net/router', { ip: '10.0.0.2' }, 'Router B'),
+          N('s1', 'net/switch', {}, 'Core switch 1'),
+          N('s2', 'net/switch', {}, 'Core switch 2'),
+          N('web', 'net/server', { ip: '10.0.1.10' }, 'Web server'),
+          N('db', 'net/server', { ip: '10.0.1.20' }, 'Database'),
           N('ap', 'net/ap'),
-          N('guest', 'net/phone'),
+          N('guest', 'net/phone', {}, 'Guest phone'),
         ],
         [
           ['isp1', 'r1'],

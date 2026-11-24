@@ -88,11 +88,11 @@ Install it with `registry.use(pack)`, or list it in a graph type's `packs`.
 | Export | id | |
 | --- | --- | --- |
 | `mathGraph` | `math` | Dataflow; `mathPack` (`nodemap/math`): values, math, logic, text, lists, async, display, graph I/O, constants, remap, sum all, plot function. Conversions number→string and boolean→number. |
-| `networkGraph` | `network` | `networkPack` (`nodemap/network`): internet, router, firewall, switch, Wi-Fi access point, server, laptop, phone; port type `link`; `networkEngine`; `allowCycles`; endpoints can't connect straight to the internet. |
+| `networkGraph` | `network` | `networkPack` (`nodemap/network`): internet, router, firewall, switch, Wi-Fi access point, server, laptop, phone; port type `link`; `networkEngine`; `allowCycles`; endpoints can't connect straight to the internet. Every device has editable `up`, `ip`, `latency` and `bandwidth`, and a name (`label`). `validate` warns about bad or duplicate IPv4 addresses (`ipIssues(nodes)`). |
 | `functionGraph` | `function` | Extends math. Input leaves are arguments and exactly one Output is required (`canAddNode` and `validate` via `functionIssues`). See [library](library.md). |
 | `stdlib` | | The math node types as a plain array (kept for compatibility). |
 | `networkDevice` | | The base device node, for `extendNode`. |
 | `networkStatusView` | | The device status view, for reuse. |
 | `builtinGraphTypes` | | `[mathGraph, networkGraph, functionGraph]`. |
 
-`networkEngine` publishes `outputs.status` for each device: `{ state: 'source' | 'online' | 'offline' | 'down' | 'blocking', latency?, hops?, bandwidth?, redundant? }`. Its summary outputs are `{ online, offline, worstLatency }`.
+`networkEngine` publishes `outputs.status` for each device: `{ state: 'source' | 'online' | 'offline' | 'down' | 'blocking', latency?, hops?, bandwidth?, redundant?, ip?, ipIssue? }`. Its summary outputs are `{ online, offline, worstLatency }`.

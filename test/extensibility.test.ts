@@ -203,3 +203,62 @@ describe('Network engine', () => {
     expect(status(r, 'web').latency).toBeGreaterThan(20);
   });
 });
+
+describe('Editing network devices', () => {
+  it('renames nodes, keeps the name in JSON, and undo restores it', () => {
+    const reg = networkGraph.createRegistry();
+    const g = Graph.fromJSON(networkGraph.examples![0].graph, reg);
+    expect(g.nodes.get('nas')!.label).toBe('NAS');
+    const changes: string[] = [];
+    g.on('change', (c) => changes.push(c.kind));
+    g.setLabel('nas', '  Backup box ');
+    expect(g.nodes.get('nas')!.label).toBe('Backup box');
+    expect(g.toJSON().nodes.find((n) => n.id === 'nas')!.label).toBe('Backup box');
+    g.setLabel('nas', '');
+    expect(g.nodes.get('nas')!.label).toBeUndefined();
+    expect(changes).toEqual(['node:label', 'node:label']);
+  });
+
+  it('flags bad and duplicate IP addresses in results and validation', async () => {
+    const reg = networkGraph.createRegistry();
+    const g = Graph.fromJSON(networkGraph.examples![0].graph, reg);
+    g.setParam('phone', 'ip', '192.168.1.10'); // same as the NAS
+    g.setParam('lap', 'ip', '300.1.1.1');
+    const r = await new Evaluator(g, reg).run();
+    const st = (id: string) => r.results.get(id)!.outputs!.status as { ip?: string; ipIssue?: string };
+    expect(st('desk')).toMatchObject({ ip: '192.168.1.20' });
+    expect(st('desk').ipIssue).toBeUndefined();
+    expect(st('phone').ipIssue).toMatch(/also used/);
+    expect(st('nas').ipIssue).toMatch(/also used/);
+    expect(st('lap').ipIssue).toMatch(/not an IPv4/);
+    expect(g.validate().map((i) => i.node).sort()).toEqual(['lap', 'nas', 'phone']);
+  });
+
+  it('opens a full-size Edit sheet that changes name and params', () => {
+    const reg = networkGraph.createRegistry();
+    const g = Graph.fromJSON(networkGraph.examples![0].graph, reg);
+    const el = document.createElement('div');
+    document.body.append(el);
+    const editor = new NodeEditor(el, { graph: g, registry: reg });
+    editor.openNodeEditor('router');
+    const sheet = el.querySelector('.nm-edit')!;
+    expect(sheet.querySelector('strong')!.textContent).toBe('Edit Home router');
+    // Advanced params (IP, latency, bandwidth) are all there, not folded away.
+    const labels = [...sheet.querySelectorAll('.nm-edit-field > span')].map((s) => s.textContent);
+    expect(labels).toEqual(expect.arrayContaining(['Name', 'powered', 'IP address', 'latency ms', 'Mbps']));
+    const name = sheet.querySelector<HTMLInputElement>('#nm-edit-name')!;
+    name.value = 'Gateway';
+    name.dispatchEvent(new Event('input'));
+    expect(g.nodes.get('router')!.label).toBe('Gateway');
+    expect(el.querySelector('[data-id="router"] .nm-title')!.textContent).toBe('Gateway');
+    const ip = sheet.querySelector<HTMLInputElement>('[data-key="p:ip"]')!;
+    ip.value = '10.0.0.1';
+    ip.dispatchEvent(new Event('input'));
+    expect(g.nodes.get('router')!.params.ip).toBe('10.0.0.1');
+    // The copy on the canvas follows.
+    expect(el.querySelector<HTMLInputElement>('[data-id="router"] [data-key="p:ip"]')!.value).toBe('10.0.0.1');
+    g.removeNode('router');
+    expect(el.querySelector('.nm-edit')).toBeNull();
+    editor.destroy();
+  });
+});

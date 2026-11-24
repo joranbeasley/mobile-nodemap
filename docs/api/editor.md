@@ -17,7 +17,7 @@ Give `container` a size. The editor adds `.nm-root`, makes it focusable and inje
 | `graph` | required | `Graph` |
 | `registry` | required | `Registry` |
 | `evaluator` | none | When given, results show live and the evaluator re-runs on edits. |
-| `toolbar` | `true` | Delete, duplicate, undo, redo, tidy, fit and add. |
+| `toolbar` | `true` | Delete, edit, duplicate, undo, redo, tidy, fit and add. |
 | `history` | `true` | Undo and redo. |
 | `minZoom`, `maxZoom` | `0.2`, `2.5` | |
 | `longPressMs` | `450` | Long-press time before the add sheet opens. |
@@ -40,6 +40,7 @@ Give `container` a size. The editor adds `.nm-root`, makes it focusable and inje
 | `openPalette(at?, connectFrom?, { around?, splice? })` / `closePalette()` | The add sheet, directly. |
 | `suggestConnection(nodeId)` | Which side and port a new node should attach to. |
 | `select({ node?, edge? })` / `deleteSelection()` / `duplicateSelection()` | |
+| `openNodeEditor(nodeId)` | A full-size Edit sheet: name, every param (advanced ones too), values of unconnected inputs, Duplicate and Delete. Opened by double-tapping a node, the toolbar pencil, or E / Enter. |
 | `showDetails(nodeId)` / `hideDetails()` | A node type's `details()` card (code, actions). Tapping such a node calls it. |
 | `autoLayout({ animate?, fit?, maxWidth? })` | Tidy. On narrow portrait screens `maxWidth` defaults to fit at a readable zoom. |
 | `setLayout(engine)` / `setWires(style)` / `setTheme(theme \| null)` | |
@@ -67,6 +68,7 @@ Give `container` a size. The editor adds `.nm-root`, makes it focusable and inje
 | Connect | drag port → port, or tap port then port or node | same |
 | Add | long-press, **+** | **+**, A, Space |
 | Add connected | select a node, port or wire, then **+** | same |
+| Edit a node | double-tap it, or select it and tap the pencil | double-click, or select and press E / Enter |
 | Details | tap a node that has `details` | click |
 | Undo, redo | toolbar | ⌘Z, ⌘⇧Z or ⌘Y |
 | Other | toolbar | Delete, ⌘D, F (fit), L (tidy), Esc |

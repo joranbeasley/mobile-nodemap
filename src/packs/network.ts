@@ -30,6 +30,7 @@ export const device = defineNode({
   inputs: { uplink: link() },
   params: [
     { name: 'up', label: 'powered', kind: 'boolean', default: true },
+    { name: 'ip', label: 'IP address', kind: 'text', default: '', placeholder: 'e.g. 192.168.1.10', description: 'IPv4 address. Duplicates are flagged.', advanced: true },
     { name: 'latency', label: 'latency ms', kind: 'number', default: 1, min: 0, max: 50, step: 0.5, advanced: true },
     { name: 'bandwidth', label: 'Mbps', kind: 'select', default: '1000', options: ['10', '100', '300', '1000', '10000'], advanced: true },
   ],
@@ -56,7 +57,9 @@ export const statusView = {
           ? `<span>${s.latency} ms</span>`
           : '';
     const path = s.state === 'online' ? `<span class="nm-net-path" data-ok="${s.redundant}">${s.redundant ? '2+ paths' : 'single path'}</span>` : '';
-    el.innerHTML = `<div class="nm-net" data-state="${s.state}"><b>${label}</b>${facts}${path}</div>`;
+    const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+    const ip = s.ip ? `<span class="nm-net-ip" data-bad="${!!s.ipIssue}" title="${esc(s.ipIssue ?? '')}">${esc(s.ip)}${s.ipIssue ? ' ⚠' : ''}</span>` : '';
+    el.innerHTML = `<div class="nm-net" data-state="${s.state}"><b>${label}</b>${facts}${ip}${path}</div>`;
   },
 };
 
@@ -147,10 +150,37 @@ const nodes: NodeType[] = [
   }),
 ].map((n) => ({ ...n, view: statusView }));
 
+// ------------------------------------------------------------------ addressing
+
+const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+
+/** IP problems per node: bad format, or the same address on two devices. */
+export function ipIssues(nodes: Iterable<NodeInstance>): Map<string, string> {
+  const issues = new Map<string, string>();
+  const seen = new Map<string, string>();
+  for (const n of nodes) {
+    const ip = String(n.params.ip ?? '').trim();
+    if (!ip) continue;
+    if (!IPV4.test(ip)) {
+      issues.set(n.id, `“${ip}” is not an IPv4 address`);
+      continue;
+    }
+    const other = seen.get(ip);
+    if (other) {
+      issues.set(n.id, `${ip} is also used by another device`);
+      issues.set(other, `${ip} is also used by another device`);
+    } else seen.set(ip, n.id);
+  }
+  return issues;
+}
+
 // ------------------------------------------------------------------ engine
 
 export interface NetworkStatus {
   state: 'source' | 'online' | 'offline' | 'down' | 'blocking';
+  ip?: string;
+  /** What is wrong with the IP address, if anything. */
+  ipIssue?: string;
   latency?: number;
   hops?: number;
   bandwidth?: number;
@@ -210,6 +240,7 @@ export const networkEngine: GraphEngine = {
     };
 
     const best = shortest();
+    const addressing = ipIssues(nodes);
     let online = 0;
     let offline = 0;
     let worst = 0;
@@ -245,6 +276,12 @@ export const networkEngine: GraphEngine = {
         }
         result = { status: 'ok', outputs: { status } };
       }
+      const ip = String(n.params.ip ?? '').trim();
+      if (ip && result.outputs) {
+        const st = result.outputs.status as NetworkStatus;
+        st.ip = ip;
+        if (addressing.has(n.id)) st.ipIssue = addressing.get(n.id);
+      }
       publish(n.id, result);
     }
     return { outputs: { online, offline, worstLatency: Math.round(worst * 10) / 10 } };
@@ -259,6 +296,8 @@ const css = `
 .nm-net[data-state="source"] b { background: #1971c2; }
 .nm-net span { font-variant-numeric: tabular-nums; }
 .nm-net-path { width: 100%; }
+.nm-net-ip { width: 100%; font-family: var(--_mono); color: var(--_text); }
+.nm-net-ip[data-bad="true"] { color: var(--_danger); }
 .nm-net-path[data-ok="false"] { color: #e8590c; }
 .nm-net-path[data-ok="true"]::before { content: "✓ "; color: var(--_ok); }
 .nm-net-path[data-ok="false"]::before { content: "! "; }

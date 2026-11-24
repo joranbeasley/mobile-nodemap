@@ -26,6 +26,8 @@ Wiring nodes on a phone with desktop editors means mis-taps, accidental zooms an
 | E10 | `advanced` params fold behind "More" to keep nodes short | Shipped |
 | E11 | Keyboard: Delete, ⌘Z / ⌘⇧Z, ⌘D, A or Space to add, F to fit, L to tidy, Esc | Shipped |
 | E12 | Live results, errors and running state on each node; custom previews via `view` | Shipped |
+| E13 | Every node can be edited in a full-size sheet (double-tap, toolbar pencil, or E / Enter): name, all params including advanced ones, unconnected input values, Duplicate and Delete | Shipped |
+| E14 | Any node can be renamed; the name is saved in the map and undoable | Shipped |
 
 ## UX notes
 

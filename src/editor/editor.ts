@@ -82,6 +82,7 @@ const icons = {
   tidy: '<rect x="3" y="4" width="7" height="5" rx="1.5"/><rect x="14" y="4" width="7" height="5" rx="1.5"/><rect x="14" y="15" width="7" height="5" rx="1.5"/><path d="M10 6.5h4M17.5 9v6"/>',
   fit: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
   trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
   copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>',
 };
 
@@ -123,6 +124,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
   private sheet?: HTMLElement;
   private records = new Map<string, NodeRecord>();
   private themeOff?: () => void;
+  private lastTap?: { id: string; t: number };
   private card?: HTMLElement;
   private detailsFor?: string;
   private currentTheme?: Theme;
@@ -694,6 +696,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
   closePalette(): void {
     if (!this.sheet) return;
     (this.sheet as any)._backdrop?.remove();
+    (this.sheet as any)._off?.();
     this.sheet.remove();
     this.sheet = undefined;
     this.root.focus({ preventScroll: true });
@@ -706,6 +709,102 @@ export class NodeEditor extends Emitter<EditorEvents> {
     clearTimeout(this.toastTimer);
     this.toastTimer = setTimeout(() => (this.toast.hidden = true), 2200);
     this.emit('error', message);
+  }
+
+  /**
+   * A full-size editing sheet for one node: its name, every param (advanced ones too) and
+   * the values of unconnected inputs, with Duplicate and Delete. On phones this is far easier
+   * than the small controls on the canvas. Opened by double-tapping a node, the pencil in the
+   * toolbar, or E / Enter.
+   */
+  openNodeEditor(id: string): void {
+    const node = this.graph.nodes.get(id);
+    if (!node) return;
+    const def = this.registry.get(node.type);
+    this.closePalette();
+    this.hideDetails();
+    this.sheetGuard = this.pointers.size ? Infinity : performance.now() + 350;
+    const typeTitle = def?.title ?? node.type;
+    const titleEl = h('strong', {}, `Edit ${node.label ?? typeTitle}`);
+    const done = h('button', { type: 'button', class: 'nm-card-btn nm-card-primary' }, 'Done');
+    done.addEventListener('click', () => this.closePalette());
+    const head = h(
+      'div',
+      { class: 'nm-sheet-head nm-edit-head' },
+      h('div', {}, titleEl, h('small', {}, [def?.category, typeTitle !== (node.label ?? typeTitle) ? typeTitle : '', def?.description].filter(Boolean).join(' · '))),
+      done,
+    );
+    const form = h('div', { class: 'nm-sheet-list nm-form' });
+    const field = (label: string, control: HTMLElement, hint?: string) =>
+      h('label', { class: 'nm-edit-field' }, h('span', {}, label), control, ...(hint ? [h('small', {}, hint)] : []));
+
+    const name = h('input', { type: 'text', id: 'nm-edit-name', autocomplete: 'off', spellcheck: 'false', placeholder: typeTitle, 'aria-label': 'Name' });
+    name.value = node.label ?? '';
+    name.addEventListener('input', () => {
+      this.graph.setLabel(id, name.value);
+      titleEl.textContent = `Edit ${name.value.trim() || typeTitle}`;
+    });
+    form.append(field('Name', name, `Leave empty to show “${typeTitle}”`));
+
+    const params = def?.params ?? [];
+    if (params.length) {
+      form.append(h('div', { class: 'nm-sheet-cat' }, 'Settings'));
+      for (const p of params) form.append(field(p.label ?? p.name, this.paramControl(node, p), p.description));
+    }
+    const linked = new Set(this.graph.incoming(id).map((e) => e.to.port));
+    const inputs = this.registry.inputsOf(node).filter((p) => {
+      const pt = this.registry.portType(p.type);
+      const inline = p.inline ?? (!p.multiple && (pt ? pt.inline !== false && !!pt.inline : Registry.isPrimitive(p.type) || p.type === 'any'));
+      return inline && !linked.has(p.name);
+    });
+    if (inputs.length) {
+      form.append(h('div', { class: 'nm-sheet-cat' }, 'Input values'));
+      for (const p of inputs) form.append(field(p.label ?? p.name, this.inlineControl(node, p), p.description ?? 'Used while nothing is wired in'));
+    }
+    const dup = h('button', { type: 'button', class: 'nm-card-btn' }, 'Duplicate');
+    dup.addEventListener('click', () => {
+      this.closePalette();
+      this.duplicateSelection();
+    });
+    const del = h('button', { type: 'button', class: 'nm-card-btn nm-card-danger' }, 'Delete');
+    del.addEventListener('click', () => {
+      this.closePalette();
+      this.select({ node: id });
+      this.deleteSelection();
+    });
+    form.append(h('div', { class: 'nm-card-actions nm-edit-actions' }, dup, del));
+
+    const backdrop = h('div', { class: 'nm-sheet-backdrop' });
+    backdrop.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      if (performance.now() < this.sheetGuard) return;
+      this.closePalette();
+    });
+    const sheet = h('div', { class: 'nm-sheet nm-edit', role: 'dialog', 'aria-label': `Edit ${node.label ?? typeTitle}` }, h('div', { class: 'nm-sheet-grip' }), head, form);
+    sheet.addEventListener('pointerdown', (e) => e.stopPropagation());
+    // The finger that double-tapped lifts onto the sheet: swallow that click so it can't toggle a control.
+    sheet.addEventListener(
+      'click',
+      (e) => {
+        if (performance.now() < this.sheetGuard) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      },
+      true,
+    );
+    sheet.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') this.closePalette();
+    });
+    // Drop the sheet if its node disappears (undo, delete elsewhere).
+    const off = this.graph.on('change', (c) => {
+      if ((c.kind === 'node:remove' && c.node.id === id) || c.kind === 'load') this.closePalette();
+    });
+    (sheet as any)._off = off;
+    this.root.append(backdrop, sheet);
+    this.sheet = sheet;
+    (sheet as any)._backdrop = backdrop;
+    if (matchMedia?.('(pointer: fine)').matches) name.focus();
   }
 
   /**
@@ -871,6 +970,11 @@ export class NodeEditor extends Emitter<EditorEvents> {
         this.place(c.node);
         this.drawEdgesOf(c.node.id);
         break;
+      case 'node:label': {
+        const title = this.records.get(c.node.id)?.el.querySelector('.nm-title');
+        if (title) title.textContent = c.node.label ?? this.registry.get(c.node.type)?.title ?? c.node.type;
+        break;
+      }
       case 'node:params': {
         const rec = this.records.get(c.node.id);
         if (rec && rec.portsKey !== this.portsKey(c.node)) {
@@ -1331,6 +1435,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       'div',
       { class: 'nm-toolbar', role: 'toolbar', 'aria-label': 'Editor' },
       btn('trash', 'Delete selection', () => this.deleteSelection(), 'nm-danger'),
+      btn('edit', 'Edit node', () => this.selected.node && this.openNodeEditor(this.selected.node)),
       btn('copy', 'Duplicate node', () => this.duplicateSelection()),
       h('span', { class: 'nm-sep' }),
       btn('undo', 'Undo', () => this.history?.undo()),
@@ -1350,6 +1455,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
     const hasSel = !!(this.selected.node || this.selected.edge);
     q('trash').hidden = !hasSel;
     q('copy').hidden = !this.selected.node;
+    q('edit').hidden = !this.selected.node;
     (this.toolbar.querySelector('.nm-sep') as HTMLElement).hidden = !hasSel;
     q('undo').hidden = q('redo').hidden = !this.history;
     // History commits after a short settle delay, so re-check shortly after edits.
@@ -1387,6 +1493,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       else if (mod && e.key.toLowerCase() === 'z') e.shiftKey ? this.history?.redo() : this.history?.undo();
       else if (mod && e.key.toLowerCase() === 'y') this.history?.redo();
       else if (mod && e.key.toLowerCase() === 'd') this.duplicateSelection();
+      else if ((e.key === 'e' || e.key === 'Enter') && this.selected.node) this.openNodeEditor(this.selected.node);
       else if (e.key === 'a' || e.key === 'A' || e.key === ' ') this.openAddSheet();
       else if (e.key === 'f') this.fit({ minScale: 0 });
       else if (e.key === 'l') void this.autoLayout();
@@ -1540,9 +1647,14 @@ export class NodeEditor extends Emitter<EditorEvents> {
             this.cancelPending();
             this.autoConnect(p, g.id);
           } else {
+            // A second tap on the same node opens its Edit sheet; a first tap selects it.
+            const now = performance.now();
+            const again = this.lastTap?.id === g.id && now - this.lastTap.t < 350;
+            this.lastTap = { id: g.id, t: now };
             this.select({ node: g.id });
+            if (again) this.openNodeEditor(g.id);
             // Nodes with details (e.g. custom nodes) show them on tap.
-            if (this.registry.get(this.graph.nodes.get(g.id)!.type)?.details) this.showDetails(g.id);
+            else if (this.registry.get(this.graph.nodes.get(g.id)!.type)?.details) this.showDetails(g.id);
           }
         }
         break;

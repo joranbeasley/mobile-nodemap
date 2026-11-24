@@ -31,6 +31,7 @@ Pass a registry to get port validation, type checks, rules and migrations.
 | `addNode(type, init?)` | `NodeInstance` | `init`: `{ id?, x?, y?, params?, label? }`. Applies param defaults, `version` and `onCreate`. Throws `ConnectionError` if `rules.canAddNode` vetoes it. |
 | `removeNode(id)` | `void` | Also removes its edges. |
 | `moveNode(id, x, y)` | `void` | |
+| `setLabel(id, label?)` | `void` | Rename a node (its title on the canvas). Trimmed; empty or `undefined` goes back to the type's title. Saved in JSON as `label`. |
 | `setParam(id, name, value)` | `void` | Also sets inline values of unconnected inputs (same namespace). Drops edges whose ports vanished (dynamic `ports()`). |
 | `canConnect(from, to)` | `string \| null` | The reason it can't connect, or `null`. Checks ports, types, `multiple`, `rules.canConnect` and loops (unless `allowCycles`). |
 | `connect(from, to, id?)` | `Edge` | Throws `ConnectionError`. Replaces the existing wire on a single input. |
@@ -50,6 +51,7 @@ Pass a registry to get port validation, type checks, rules and migrations.
 
 - `node:add`, `node:remove`, `node:move`: with `node`;
 - `node:params`: with `node` and `name`;
+- `node:label`: with `node`;
 - `edge:add`, `edge:remove`: with `edge`;
 - `load`.
 

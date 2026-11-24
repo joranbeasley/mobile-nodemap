@@ -9,6 +9,7 @@ export type GraphChange =
   | { kind: 'node:remove'; node: NodeInstance }
   | { kind: 'node:move'; node: NodeInstance }
   | { kind: 'node:params'; node: NodeInstance; name: string }
+  | { kind: 'node:label'; node: NodeInstance }
   | { kind: 'edge:add'; edge: Edge }
   | { kind: 'edge:remove'; edge: Edge }
   | { kind: 'load' };
@@ -91,6 +92,17 @@ export class Graph extends Emitter<GraphEvents> implements GraphPort {
   /** Problems with the whole map, from the graph type's `validate` rule. */
   validate(): GraphIssue[] {
     return this.registry?.rules.validate?.(this) ?? [];
+  }
+
+  /** Rename a node (its title on the canvas). Empty or undefined goes back to the node type's title. */
+  setLabel(id: string, label?: string): void {
+    const node = this.nodes.get(id);
+    if (!node) return;
+    const next = label?.trim() || undefined;
+    if (next === node.label) return;
+    if (next) node.label = next;
+    else delete node.label;
+    this.emit('change', { kind: 'node:label', node });
   }
 
   /** Returns a reason the connection is invalid, or null if it can be made. */

@@ -300,6 +300,7 @@ It renders in a shadow root. `--nm-*` CSS variables set on the element or any an
 | Connect | drag port → port, or tap a port then another port (or a node) | same |
 | Rewire | drag a wire's end off an input | same |
 | Add connected node | drop a wire on empty canvas | same |
+| Edit a node (name, all settings) | double-tap it, or select it and tap the pencil | double-click, or select and press <kbd>E</kbd> |
 | Add node | long-press the background, or **+** | **+**, <kbd>A</kbd> or <kbd>Space</kbd> |
 | Add a connected node | select a node, then **+** | select, then **+**, <kbd>A</kbd> or <kbd>Space</kbd> |
 | Add on a specific port | tap the port, then **+** | click the port, then **+** |

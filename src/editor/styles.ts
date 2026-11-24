@@ -161,6 +161,23 @@ export const css = /* css */ `
 .nm-card-primary { background: var(--_accent); border-color: var(--_accent); color: var(--_bg); }
 .nm-card-btn:focus-visible, .nm-card-close:focus-visible, .nm-card-code:focus-visible { outline: 2px solid var(--_accent); outline-offset: 1px; }
 .nm-card-status { color: var(--_muted); font-size: 12px; }
+.nm-sheet-head.nm-edit-head { flex-direction: row; align-items: center; gap: 10px; text-align: left; }
+.nm-edit-head > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.nm-edit-head small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nm-form { display: flex; flex-direction: column; gap: 4px; padding: 0 14px 16px; user-select: text; -webkit-user-select: text; }
+.nm-form .nm-sheet-cat { padding-inline: 0; }
+.nm-edit-field { display: flex; flex-direction: column; gap: 6px; padding: 6px 0; font-size: 14px; color: var(--_text); }
+.nm-edit-field > span { font-weight: 600; }
+.nm-edit-field > small { color: var(--_muted); font-size: 12px; }
+.nm-edit-field:has(> input[type="checkbox"]) { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+.nm-edit-field:has(> input[type="checkbox"]) > small { width: 100%; }
+.nm-form input:not([type="checkbox"]):not([type="range"]):not([type="color"]), .nm-form select, .nm-form textarea { font-size: 16px; min-height: 42px; padding: 6px 10px; border-radius: 9px; }
+.nm-form input[type="number"] { width: 110px; }
+.nm-form input[type="checkbox"] { width: 28px; height: 28px; }
+.nm-form .nm-range { gap: 12px; }
+.nm-form input[type="range"] { height: 36px; }
+.nm-edit-actions { padding-top: 12px; margin-top: 6px; border-top: 1px solid var(--_border); }
+.nm-card-danger { color: var(--_danger); }
 .nm-sheet-backdrop { position: absolute; inset: 0; background: rgb(0 0 0 / .25); z-index: 8; }
 .nm-sheet { position: absolute; left: 0; right: 0; bottom: 0; max-height: 72%; display: flex; flex-direction: column; z-index: 9;
   background: var(--_node); border-radius: 18px 18px 0 0; box-shadow: 0 -8px 30px rgb(0 0 0 / .2); padding-bottom: env(safe-area-inset-bottom, 0px);
