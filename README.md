@@ -5,6 +5,9 @@ A small, dependency-free TypeScript library for building **node maps** (node gra
 - **`mobile-nodemap/core`**: the data model. `Graph` (nodes, ports, edges, JSON), `Registry` (node type definitions), `History` (undo/redo). No DOM.
 - **`mobile-nodemap/runtime`**: the evaluator. Memoised, async, cancellable execution; `compile()` turns a map into a plain async function; `graphNode()` turns a map into a reusable node; `stdlib` has about 30 ready-made nodes. No DOM.
 - **`mobile-nodemap/editor`**: `NodeEditor`, a touch-first DOM/SVG editor with pinch zoom, drag or tap-to-connect wiring, a long-press add menu, live results and undo.
+- **`mobile-nodemap/layout`**: auto-layout, wire routing and placement. A layered layout that wraps to fit portrait screens, an orthogonal router that steers wires around nodes, free-space placement, and an optional [ELK](https://eclipse.dev/elk/) adapter. No DOM.
+- **`mobile-nodemap/react`**: `<NodeMap>`, hooks (`useGraph`, `useEvaluator`, `useEvaluation`, `useGraphValue`) and `reactView()` for React-rendered node previews.
+- **`mobile-nodemap/element`**: the `<node-map>` custom element. Importing it registers the tag.
 
 The demo playground is in `docs/demo.html` (one self-contained file).
 
@@ -84,6 +87,71 @@ registry.define(graphNode({ type: 'fn/area', title: 'Circle area', graph, regist
 
 `graphNode()` lets people build their own nodes out of nodes.
 
+## Layout, routing and placement
+
+The editor arranges things so you rarely have to drag on a small screen:
+
+- **Tidy** (toolbar button, <kbd>L</kbd>, or `editor.autoLayout()`) runs the layout engine and animates nodes into place. On a narrow portrait canvas the layout wraps into rows that fit the width at a readable zoom.
+- **Routed wires** (`wires: 'smart'`, the default) are orthogonal and go around nodes. The router runs A* over a sparse grid built from node edges and the channels between them. Bends cost extra, and wires from different outputs avoid sharing a segment. While you drag a node, only its own wires re-route; everything re-routes when you drop it. Use `wires: 'curved'` for classic S-curves.
+- **Placement**: a node added by dropping a wire lands one column over with its port lined up, in the nearest free space. A node dropped on top of another slides off it. When a node grows (a chart or an error appears), the nodes below it are pushed down.
+
+```ts
+import { layered, elkLayout, Router, findFreeSpot } from 'mobile-nodemap/layout';
+import ELK from 'elkjs/lib/elk.bundled.js';           // optional peer dependency
+
+editor.setLayout(elkLayout(new ELK()));               // or layered({ gapX: 80, gapY: 36 })
+await editor.autoLayout({ maxWidth: 600 });           // force row wrapping
+
+// The pieces work without the editor too:
+const positions = layered()({ nodes, edges, maxWidth: 600 });
+const points = new Router(nodeRects).route(outputPoint, inputPoint);
+```
+
+A layout engine is any function `(input) => positions` (sync or async), so you can plug in dagre, d3-dag and so on.
+
+## React
+
+```tsx
+import { NodeMap, useGraph, useEvaluator, useEvaluation, reactView } from 'mobile-nodemap/react';
+
+function Weather() {
+  const graph = useGraph(registry, weatherMap);
+  const evaluator = useEvaluator(graph, registry);
+  const [f, setF] = useState(70);
+  const { outputs, running } = useEvaluation(evaluator, { f });   // feeds graph inputs, re-runs on change
+
+  return (
+    <>
+      <input type="range" value={f} onChange={(e) => setF(+e.target.value)} />
+      <p>{outputs.advice}</p>
+      <NodeMap registry={registry} graph={graph} evaluator={evaluator} autoLayout style={{ height: 480 }} />
+    </>
+  );
+}
+
+// A node whose preview is a React component:
+registry.define({ type: 'view/gauge', inputs: [...], run: ..., view: reactView(({ result, node }) => <Gauge value={result?.outputs?.value} />) });
+```
+
+`<NodeMap>` props: `registry`, `graph` or `defaultValue`, `evaluator` (or `false`), `wires`, `layout`, `toolbar`, `placement`, `theme`, `autoLayout`, `onChange`, `onSelect`, `onEvaluate`. Its ref is the `NodeEditor`. `useGraphValue(graph)` gives you the JSON and re-renders on every change. React 18 and 19 are supported, as optional peer dependencies.
+
+## Custom element
+
+```html
+<script type="module">import 'mobile-nodemap/element';</script>
+
+<node-map wires="smart" auto-layout style="height: 420px">
+  <script type="application/json">{ "version": 1, "nodes": [...], "edges": [...] }</script>
+</node-map>
+```
+
+- **Attributes**: `wires` (`smart` | `curved`), `theme` (`light` | `dark`), `auto-layout`, `no-toolbar`, `no-eval`.
+- **Properties**: `registry` (defaults to `stdlib`), `value` (graph JSON), `layout`, plus `graph`, `editor` and `evaluator`.
+- **Methods**: `autoLayout()`, `fit()`, `run(inputs)` (results show on the nodes), `call(inputs)` (runs the map as a function).
+- **Events**: `change` (`{ value, change }`), `select`, `evaluate` (the run report).
+
+It renders in a shadow root. `--nm-*` CSS variables set on the element or any ancestor still theme it. With the IIFE bundle, call `Nodemap.defineNodeMapElement()`.
+
 ## Editor gestures
 
 | Action | Touch | Mouse / keyboard |
@@ -95,6 +163,7 @@ registry.define(graphNode({ type: 'fn/area', title: 'Circle area', graph, regist
 | Rewire | drag a wire's end off an input | same |
 | Add connected node | drop a wire on empty canvas | same |
 | Add node | long-press the background, or **+** | **+**, <kbd>A</kbd> or <kbd>Space</kbd> |
+| Tidy layout | toolbar | <kbd>L</kbd> |
 | Delete | select, then the bin | <kbd>Delete</kbd> |
 | Undo / redo | toolbar | <kbd>Ctrl/⌘ Z</kbd>, <kbd>Ctrl/⌘ Shift Z</kbd> |
 
@@ -102,7 +171,7 @@ Ports have a 44px touch target, form fields use 16px text (no iOS focus zoom), a
 
 ## Theming
 
-Every colour is a CSS variable on `.nm-root`: `--nm-bg`, `--nm-dot`, `--nm-node`, `--nm-node-2`, `--nm-border`, `--nm-text`, `--nm-muted`, `--nm-accent`, `--nm-wire`, `--nm-danger`, `--nm-font`, `--nm-mono` and port colours `--nm-t-number`, `--nm-t-string`, `--nm-t-boolean`, `--nm-t-list`, `--nm-t-any`. Dark mode follows `prefers-color-scheme`, or set `data-theme="dark" | "light"` on the container.
+Every colour is a CSS variable you can set on `.nm-root`, any ancestor, or `<node-map>`: `--nm-bg`, `--nm-dot`, `--nm-node`, `--nm-node-2`, `--nm-border`, `--nm-text`, `--nm-muted`, `--nm-accent`, `--nm-wire`, `--nm-danger`, `--nm-font`, `--nm-mono` and port colours `--nm-t-number`, `--nm-t-string`, `--nm-t-boolean`, `--nm-t-list`, `--nm-t-any`. Dark mode follows `prefers-color-scheme`, or set `data-theme="dark" | "light"` on the container.
 
 ## Security note
 
@@ -112,7 +181,7 @@ Every colour is a CSS variable on `.nm-root`: `--nm-bg`, `--nm-dot`, `--nm-node`
 
 ```sh
 npm install
-npm test          # vitest: core, runtime and editor (happy-dom)
+npm test          # vitest: core, runtime, layout, editor, React and element (happy-dom)
 npm run build     # dist/ (ESM + .d.ts) and dist/nodemap.iife.js (window.Nodemap)
 npm run demo      # docs/demo.html
 ```

@@ -9,8 +9,12 @@ import {
   signature,
   defineNode,
   formatValue,
+  layered,
+  elkLayout,
   type GraphJSON,
+  type LayoutEngine,
 } from '../src/index.js';
+import { defineDemoNodes, mountElement, mountReact, unmountReact } from './integrations.js';
 
 // ------------------------------------------------------------------ registry
 
@@ -49,6 +53,8 @@ registry.define(
   graphNode({ type: 'fn/hypot', title: 'Hypotenuse', category: 'Custom', color: '#be4bdb', graph: hypotGraph, registry }),
 );
 registry.get('fn/hypot')!.description = 'A node built from another node map';
+
+defineDemoNodes(registry);
 
 // ------------------------------------------------------------------ examples
 
@@ -156,6 +162,44 @@ const examples: Example[] = [
       ],
     },
   },
+  {
+    id: 'tidy',
+    name: 'Tidy me',
+    blurb: 'These nodes are piled up. Press the tidy button (or L). On a phone the layout wraps into rows that fit the screen.',
+    graph: {
+      version: 1,
+      nodes: [
+        N('a', 'value/number', 120, 60, { value: 3 }),
+        N('b', 'value/number', 40, 10, { value: 4 }),
+        N('add', 'math/add', 90, 120),
+        N('mul', 'math/multiply', 10, 90),
+        N('hyp', 'fn/hypot', 150, 20),
+        N('ex', 'math/expression', 60, 150, { vars: 'p, q, h', expr: '(p + q) / h' }),
+        N('cmp', 'logic/compare', 170, 110, { op: '>' }),
+        N('if', 'logic/if', 30, 40, { then: 'above', else: 'below' }),
+        N('show', 'view/display', 110, 170),
+        N('rng', 'list/range', 0, 130, { count: 40 }),
+        N('map', 'list/map', 140, 140, { expr: 'x * x' }),
+        N('plot', 'view/plot', 80, 30),
+      ],
+      edges: [
+        E('a', 'value', 'add', 'a'),
+        E('b', 'value', 'add', 'b'),
+        E('a', 'value', 'mul', 'a'),
+        E('b', 'value', 'mul', 'b'),
+        E('a', 'value', 'hyp', 'a'),
+        E('b', 'value', 'hyp', 'b'),
+        E('add', 'out', 'ex', 'p'),
+        E('mul', 'out', 'ex', 'q'),
+        E('hyp', 'c', 'ex', 'h'),
+        E('ex', 'out', 'cmp', 'a'),
+        E('cmp', 'out', 'if', 'cond'),
+        E('if', 'out', 'show', 'value'),
+        E('rng', 'list', 'map', 'list'),
+        E('map', 'list', 'plot', 'value'),
+      ],
+    },
+  },
 ];
 
 // ------------------------------------------------------------------ app
@@ -191,6 +235,38 @@ const graph = new Graph(registry);
 const evaluator = new Evaluator(graph, registry);
 const editor = new NodeEditor($('#canvas'), { graph, registry, evaluator });
 
+// Wire style and layout engine pickers.
+const wiresSel = $<HTMLSelectElement>('#wires');
+const engineSel = $<HTMLSelectElement>('#engine');
+wiresSel.addEventListener('change', () => editor.setWires(wiresSel.value as 'smart' | 'curved'));
+let elk: Promise<LayoutEngine> | null = null;
+function loadElk(): Promise<LayoutEngine> {
+  // elkjs is ~1.5 MB, so the demo fetches it from a CDN only when someone picks it.
+  return (elk ??= new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/elkjs@0.12.1/lib/elk.bundled.js';
+    s.onload = () => resolve(elkLayout(new (window as any).ELK()));
+    s.onerror = () => reject(new Error('ELK could not be loaded'));
+    document.head.append(s);
+  }));
+}
+engineSel.addEventListener('change', async () => {
+  if (engineSel.value === 'elk') {
+    statusEl.textContent = 'loading ELK…';
+    try {
+      editor.setLayout(await loadElk());
+      statusEl.textContent = 'ELK ready';
+      void editor.autoLayout();
+    } catch (err) {
+      engineSel.value = 'layered';
+      editor.notify(err instanceof Error ? err.message : String(err));
+    }
+  } else {
+    editor.setLayout(layered());
+    void editor.autoLayout();
+  }
+});
+
 let current = examples[0];
 const statusEl = $('#status');
 const blurbEl = $('#blurb');
@@ -210,6 +286,49 @@ graph.on('change', () => {
   saveTimer = setTimeout(() => store.set(current.id, graph.toJSON()), 400);
 });
 
+const integrations: Record<string, { name: string; blurb: string; mount: (el: HTMLElement) => void; unmount?: () => void }> = {
+  react: {
+    name: 'React',
+    blurb: '<NodeMap> with hooks. React state drives the map and reads its results.',
+    mount: (el) => mountReact(el, registry),
+    unmount: unmountReact,
+  },
+  element: {
+    name: '<node-map>',
+    blurb: 'A custom element: one tag with inline JSON, events and methods.',
+    mount: mountElement,
+  },
+};
+let activeIntegration: string | null = null;
+
+function showTab(id: string) {
+  if (activeIntegration) {
+    integrations[activeIntegration].unmount?.();
+    $('#alt').textContent = '';
+    activeIntegration = null;
+  }
+  const integ = integrations[id];
+  $('.app').dataset.mode = integ ? 'integration' : 'map';
+  $('#canvas').hidden = !!integ;
+  $('#alt').hidden = !integ;
+  if (integ) {
+    showPanel(null);
+    activeIntegration = id;
+    blurbEl.textContent = integ.blurb;
+    integ.mount($('#alt'));
+    markTab(id);
+  } else loadExample(id);
+  try {
+    localStorage.setItem('nodemap-demo:tab', id);
+  } catch {
+    /* ignore */
+  }
+}
+
+function markTab(id: string) {
+  document.querySelectorAll<HTMLButtonElement>('.tab').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.id === id)));
+}
+
 function loadExample(id: string, fresh = false) {
   current = examples.find((e) => e.id === id) ?? examples[0];
   if (fresh) store.clear(current.id);
@@ -217,13 +336,8 @@ function loadExample(id: string, fresh = false) {
   editor.history?.reset();
   editor.select({});
   blurbEl.textContent = current.blurb;
-  document.querySelectorAll<HTMLButtonElement>('.tab').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.id === current.id)));
+  markTab(current.id);
   requestAnimationFrame(() => editor.fit());
-  try {
-    localStorage.setItem('nodemap-demo:tab', current.id);
-  } catch {
-    /* ignore */
-  }
 }
 
 const tabs = $('#tabs');
@@ -234,7 +348,21 @@ for (const ex of examples) {
   b.role = 'tab';
   b.dataset.id = ex.id;
   b.textContent = ex.name;
-  b.addEventListener('click', () => loadExample(ex.id));
+  b.addEventListener('click', () => showTab(ex.id));
+  tabs.append(b);
+}
+const divider = document.createElement('span');
+divider.className = 'tab-divider';
+divider.setAttribute('aria-hidden', 'true');
+tabs.append(divider);
+for (const [id, integ] of Object.entries(integrations)) {
+  const b = document.createElement('button');
+  b.className = 'tab tab-integ';
+  b.type = 'button';
+  b.role = 'tab';
+  b.dataset.id = id;
+  b.textContent = integ.name;
+  b.addEventListener('click', () => showTab(id));
   tabs.append(b);
 }
 
@@ -370,6 +498,7 @@ function renderHelp() {
     <li><b>Rewire</b> drag a wire's end off an input · drop it on empty canvas to add a connected node</li>
     <li><b>Add</b> long-press the background, or press <kbd>+</kbd></li>
     <li><b>Delete a wire</b> tap it, then the bin</li>
+    <li><b>Tidy</b> the layout button (or <kbd>L</kbd>) arranges the map; wires route around nodes</li>
   </ul>
   <pre class="code">import { Graph, Registry, Evaluator, NodeEditor, stdlib, defineNode } from 'mobile-nodemap';
 
@@ -395,4 +524,4 @@ try {
 } catch {
   /* ignore */
 }
-loadExample(startTab);
+showTab(startTab in integrations || examples.some((e) => e.id === startTab) ? startTab : examples[0].id);

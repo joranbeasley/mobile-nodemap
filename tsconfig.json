@@ -11,7 +11,8 @@
     "rootDir": ".",
     "skipLibCheck": true,
     "noUnusedLocals": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "jsx": "react-jsx"
   },
   "include": ["src", "test", "demo"]
 }

@@ -6,9 +6,14 @@ import type { Edge, NodeInstance, NodeResult, NodeType, ParamDef, PortDef, PortR
 import type { Evaluator } from '../runtime/evaluator.js';
 import { formatValue } from '../runtime/stdlib.js';
 import { injectStyles } from './styles.js';
+import { Router } from '../layout/router.js';
+import { layered } from '../layout/layered.js';
+import { findFreeSpot } from '../layout/place.js';
+import { bezierPath, overlaps, roundedPath } from '../layout/geometry.js';
+import type { LayoutEngine, LayoutInput, Positions, Rect } from '../layout/types.js';
 
 type Dir = 'in' | 'out';
-interface Anchor extends PortRef {
+export interface Anchor extends PortRef {
   dir: Dir;
 }
 interface Viewport {
@@ -30,6 +35,12 @@ export interface EditorOptions {
   maxZoom?: number;
   /** Long-press duration that opens the add-node sheet, in ms. Default 450. */
   longPressMs?: number;
+  /** 'smart' (default) routes orthogonal wires around nodes; 'curved' draws classic S-curves. */
+  wires?: 'smart' | 'curved';
+  /** Engine used by autoLayout(). Defaults to the built-in layered layout. */
+  layout?: LayoutEngine;
+  /** Place new and dropped nodes in free space next to what they connect to. Default true. */
+  placement?: boolean;
 }
 
 export interface EditorEvents extends Record<string, unknown> {
@@ -47,6 +58,8 @@ type Gesture =
 
 interface NodeRecord {
   el: HTMLElement;
+  w: number;
+  h: number;
   portsKey: string;
   offsets: Map<string, { x: number; y: number }>;
 }
@@ -58,6 +71,7 @@ const icons = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
   redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/>',
+  tidy: '<rect x="3" y="4" width="7" height="5" rx="1.5"/><rect x="14" y="4" width="7" height="5" rx="1.5"/><rect x="14" y="15" width="7" height="5" rx="1.5"/><path d="M10 6.5h4M17.5 9v6"/>',
   fit: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
   trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
   copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>',
@@ -111,19 +125,33 @@ export class NodeEditor extends Emitter<EditorEvents> {
   private toastTimer?: ReturnType<typeof setTimeout>;
   /** Ignore sheet taps until this time: the finger that opened the sheet would otherwise "click" an item as it lifts. */
   private sheetGuard = 0;
-  private opts: Required<Pick<EditorOptions, 'minZoom' | 'maxZoom' | 'longPressMs'>>;
+  private opts: Required<Pick<EditorOptions, 'minZoom' | 'maxZoom' | 'longPressMs' | 'placement'>>;
+  private wireStyle: 'smart' | 'curved';
+  private layoutEngine: LayoutEngine;
+  private routingPaused = false;
+  private routeAll = false;
+  private routeOnly = new Set<string>();
+  private routeFrame = 0;
 
   constructor(container: HTMLElement, options: EditorOptions) {
     super();
-    injectStyles(container.ownerDocument);
+    injectStyles(container.getRootNode() as Document | ShadowRoot);
     this.graph = options.graph;
     this.registry = options.registry;
     this.evaluator = options.evaluator;
-    this.opts = { minZoom: 0.2, maxZoom: 2.5, longPressMs: 450, ...options };
+    this.opts = {
+      minZoom: options.minZoom ?? 0.2,
+      maxZoom: options.maxZoom ?? 2.5,
+      longPressMs: options.longPressMs ?? 450,
+      placement: options.placement ?? true,
+    };
+    this.wireStyle = options.wires ?? 'smart';
+    this.layoutEngine = options.layout ?? layered();
     if (options.history !== false) this.history = new History(this.graph);
 
     this.root = container;
     container.classList.add('nm-root');
+    container.dataset.wires = this.wireStyle;
     container.tabIndex = container.tabIndex >= 0 ? container.tabIndex : 0;
     this.viewportEl = h('div', { class: 'nm-viewport' });
     this.wires = document.createElementNS(SVGNS, 'svg');
@@ -142,8 +170,10 @@ export class NodeEditor extends Emitter<EditorEvents> {
         for (const e of entries) {
           const id = (e.target as HTMLElement).dataset.id;
           if (id && this.records.has(id)) {
+            const before = this.records.get(id)!.h;
             this.measure(id);
-            this.drawEdgesOf(id);
+            if (this.opts.placement && this.records.get(id)!.h > before + 1) this.pushAway(id);
+            this.scheduleRoute();
           }
         }
       });
@@ -242,16 +272,114 @@ export class NodeEditor extends Emitter<EditorEvents> {
     const n = this.selected.node && this.graph.nodes.get(this.selected.node);
     if (!n) return;
     const copy = this.graph.addNode(n.type, { x: n.x + 30, y: n.y + 30, params: structuredClone(n.params) });
+    if (this.opts.placement) this.place_(copy.id, { axis: 'both' });
     this.select({ node: copy.id });
+    this.ensureVisible(copy.id);
   }
 
-  /** Add a node of `type` centred on the given world position (defaults to the middle of the view). */
-  addNode(type: string, at?: { x: number; y: number }): NodeInstance {
+  /**
+   * Add a node of `type` near a world position (defaults to the middle of the view).
+   * With `connectFrom` it is wired to that port and placed beside it, in free space.
+   */
+  addNode(type: string, at?: { x: number; y: number }, connectFrom?: Anchor): NodeInstance {
     const r = this.root.getBoundingClientRect();
     const p = at ?? this.screenToWorld(r.left + r.width / 2, r.top + r.height / 2);
     const node = this.graph.addNode(type, { x: Math.round(p.x - 90), y: Math.round(p.y - 30) });
+    if (connectFrom) this.autoConnect(connectFrom, node.id);
+    if (this.opts.placement) {
+      const edge = connectFrom && [...this.graph.edges.values()].find(
+        (e) => (e.from.node === connectFrom.node && e.to.node === node.id) || (e.to.node === connectFrom.node && e.from.node === node.id),
+      );
+      if (edge && connectFrom) {
+        // Line the new node's port up with the port it is wired to, one column over.
+        const src = this.graph.nodes.get(connectFrom.node)!;
+        const srcRec = this.records.get(src.id)!;
+        const rec = this.records.get(node.id)!;
+        const anchorY = this.portPos(connectFrom, connectFrom.dir).y;
+        const own = connectFrom.dir === 'out' ? rec.offsets.get(`in:${edge.to.port}`) : rec.offsets.get(`out:${edge.from.port}`);
+        const x = connectFrom.dir === 'out' ? src.x + srcRec.w + 70 : src.x - 70 - rec.w;
+        this.graph.moveNode(node.id, Math.round(x), Math.round(anchorY - (own?.y ?? 40)));
+        this.place_(node.id, { axis: 'y' });
+      } else this.place_(node.id, { axis: 'both' });
+    }
     this.select({ node: node.id });
+    this.ensureVisible(node.id);
     return node;
+  }
+
+  /** Switch between routed ('smart') and curved wires. */
+  setWires(style: 'smart' | 'curved'): void {
+    this.wireStyle = style;
+    this.root.dataset.wires = style;
+    this.scheduleRoute();
+  }
+
+  get wireMode(): 'smart' | 'curved' {
+    return this.wireStyle;
+  }
+
+  /** On a narrow portrait canvas, the world width that fits at a readable zoom; otherwise undefined. */
+  suggestedMaxWidth(): number | undefined {
+    const r = this.root.getBoundingClientRect();
+    if (!r.width || r.width >= 720 || r.height < r.width) return undefined;
+    return Math.max(420, (r.width - 48) / 0.62);
+  }
+
+  setLayout(engine: LayoutEngine): void {
+    this.layoutEngine = engine;
+  }
+
+  /**
+   * Tidy the whole map with the layout engine, animating nodes to their new places.
+   * On narrow portrait screens the layout wraps into rows that fit the width at a readable zoom.
+   */
+  async autoLayout(opts: { animate?: boolean; fit?: boolean; maxWidth?: number } = {}): Promise<void> {
+    if (!this.graph.nodes.size) return;
+    const input = this.layoutInput();
+    input.maxWidth = opts.maxWidth ?? this.suggestedMaxWidth();
+    const pos = await this.layoutEngine(input);
+    await this.animateTo(pos, opts.animate === false ? 0 : 360);
+    if (opts.fit !== false) this.fit();
+  }
+
+  /** The snapshot a layout engine works on: node boxes and port offsets as currently rendered. */
+  layoutInput(): LayoutInput {
+    return {
+      nodes: [...this.graph.nodes.values()].map((n) => {
+        const rec = this.records.get(n.id);
+        return {
+          id: n.id,
+          x: n.x,
+          y: n.y,
+          w: rec?.w ?? 180,
+          h: rec?.h ?? 80,
+          ports: [...(rec?.offsets ?? [])].map(([k, o]) => {
+            const [dir, ...name] = k.split(':');
+            return { name: name.join(':'), dir: dir as Dir, x: o.x, y: o.y };
+          }),
+        };
+      }),
+      edges: [...this.graph.edges.values()].map((e) => ({ id: e.id, from: { ...e.from }, to: { ...e.to } })),
+    };
+  }
+
+  /** Pan (without zooming) so a node is fully on screen. */
+  ensureVisible(id: string, pad = 24): void {
+    const n = this.graph.nodes.get(id);
+    const rec = this.records.get(id);
+    if (!n || !rec) return;
+    const r = this.root.getBoundingClientRect();
+    const k = this.vp.k;
+    const bottomUi = this.toolbar ? 70 : 0;
+    const left = n.x * k + this.vp.x;
+    const top = n.y * k + this.vp.y;
+    let dx = 0;
+    let dy = 0;
+    if (left < pad) dx = pad - left;
+    else if (left + rec.w * k > r.width - pad) dx = Math.max(pad - left, r.width - pad - (left + rec.w * k));
+    if (top < pad) dy = pad - top;
+    else if (top + rec.h * k > r.height - pad - bottomUi) dy = Math.max(pad - top, r.height - pad - bottomUi - (top + rec.h * k));
+    if (dx || dy) this.setViewport({ x: this.vp.x + dx, y: this.vp.y + dy });
   }
 
   /** Open the add-node sheet. With `connectFrom`, the new node is wired to that port. */
@@ -298,8 +426,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
           btn.addEventListener('click', () => {
             if (performance.now() < this.sheetGuard) return;
             this.closePalette();
-            const node = this.addNode(t.type, at);
-            if (connectFrom) this.autoConnect(connectFrom, node.id);
+            this.addNode(t.type, at, connectFrom);
           });
           list.append(btn);
         }
@@ -343,6 +470,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
   }
 
   destroy(): void {
+    cancelAnimationFrame(this.routeFrame);
     this.disposers.forEach((d) => d());
     this.history?.dispose();
     this.resizeObs?.disconnect();
@@ -385,6 +513,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
           r.el.remove();
         }
         this.records.delete(c.node.id);
+        this.scheduleRoute();
         if (this.selected.node === c.node.id) this.select({});
         break;
       }
@@ -409,6 +538,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       case 'edge:remove':
         this.edgeEls.get(c.edge.id)?.remove();
         this.edgeEls.delete(c.edge.id);
+        this.scheduleRoute();
         if (this.selected.edge === c.edge.id) this.select({});
         this.refreshLinks();
         break;
@@ -429,7 +559,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
   private buildNode(node: NodeInstance): void {
     const def = this.registry.get(node.type);
     const old = this.records.get(node.id);
-    const active = old?.el.contains(document.activeElement) ? (document.activeElement as HTMLInputElement) : null;
+    const focused = this.activeElement();
+    const active = focused && old?.el.contains(focused) ? (focused as HTMLInputElement) : null;
     const focusKey = active?.dataset.key;
     const sel = active && 'selectionStart' in active ? [active.selectionStart, active.selectionEnd] : null;
 
@@ -481,7 +612,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       old.el.replaceWith(el);
       if (this.selected.node === node.id) el.classList.add('nm-selected');
     } else this.viewportEl.append(el);
-    this.records.set(node.id, { el, portsKey: this.portsKey(node), offsets: new Map() });
+    this.records.set(node.id, { el, w: 180, h: 80, portsKey: this.portsKey(node), offsets: new Map() });
     this.place(node);
     this.resizeObs?.observe(el);
 
@@ -568,7 +699,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
     const el = this.records.get(node.id)?.el;
     if (!el) return;
     el.querySelectorAll<HTMLInputElement>('[data-key]').forEach((input) => {
-      if (input === document.activeElement) return;
+      if (input === this.activeElement()) return;
       const name = input.dataset.key!.replace(/^[pi]:/, '').replace(/:n$/, '');
       const v = node.params[name];
       if (v === undefined) return;
@@ -583,6 +714,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
     const node = this.graph.nodes.get(id);
     if (!rec || !node) return;
     const nodeRect = rec.el.getBoundingClientRect();
+    rec.w = rec.el.offsetWidth || nodeRect.width / this.vp.k || 180;
+    rec.h = rec.el.offsetHeight || nodeRect.height / this.vp.k || 80;
     rec.offsets.clear();
     rec.el.querySelectorAll<HTMLElement>('.nm-port').forEach((p) => {
       const r = p.getBoundingClientRect();
@@ -600,8 +733,117 @@ export class NodeEditor extends Emitter<EditorEvents> {
   }
 
   private curve(a: { x: number; y: number }, b: { x: number; y: number }): string {
-    const dx = Math.max(40, Math.abs(b.x - a.x) * 0.5);
-    return `M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`;
+    return bezierPath(a, b);
+  }
+
+  private get smart(): boolean {
+    return this.wireStyle === 'smart' && !this.routingPaused;
+  }
+
+  /** Re-route wires on the next frame: all of them, or (while dragging) just those of one node. */
+  private scheduleRoute(only?: string): void {
+    if (only) this.routeOnly.add(only);
+    else this.routeAll = true;
+    if (this.routeFrame) return;
+    this.routeFrame = requestAnimationFrame(() => {
+      this.routeFrame = 0;
+      const all = this.routeAll;
+      const only = new Set(this.routeOnly);
+      this.routeAll = false;
+      this.routeOnly.clear();
+      this.routeNow(all ? undefined : only);
+    });
+  }
+
+  private routeNow(only?: Set<string>): void {
+    const edges = [...this.graph.edges.values()].filter((e) => !only || only.has(e.from.node) || only.has(e.to.node));
+    if (!this.smart) return edges.forEach((e) => this.setEdgePath(e, this.curve(this.portPos(e.from, 'out'), this.portPos(e.to, 'in'))));
+    const rects: Rect[] = [];
+    for (const [id, rec] of this.records) {
+      const n = this.graph.nodes.get(id);
+      if (n) rects.push({ x: n.x, y: n.y, w: rec.w, h: rec.h });
+    }
+    const router = new Router(rects);
+    const ends = edges.map((e) => ({ e, a: this.portPos(e.from, 'out'), b: this.portPos(e.to, 'in') }));
+    // Short wires first: they get the direct channels, long ones detour around them.
+    ends.sort((p, q) => Math.abs(p.b.x - p.a.x) + Math.abs(p.b.y - p.a.y) - (Math.abs(q.b.x - q.a.x) + Math.abs(q.b.y - q.a.y)));
+    for (const { e, a, b } of ends) {
+      const pts = router.route(a, b, `${e.from.node}:${e.from.port}`);
+      this.setEdgePath(e, pts ? roundedPath(pts, 12) : this.curve(a, b));
+    }
+  }
+
+  private setEdgePath(e: Edge, d: string): void {
+    this.edgeEls.get(e.id)?.querySelectorAll('path').forEach((p) => p.setAttribute('d', d));
+  }
+
+  /** Move a node to the nearest spot where it does not overlap others. */
+  private place_(id: string, opts: { axis: 'y' | 'both' }): void {
+    const n = this.graph.nodes.get(id);
+    const rec = this.records.get(id);
+    if (!n || !rec) return;
+    const spot = findFreeSpot(this.rectsExcept(id), { x: n.x, y: n.y, w: rec.w, h: rec.h }, { axis: opts.axis, gap: 28 });
+    if (spot.x !== n.x || spot.y !== n.y) this.graph.moveNode(id, Math.round(spot.x), Math.round(spot.y));
+  }
+
+  /** A node grew (a preview or error appeared): slide the nodes it now covers out of the way. */
+  private pushAway(id: string, depth = 0): void {
+    const n = this.graph.nodes.get(id);
+    const rec = this.records.get(id);
+    if (!n || !rec || depth > 50 || this.gesture?.kind === 'node') return;
+    const box = { x: n.x, y: n.y, w: rec.w, h: rec.h };
+    const hit = [...this.graph.nodes.values()]
+      .filter((o) => o.id !== id && o.y >= n.y)
+      .filter((o) => {
+        const r = this.records.get(o.id);
+        return r && overlaps(box, { x: o.x, y: o.y, w: r.w, h: r.h }, 8);
+      })
+      .sort((a, b) => a.y - b.y);
+    // Push straight down, keeping the column's order, and cascade to whatever those land on.
+    for (const o of hit) {
+      this.graph.moveNode(o.id, o.x, Math.round(n.y + rec.h + 28));
+      this.pushAway(o.id, depth + 1);
+    }
+  }
+
+  private rectsExcept(id: string): Rect[] {
+    const out: Rect[] = [];
+    for (const [oid, rec] of this.records) {
+      const o = this.graph.nodes.get(oid);
+      if (o && oid !== id) out.push({ x: o.x, y: o.y, w: rec.w, h: rec.h });
+    }
+    return out;
+  }
+
+  /** Animate nodes to new positions; wires draw as curves in flight and are routed on landing. */
+  private animateTo(pos: Positions, ms: number): Promise<void> {
+    const ids = Object.keys(pos).filter((id) => this.graph.nodes.has(id));
+    const from = new Map(ids.map((id) => [id, { x: this.graph.nodes.get(id)!.x, y: this.graph.nodes.get(id)!.y }]));
+    const reduce = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!ms || reduce) {
+      ids.forEach((id) => this.graph.moveNode(id, pos[id].x, pos[id].y));
+      return Promise.resolve();
+    }
+    this.routingPaused = true;
+    const t0 = performance.now();
+    return new Promise((resolve) => {
+      const tick = (now: number) => {
+        const t = Math.min(1, (now - t0) / ms);
+        const e = 1 - Math.pow(1 - t, 3);
+        for (const id of ids) {
+          const a = from.get(id)!;
+          if (!this.graph.nodes.has(id)) continue;
+          this.graph.moveNode(id, Math.round(a.x + (pos[id].x - a.x) * e), Math.round(a.y + (pos[id].y - a.y) * e));
+        }
+        if (t < 1) requestAnimationFrame(tick);
+        else {
+          this.routingPaused = false;
+          this.scheduleRoute();
+          resolve();
+        }
+      };
+      requestAnimationFrame(tick);
+    });
   }
 
   private buildEdge(e: Edge): void {
@@ -622,13 +864,16 @@ export class NodeEditor extends Emitter<EditorEvents> {
   }
 
   private drawEdge(e: Edge): void {
-    const g = this.edgeEls.get(e.id);
-    if (!g) return;
-    const d = this.curve(this.portPos(e.from, 'out'), this.portPos(e.to, 'in'));
-    g.querySelectorAll('path').forEach((p) => p.setAttribute('d', d));
+    if (this.smart) return this.scheduleRoute();
+    this.setEdgePath(e, this.curve(this.portPos(e.from, 'out'), this.portPos(e.to, 'in')));
   }
 
   private drawEdgesOf(nodeId: string): void {
+    if (this.smart) {
+      // While a node is being dragged only its own wires follow; the rest re-route on drop.
+      const dragging = this.gesture?.kind === 'node' && this.gesture.id === nodeId;
+      return this.scheduleRoute(dragging ? nodeId : undefined);
+    }
     for (const e of this.graph.edges.values()) if (e.from.node === nodeId || e.to.node === nodeId) this.drawEdge(e);
   }
 
@@ -683,6 +928,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       h('span', { class: 'nm-sep' }),
       btn('undo', 'Undo', () => this.history?.undo()),
       btn('redo', 'Redo', () => this.history?.redo()),
+      btn('tidy', 'Tidy layout', () => void this.autoLayout()),
       btn('fit', 'Show whole map', () => this.fit({ minScale: 0 })),
       btn('plus', 'Add node', () => this.openPalette(), 'nm-primary'),
     );
@@ -736,6 +982,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       else if (mod && e.key.toLowerCase() === 'd') this.duplicateSelection();
       else if (e.key === 'a' || e.key === 'A' || e.key === ' ') this.openPalette();
       else if (e.key === 'f') this.fit({ minScale: 0 });
+      else if (e.key === 'l') void this.autoLayout();
       else return;
       e.preventDefault();
     });
@@ -868,6 +1115,18 @@ export class NodeEditor extends Emitter<EditorEvents> {
         break;
       case 'node':
         this.records.get(g.id)?.el.classList.remove('nm-dragging');
+        if (g.moved) {
+          this.scheduleRoute();
+          const n = this.graph.nodes.get(g.id);
+          const rec = this.records.get(g.id);
+          if (this.opts.placement && n && rec) {
+            const box = { x: n.x, y: n.y, w: rec.w, h: rec.h };
+            if (this.rectsExcept(g.id).some((o) => overlaps(box, o, 8))) {
+              const spot = findFreeSpot(this.rectsExcept(g.id), box, { axis: 'both', gap: 28 });
+              void this.animateTo({ [g.id]: { x: Math.round(spot.x), y: Math.round(spot.y) } }, 180);
+            }
+          }
+        }
         if (!g.moved) {
           if (this.pending && this.pending.node !== g.id) {
             const p = this.pending;
@@ -1014,6 +1273,10 @@ export class NodeEditor extends Emitter<EditorEvents> {
     return null;
   }
 
+  private activeElement(): Element | null {
+    return (this.root.getRootNode() as Document | ShadowRoot).activeElement ?? null;
+  }
+
   private portDef(a: Anchor): PortDef | undefined {
     const n = this.graph.nodes.get(a.node);
     if (!n) return;
@@ -1022,6 +1285,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
 }
 
 const noop = () => {};
+
 
 function defaults(t: NodeType): Record<string, unknown> {
   const out: Record<string, unknown> = {};

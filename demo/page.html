@@ -43,7 +43,7 @@ body { background: var(--surface); color: var(--ink); font-family: var(--f-ui); 
 .tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
 @media (min-width: 760px) { #tabs { order: 0; flex-basis: auto; margin: 0 auto 0 12px; } .brand { margin-right: 0; } .bar { padding-block: 0; } .bar > * { align-self: stretch; display: flex; align-items: center; } .tab { padding-block: 16px 14px; } }
 
-.sub { display: flex; align-items: center; gap: 10px; padding-block: 8px;
+.sub { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding-block: 8px;
   padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
   background: var(--surface-2); border-bottom: 1px solid var(--line); font-size: 13px; }
 #blurb { margin: 0; color: var(--muted); flex: 1; min-width: 0; line-height: 1.35; }
@@ -53,8 +53,45 @@ body { background: var(--surface); color: var(--ink); font-family: var(--f-ui); 
 #status[data-state="error"] { color: var(--bad); }
 #status[data-state="error"]::before { background: var(--bad); }
 #status[data-state="running"]::before { background: var(--accent); }
-#reset { height: 30px; font-size: 13px; padding: 0 10px; }
-@media (max-width: 520px) { #status { display: none; } }
+#reset { height: 32px; font-size: 13px; padding: 0 10px; }
+.controls { display: flex; align-items: center; gap: 6px; }
+.pick { font: inherit; font-size: 13px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; height: 32px; padding: 0 6px; }
+.pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (max-width: 700px) { #blurb { flex-basis: 100%; } .controls { width: 100%; } #status { margin-right: auto; } }
+@media (max-width: 400px) { #status { display: none; } .controls .pick { flex: 1; min-width: 0; } }
+.app[data-mode="integration"] .controls { display: none; }
+.tab-divider { width: 1px; background: var(--line); margin: 10px 6px; flex: none; }
+.tab-integ { font-family: var(--f-mono); font-size: 13px; }
+
+#alt { flex: 1; min-height: 0; overflow-y: auto; background: var(--paper); }
+.integ { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: "side" "map" "code"; min-height: 100%; }
+.integ-side { grid-area: side; } .integ-map { grid-area: map; } .integ-code { grid-area: code; padding: 14px max(16px, env(safe-area-inset-right, 0px)) 20px max(16px, env(safe-area-inset-left, 0px)); display: flex; flex-direction: column; gap: 12px; background: var(--surface); border-top: 1px solid var(--line); min-width: 0; }
+.integ-side { padding: 14px max(16px, env(safe-area-inset-right, 0px)) 16px max(16px, env(safe-area-inset-left, 0px)); display: flex; flex-direction: column; gap: 12px; background: var(--surface); border-bottom: 1px solid var(--line); min-width: 0; }
+.integ-map { height: 62vh; min-height: 340px; position: relative; }
+.integ-map node-map { height: 100%; --nm-bg: var(--paper); --nm-dot: var(--dot); --nm-node: var(--surface); --nm-node-2: var(--surface-2); --nm-border: var(--line); --nm-text: var(--ink); --nm-muted: var(--muted); --nm-accent: var(--accent); --nm-font: var(--f-ui); --nm-mono: var(--f-mono); }
+.integ-map > .nm-root { --nm-bg: var(--paper); --nm-dot: var(--dot); --nm-node: var(--surface); --nm-node-2: var(--surface-2); --nm-border: var(--line); --nm-text: var(--ink); --nm-muted: var(--muted); --nm-accent: var(--accent); --nm-font: var(--f-ui); --nm-mono: var(--f-mono); }
+@media (min-width: 900px) { #alt { overflow: hidden; } .integ { grid-template-columns: 380px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); grid-template-areas: "side map" "code map"; height: 100%; }
+  .integ-side, .integ-code { border-right: 1px solid var(--line); } .integ-side { border-bottom: 0; } .integ-code { border-top: 0; padding-top: 0; overflow-y: auto; } .integ-map { height: auto; min-height: 0; } }
+.integ-side { padding-bottom: 16px; }
+.slider { display: flex; justify-content: space-between; font-weight: 600; }
+.slider output { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+#rx-f { width: 100%; accent-color: var(--accent); height: 32px; }
+.readout { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); }
+.readout .big { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.readout[data-busy="true"] .big { opacity: .6; }
+.chip { font-weight: 600; font-size: 13px; padding: 4px 10px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); }
+code { font-family: var(--f-mono); font-size: .92em; }
+.log-title { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 4px 0 0; }
+.log { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-family: var(--f-mono); font-size: 12px; }
+.log li { display: flex; gap: 8px; padding: 5px 8px; border-radius: 6px; background: var(--surface-2); min-width: 0; }
+.log b { color: var(--accent); font-weight: 500; flex: none; }
+.log li:only-child span { color: var(--muted); }
+.log span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gauge { display: block; width: 100%; height: auto; }
+.gauge-track { fill: none; stroke: var(--line); stroke-width: 9; stroke-linecap: round; }
+.gauge-fill { fill: none; stroke: var(--accent); stroke-width: 9; stroke-linecap: round; }
+.gauge-value { font-family: var(--f-mono); font-size: 15px; fill: var(--ink); }
+.gauge-tick { font-family: var(--f-mono); font-size: 8px; fill: var(--muted); }
 
 #canvas { flex: 1; min-height: 0; outline: none;
   --nm-bg: var(--paper); --nm-dot: var(--dot); --nm-node: var(--surface); --nm-node-2: var(--surface-2); --nm-border: var(--line);
@@ -107,10 +144,15 @@ kbd { font-family: var(--f-mono); font-size: 12px; border: 1px solid var(--line)
   </header>
   <div class="sub">
     <p id="blurb"></p>
-    <span id="status" role="status">ready</span>
-    <button type="button" class="btn" id="reset">Reset</button>
+    <div class="controls">
+      <span id="status" role="status">ready</span>
+      <select id="wires" class="pick" aria-label="Wire style"><option value="smart">Routed wires</option><option value="curved">Curved wires</option></select>
+      <select id="engine" class="pick" aria-label="Layout engine"><option value="layered">Built-in layout</option><option value="elk">ELK layout</option></select>
+      <button type="button" class="btn" id="reset">Reset</button>
+    </div>
   </div>
   <main id="canvas" aria-label="Node map canvas"></main>
+  <div id="alt" hidden></div>
   <aside id="panel" hidden aria-labelledby="panel-title">
     <div class="panel-head"><h2 id="panel-title"></h2><button type="button" class="btn" id="panel-close" aria-label="Close panel">×</button></div>
     <div id="panel-body"></div>
