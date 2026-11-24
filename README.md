@@ -2,8 +2,9 @@
 
 A small, dependency-free TypeScript library for building **node maps** (node graphs) that work well on phones, plus a runtime that **evaluates** them.
 
-- **`mobile-nodemap/core`**: the data model. `Graph` (nodes, ports, edges, JSON), `Registry` (node type definitions), `History` (undo/redo). No DOM.
-- **`mobile-nodemap/runtime`**: the evaluator. Memoised, async, cancellable execution; `compile()` turns a map into a plain async function; `graphNode()` turns a map into a reusable node; `stdlib` has about 30 ready-made nodes. No DOM.
+- **`mobile-nodemap/core`**: the data model and the extension API. `Graph`, `History`, plus `defineGraphType`, `definePack`, `defineNode`, `extendNode` and `Registry`. No DOM.
+- **`mobile-nodemap/runtime`**: the evaluator. Memoised, async, cancellable execution; `compile()` turns a map into a plain async function; `graphNode()` turns a map into a reusable node. No DOM.
+- **Built-in graph types and packs**: `mathGraph` / `mathPack` (about 35 nodes) and `networkGraph` / `networkPack` (devices plus a reachability engine).
 - **`mobile-nodemap/editor`**: `NodeEditor`, a touch-first DOM/SVG editor with pinch zoom, drag or tap-to-connect wiring, a long-press add menu, live results and undo.
 - **`mobile-nodemap/layout`**: auto-layout, wire routing and placement. A layered layout that wraps to fit portrait screens, an orthogonal router that steers wires around nodes, free-space placement, and an optional [ELK](https://eclipse.dev/elk/) adapter. No DOM.
 - **`mobile-nodemap/react`**: `<NodeMap>`, hooks (`useGraph`, `useEvaluator`, `useEvaluation`, `useGraphValue`) and `reactView()` for React-rendered node previews.
@@ -14,19 +15,9 @@ The demo playground is in `docs/demo.html` (one self-contained file).
 ## Quick start
 
 ```ts
-import { Graph, Registry, Evaluator, NodeEditor, stdlib, defineNode } from 'mobile-nodemap';
+import { Graph, Evaluator, NodeEditor, mathGraph } from 'mobile-nodemap';
 
-const registry = new Registry(stdlib).define(
-  defineNode({
-    type: 'units/f-to-c',
-    title: '°F → °C',
-    category: 'Custom',
-    inputs: [{ name: 'f', type: 'number', default: 72 }],
-    outputs: [{ name: 'c', type: 'number' }],
-    run: ({ f }) => ({ c: ((f - 32) * 5) / 9 }),
-  }),
-);
-
+const registry = mathGraph.createRegistry();      // what this kind of map can contain
 const graph = new Graph(registry);
 const evaluator = new Evaluator(graph, registry);
 new NodeEditor(document.getElementById('canvas')!, { graph, registry, evaluator });
@@ -34,27 +25,139 @@ new NodeEditor(document.getElementById('canvas')!, { graph, registry, evaluator 
 
 Give the container a size (for example `height: 100dvh`). The editor injects its own stylesheet.
 
-## Defining nodes
+## Extending it
+
+Everything a map can contain comes from plug-ins, and the built-in maths and network maps use the same API a third party would. There are three layers:
+
+| Layer | What it is | Who writes it |
+| --- | --- | --- |
+| **Node type** | one kind of box: ports, params, a `run` function, a preview | anyone |
+| **Pack** | what a library publishes: node types, plus the port types, param editors and CSS they need | library authors |
+| **Graph type** | a kind of map: which packs and nodes it offers, its connection rules, and how it runs | apps, or anyone building on others |
+
+### Graph types
 
 ```ts
-defineNode({
-  type: 'math/lerp',              // unique id
-  title: 'Lerp', category: 'Math', color: '#3b5bdb', description: 'Shown in the add menu',
-  inputs:  [{ name: 'a', type: 'number', default: 0 }, { name: 'b', type: 'number', default: 1 }, { name: 't', type: 'number' }],
-  outputs: [{ name: 'out', type: 'number' }],
-  params:  [{ name: 'clamp', kind: 'boolean', default: true }],   // number | text | boolean | select
-  run: async ({ a, b, t }, { params, signal, graphInputs, node }) => ({
-    out: a + (b - a) * (params.clamp ? Math.min(1, Math.max(0, t)) : t),
-  }),
-  pure: true,                     // false = never reuse cached results (random, clock, fetch)
-  view: { render(el, result) { /* custom preview inside the node */ } },
-  ports: (params) => ({ inputs: [...] }),   // optional: ports that depend on params
+import { defineGraphType, registerGraphType, mathGraph, networkGraph } from 'mobile-nodemap';
+
+export const lab = defineGraphType({
+  id: 'acme/lab',                    // saved in JSON as "type"; namespace your ids
+  title: 'Lab',
+  extends: [mathGraph],              // or ids of registered types: ['math']
+  packs: [unitsPack, statsPack],
+  nodes: [myOneOffNode],
+  exclude: ['async/*', 'text/case'], // drop inherited nodes
+  rules: {
+    allowCycles: false,
+    canConnect: (from, to, graph) => (to.nodeType === 'acme/sink' && from.def.type !== 'number' ? 'Sinks take numbers' : null),
+  },
+  engine: undefined,                 // keep dataflow, or bring your own (below)
+  editor: { wires: 'smart', autoLayout: true },
+  examples: [{ id: 'hello', name: 'Hello', graph: helloJson }],
 });
+registerGraphType(lab);              // lets <node-map graph-type="acme/lab"> and saved JSON find it
+
+const registry = lab.createRegistry();
+const sibling = lab.extend({ id: 'acme/lab-lite', title: 'Lab lite', exclude: ['stats/*'] });
 ```
 
-- **Ports** have a `type` string. `any` connects to everything. Add conversions with `registry.allowConversion('number', 'string')`.
-- **Unconnected inputs** of type `number`, `string`, `boolean` or `any` get an inline editor on the node. Their values live in `node.params[inputName]`, and fall back to `default`.
-- `run` may be sync or async. Throwing marks the node as errored and skips its downstream nodes.
+Built in:
+
+- **`mathGraph`** (`'math'`): dataflow over numbers, lists, logic, text and async nodes, plus graph inputs and outputs. Maps can be called as functions.
+- **`networkGraph`** (`'network'`): devices and cables with loops allowed. Instead of dataflow, its engine works out each device's fastest path to the internet: latency, hops, bottleneck bandwidth, and whether a second path exists. Powered-off devices and closed firewalls cut traffic, and a rule stops laptops plugging straight into the internet.
+
+`registryFor(json)` builds the right registry for a saved map from its `type`.
+
+### Packs
+
+```ts
+import { definePack } from 'mobile-nodemap';
+
+export const palettePack = definePack({
+  id: 'acme/palette',
+  version: '1.0.0',
+  portTypes: [{
+    id: 'color', label: 'Colour', color: '#d6336c',    // wire and port colour
+    accepts: ['string'], coerce: (v) => normalise(v),  // text can flow in, cleaned up on the way
+    inline: 'color',                                   // editor for unconnected inputs
+    default: '#888888',
+  }],
+  paramKinds: [{                                       // a custom editor, usable by any param or port type
+    kind: 'color',
+    render: ({ value, set, key }) => { /* return an element; call set(v) on change */ },
+    update: (el, value) => { /* optional: reflect undo / API changes */ },
+  }],
+  conversions: [['number', 'string']],
+  nodes: [mixNode, scaleNode, contrastNode],
+  css: `.pal-row { display: flex }`,                   // injected once per document or shadow root
+  setup(registry) { /* anything else */ },
+});
+
+registry.use(palettePack);   // or list it in a graph type's packs
+```
+
+The demo's **Palette** graph type is a complete third-party pack of about 200 lines (`demo/palette.ts`). It is written only against the public API.
+
+### Node types
+
+```ts
+import { defineNode, extendNode } from 'mobile-nodemap';
+
+export const lerp = defineNode({
+  type: 'acme/lerp',                 // namespace/name
+  title: 'Lerp', category: 'Math', color: '#3b5bdb',
+  icon: 'λ',                         // text, emoji or an inline <svg>
+  description: 'Shown in the add menu', tags: ['mix', 'interpolate'], docs: 'https://…',
+  inputs: {                          // shorthand: name → type, or name → PortDef
+    a: 'number',
+    b: 'number',
+    t: { type: 'number', default: 0.5, description: '0 → a, 1 → b' },
+  },
+  outputs: { out: 'number' },
+  params: [
+    { name: 'clamp', kind: 'boolean', default: true },
+    { name: 'curve', kind: 'select', options: ['linear', 'smooth'], default: 'linear', advanced: true },  // behind "More"
+  ],
+  run: ({ a, b, t }, { params, signal }) => ({ out: a + (b - a) * t }),   // a, b, t are typed as numbers
+});
+
+const smoothLerp = extendNode(lerp, { type: 'acme/smooth-lerp', title: 'Smooth lerp', params: [{ name: 'curve', kind: 'select', options: ['smooth'], default: 'smooth' }] });
+```
+
+Everything a node type can say about itself:
+
+| Field | Purpose |
+| --- | --- |
+| `inputs`, `outputs` | Ports, as a list of PortDefs or `{ name: type }` shorthand. `multiple: true` on an input collects every wire into an array, ordered top to bottom. |
+| `params` | Built-in kinds `number`, `text` (`code: true` for monospace), `boolean` and `select`, or any registered param kind. `advanced: true` tucks a param behind **More**. |
+| `run(inputs, ctx)` | Sync or async. `ctx` holds `params`, `signal` (aborts when superseded), `graphInputs` and `node`. Throw to show an error. |
+| `ports(params)` | Ports that depend on params, like the expression node's variables. |
+| `view.render(el, result, node)` | A custom preview: chart, swatch or badge. `reactView(Component)` renders it with React. |
+| `pure: false` | Never cache, for random values or clocks. |
+| `onCreate(node)` | Set up a newly added node; return params to merge in. |
+| `version`, `migrate(params, from)` | Saved maps upgrade themselves when a node type's params change shape. |
+| `icon`, `color`, `width`, `tags`, `docs`, `meta` | Presentation, search terms, and free-form data for engines (the network engine reads `meta.role`). |
+
+### Engines
+
+A graph type can replace dataflow evaluation with anything: a simulation, a solver, a network analysis, or a call to a server.
+
+```ts
+const engine: GraphEngine = {
+  name: 'Reachability',
+  callable: false,               // hides "call as a function" in tools
+  async run({ graph, registry, inputs, signal, publish }) {
+    for (const node of graph.nodes.values()) publish(node.id, { status: 'ok', outputs: { status: '…' } });
+    return { outputs: { summary: 42 } };   // ends up in EvalReport.outputs
+  },
+};
+```
+
+The editor, `live()` re-runs, the React hooks and `<node-map>` events all work with custom engines.
+
+### Ideas for packs
+
+Unit conversion, statistics, HTTP and JSON (async nodes), audio graphs (Web Audio), shader graphs (port types for vectors and textures), state machines (`allowCycles` plus an engine), CI pipelines, home automation, and electrical circuits (an engine that solves the network).
 
 ## Evaluating
 
@@ -136,7 +239,7 @@ function Weather() {
 registry.define({ type: 'view/gauge', inputs: [...], run: ..., view: reactView(({ result, node }) => <Gauge value={result?.outputs?.value} />) });
 ```
 
-`<NodeMap>` props: `registry`, `graph` or `defaultValue`, `evaluator` (or `false`), `wires`, `layout`, `toolbar`, `placement`, `theme`, `autoLayout`, `onChange`, `onSelect`, `onEvaluate`. Its ref is the `NodeEditor`. `useGraphValue(graph)` gives you the JSON and re-renders on every change. React 18 and 19 are supported, as optional peer dependencies.
+`<NodeMap>` props: `graphType` or `registry` (`useRegistry(graphType)` memoises one), `graph` or `defaultValue`, `evaluator` (or `false`), `wires`, `layout`, `toolbar`, `placement`, `theme`, `autoLayout`, `onChange`, `onSelect`, `onEvaluate`. Its ref is the `NodeEditor`. `useGraphValue(graph)` gives you the JSON and re-renders on every change. React 18 and 19 are supported, as optional peer dependencies.
 
 ## Custom element
 
@@ -148,8 +251,8 @@ registry.define({ type: 'view/gauge', inputs: [...], run: ..., view: reactView((
 </node-map>
 ```
 
-- **Attributes**: `wires` (`smart` | `curved`), `theme` (`light` | `dark`), `auto-layout`, `no-toolbar`, `no-eval`.
-- **Properties**: `registry` (defaults to `stdlib`), `value` (graph JSON), `layout`, plus `graph`, `editor` and `evaluator`.
+- **Attributes**: `graph-type` (a registered graph type id; defaults to the inline JSON's `type`, else `math`), `wires` (`smart` | `curved`), `theme` (`light` | `dark`), `auto-layout`, `no-toolbar`, `no-eval`.
+- **Properties**: `graphType`, `registry` (defaults to the graph type's), `value` (graph JSON), `layout`, plus `graph`, `editor` and `evaluator`.
 - **Methods**: `autoLayout()`, `fit()`, `run(inputs)` (results show on the nodes), `call(inputs)` (runs the map as a function).
 - **Events**: `change` (`{ value, change }`), `select`, `evaluate` (the run report).
 

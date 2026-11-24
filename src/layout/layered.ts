@@ -27,7 +27,8 @@ export function layered(opts: LayeredOptions = {}): LayoutEngine {
   return (input: LayoutInput): Positions => {
     const nodes = new Map(input.nodes.map((n) => [n.id, n]));
     if (!nodes.size) return {};
-    const edges = input.edges.filter((e) => nodes.has(e.from.node) && nodes.has(e.to.node) && e.from.node !== e.to.node);
+    const all = input.edges.filter((e) => nodes.has(e.from.node) && nodes.has(e.to.node) && e.from.node !== e.to.node);
+    const edges = withoutBackEdges([...nodes.keys()], all);
     const preds = new Map<string, typeof edges>();
     const succs = new Map<string, typeof edges>();
     for (const id of nodes.keys()) preds.set(id, []), succs.set(id, []);
@@ -166,4 +167,26 @@ export function layered(opts: LayeredOptions = {}): LayoutEngine {
     }
     return pos;
   };
+}
+
+/** Drop the edges that close loops (found by depth-first search) so the rest can be layered. */
+function withoutBackEdges<E extends { from: { node: string }; to: { node: string } }>(ids: string[], edges: E[]): E[] {
+  const out = new Map<string, E[]>(ids.map((id) => [id, []]));
+  const hasIn = new Set(edges.map((e) => e.to.node));
+  edges.forEach((e) => out.get(e.from.node)!.push(e));
+  const state = new Map<string, 1 | 2>(); // 1 = on the stack, 2 = done
+  const back = new Set<E>();
+  const visit = (id: string) => {
+    state.set(id, 1);
+    for (const e of out.get(id)!) {
+      const s = state.get(e.to.node);
+      if (s === 1) back.add(e);
+      else if (!s) visit(e.to.node);
+    }
+    state.set(id, 2);
+  };
+  // Start from sources so the natural direction wins; then cover what is left (pure loops).
+  for (const id of ids) if (!hasIn.has(id) && !state.has(id)) visit(id);
+  for (const id of ids) if (!state.has(id)) visit(id);
+  return edges.filter((e) => !back.has(e));
 }

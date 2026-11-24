@@ -83,6 +83,34 @@ export class Evaluator extends Emitter<EvaluatorEvents> {
     for (const id of this.cache.keys()) if (!this.graph.nodes.has(id)) this.cache.delete(id);
     for (const id of this.results.keys()) if (!this.graph.nodes.has(id)) this.results.delete(id);
 
+    // A graph type can bring its own engine (simulation, analysis, remote execution…).
+    const engine = this.registry.engine;
+    if (engine) {
+      let outputs: Record<string, unknown> = {};
+      try {
+        const res = await engine.run({
+          graph: this.graph,
+          registry: this.registry,
+          inputs: this.graphInputs,
+          signal: controller.signal,
+          publish: (id, result) => {
+            results.set(id, result);
+            if (result.status === 'error') errors.push({ node: id, error: result.error ?? 'Error' });
+            if (controller.signal.aborted) return;
+            this.results.set(id, result);
+            this.emit('node', { id, result });
+          },
+        });
+        outputs = res?.outputs ?? {};
+        executed.push(...results.keys());
+      } catch (err) {
+        if (!controller.signal.aborted) errors.push({ node: '', error: err instanceof Error ? err.message : String(err) });
+      }
+      const report: EvalReport = { outputs, results, errors, durationMs: now() - started, executed, aborted: controller.signal.aborted };
+      if (!report.aborted) this.emit('done', report);
+      return report;
+    }
+
     const order = this.graph.topoSort();
     const pending = new Map<string, Promise<NodeResult>>();
 
@@ -157,11 +185,18 @@ export class Evaluator extends Emitter<EvaluatorEvents> {
   inputValues(node: NodeInstance, results: Map<string, NodeResult> = this.results): Record<string, unknown> {
     const values: Record<string, unknown> = {};
     const edges = this.graph.incoming(node.id);
+    const valueOf = (e: (typeof edges)[number], port: PortDef) => {
+      const src = this.graph.nodes.get(e.from.node)!;
+      const outType = this.registry.outputsOf(src).find((p) => p.name === e.from.port)?.type;
+      return this.registry.coerce(results.get(e.from.node)?.outputs?.[e.from.port], outType, port.type);
+    };
     for (const port of this.registry.inputsOf(node)) {
-      const edge = edges.find((e) => e.to.port === port.name);
-      values[port.name] = edge
-        ? results.get(edge.from.node)?.outputs?.[edge.from.port]
-        : fallback(node, port);
+      const wired = edges.filter((e) => e.to.port === port.name);
+      if (port.multiple) {
+        // Collect every wire, top to bottom, so the order matches what people see.
+        wired.sort((a, b) => this.graph.nodes.get(a.from.node)!.y - this.graph.nodes.get(b.from.node)!.y);
+        values[port.name] = wired.map((e) => valueOf(e, port));
+      } else values[port.name] = wired[0] ? valueOf(wired[0], port) : fallback(node, port, this.registry);
     }
     return values;
   }
@@ -213,8 +248,9 @@ export class Evaluator extends Emitter<EvaluatorEvents> {
   }
 }
 
-function fallback(node: NodeInstance, port: PortDef): unknown {
-  return node.params[port.name] !== undefined ? node.params[port.name] : port.default;
+function fallback(node: NodeInstance, port: PortDef, registry: Registry): unknown {
+  if (node.params[port.name] !== undefined) return node.params[port.name];
+  return port.default !== undefined ? port.default : registry.portType(port.type)?.default;
 }
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());

@@ -12,6 +12,7 @@ import {
 import { createRoot, type Root } from 'react-dom/client';
 import { Graph, type GraphChange } from '../core/graph.js';
 import type { Registry } from '../core/registry.js';
+import type { GraphType } from '../core/graph-type.js';
 import type { GraphJSON, NodeInstance, NodeResult, NodeView } from '../core/types.js';
 import { Evaluator, type EvalReport } from '../runtime/evaluator.js';
 import { NodeEditor } from '../editor/editor.js';
@@ -20,7 +21,9 @@ import type { LayoutEngine } from '../layout/types.js';
 const EMPTY: GraphJSON = { version: 1, nodes: [], edges: [] };
 
 export interface NodeMapProps {
-  registry: Registry;
+  /** What the map can contain. Pass a graph type, or a registry you built (e.g. with useRegistry). */
+  registry?: Registry;
+  graphType?: GraphType;
   /** A graph you own (see useGraph). Without it the component keeps its own, seeded from defaultValue. */
   graph?: Graph;
   defaultValue?: GraphJSON;
@@ -45,7 +48,11 @@ export interface NodeMapProps {
  * (autoLayout(), fit(), addNode(), …). Size it with style or className; it fills its box.
  */
 export const NodeMap = forwardRef<NodeEditor | null, NodeMapProps>(function NodeMap(props, ref) {
-  const { registry, graph: given, evaluator: givenEval, toolbar, placement, autoLayout } = props;
+  const { graph: given, evaluator: givenEval, toolbar, placement } = props;
+  const typeRegistry = useMemo(() => (props.registry || !props.graphType ? undefined : props.graphType.createRegistry()), [props.registry, props.graphType]);
+  const registry = props.registry ?? typeRegistry ?? given?.registry;
+  if (!registry) throw new Error('<NodeMap> needs a registry, a graphType, or a graph that has a registry');
+  const autoLayout = props.autoLayout ?? props.graphType?.editor?.autoLayout;
   const el = useRef<HTMLDivElement>(null);
   const [editor, setEditor] = useState<NodeEditor | null>(null);
   const own = useMemo(() => (given ? null : Graph.fromJSON(props.defaultValue ?? EMPTY, registry)), [given, registry]);
@@ -61,7 +68,7 @@ export const NodeMap = forwardRef<NodeEditor | null, NodeMapProps>(function Node
       evaluator: ev,
       toolbar,
       placement,
-      wires: latest.current.wires,
+      wires: latest.current.wires ?? latest.current.graphType?.editor?.wires,
       layout: latest.current.layout,
     });
     const offs = [
@@ -98,6 +105,11 @@ export const NodeMap = forwardRef<NodeEditor | null, NodeMapProps>(function Node
     />
   );
 });
+
+/** A registry for a graph type, created once per graph type. */
+export function useRegistry(type: GraphType): Registry {
+  return useMemo(() => type.createRegistry(), [type]);
+}
 
 /** A Graph that lives as long as the component. Pass it to <NodeMap graph={…}>. */
 export function useGraph(registry: Registry, initial?: GraphJSON | (() => GraphJSON)): Graph {

@@ -3,7 +3,6 @@ import {
   Registry,
   Evaluator,
   NodeEditor,
-  stdlib,
   compile,
   graphNode,
   signature,
@@ -11,30 +10,20 @@ import {
   formatValue,
   layered,
   elkLayout,
+  mathGraph,
+  networkGraph,
+  registerGraphType,
   type GraphJSON,
+  type GraphType,
+  type GraphExample,
   type LayoutEngine,
 } from '../src/index.js';
 import { defineDemoNodes, mountElement, mountReact, unmountReact } from './integrations.js';
+import { paletteGraph } from './palette.js';
 
-// ------------------------------------------------------------------ registry
+// ------------------------------------------------------------------ graph types
 
-const registry = new Registry(stdlib);
-
-// A node defined in plain TypeScript.
-registry.define(
-  defineNode({
-    type: 'units/f-to-c',
-    title: '°F → °C',
-    category: 'Custom',
-    color: '#be4bdb',
-    description: 'A custom node written in TypeScript',
-    inputs: [{ name: 'f', type: 'number', default: 72 }],
-    outputs: [{ name: 'c', type: 'number' }],
-    run: ({ f }) => ({ c: ((Number(f) - 32) * 5) / 9 }),
-  }),
-);
-
-// A node defined *as a node map*: compile() turns the graph into a function and graphNode() wraps it.
+// The playground's math: the built-in math graph type plus a few custom nodes.
 const hypotGraph: GraphJSON = {
   version: 1,
   nodes: [
@@ -49,195 +38,167 @@ const hypotGraph: GraphJSON = {
     { id: 'e3', from: { node: 'e', port: 'out' }, to: { node: 'o', port: 'value' } },
   ],
 };
-registry.define(
-  graphNode({ type: 'fn/hypot', title: 'Hypotenuse', category: 'Custom', color: '#be4bdb', graph: hypotGraph, registry }),
-);
-registry.get('fn/hypot')!.description = 'A node built from another node map';
 
-defineDemoNodes(registry);
-
-// ------------------------------------------------------------------ examples
-
-type Example = { id: string; name: string; blurb: string; graph: GraphJSON };
 const N = (id: string, type: string, x: number, y: number, params: Record<string, unknown> = {}) => ({ id, type, x, y, params });
 const E = (from: string, fp: string, to: string, tp: string) => ({ id: `${from}.${fp}-${to}.${tp}`, from: { node: from, port: fp }, to: { node: to, port: tp } });
 
-const examples: Example[] = [
-  {
-    id: 'waves',
-    name: 'Waves',
-    blurb: 'Drag the frequency slider. Only the nodes downstream of it re-run.',
-    graph: {
-      version: 1,
-      nodes: [
-        N('range', 'list/range', 0, 0, { start: 0, end: 12.566, count: 120 }),
-        N('freq', 'value/number', 0, 220, { value: 1.5 }),
-        N('map', 'list/map', 270, 40, { expr: 'sin(x * k) + 0.4 * sin(x * k * 3)' }),
-        N('plot', 'view/plot', 540, 0),
-        N('stat', 'list/reduce', 540, 230, { op: 'max' }),
-        N('show', 'view/display', 800, 240),
-      ],
-      edges: [
-        E('range', 'list', 'map', 'list'),
-        E('freq', 'value', 'map', 'k'),
-        E('map', 'list', 'plot', 'value'),
-        E('map', 'list', 'stat', 'list'),
-        E('stat', 'out', 'show', 'value'),
-      ],
+const demoMath = registerGraphType(
+  mathGraph.extend({
+    id: 'demo/math',
+    title: 'Math',
+    icon: 'ƒ',
+    nodes: [
+      // A node written in TypeScript with shorthand, typed ports.
+      defineNode({
+        type: 'units/f-to-c',
+        title: '°F → °C',
+        category: 'Custom',
+        color: '#be4bdb',
+        description: 'A custom node written in TypeScript',
+        inputs: { f: { type: 'number', default: 72 } },
+        outputs: { c: 'number' },
+        run: ({ f }) => ({ c: ((f - 32) * 5) / 9 }),
+      }),
+    ],
+    setup(registry) {
+      // A node made *from a node map*: compile() turns the map into a function, graphNode() wraps it.
+      registry.define({ ...graphNode({ type: 'fn/hypot', title: 'Hypotenuse', category: 'Custom', color: '#be4bdb', graph: hypotGraph, registry }), description: 'A node built from another node map' });
+      defineDemoNodes(registry);
     },
-  },
-  {
-    id: 'function',
-    name: 'Function',
-    blurb: 'Graph inputs and outputs make this map callable. Open “Call” to run it with arguments.',
-    graph: {
-      version: 1,
-      nodes: [
-        N('r', 'graph/input', 0, 0, { name: 'radius', type: 'number', value: 2 }),
-        N('h', 'graph/input', 0, 200, { name: 'height', type: 'number', value: 5 }),
-        N('area', 'math/expression', 270, 0, { vars: 'r', expr: 'PI * r ** 2' }),
-        N('vol', 'math/multiply', 520, 120),
-        N('outA', 'graph/output', 790, 0, { name: 'area' }),
-        N('outV', 'graph/output', 790, 170, { name: 'volume' }),
-        N('label', 'text/template', 520, 300, { template: 'Cylinder volume {a} for height {b}' }),
-        N('outL', 'graph/output', 790, 330, { name: 'label' }),
-      ],
-      edges: [
-        E('r', 'value', 'area', 'r'),
-        E('area', 'out', 'vol', 'a'),
-        E('h', 'value', 'vol', 'b'),
-        E('area', 'out', 'outA', 'value'),
-        E('vol', 'out', 'outV', 'value'),
-        E('vol', 'out', 'label', 'a'),
-        E('h', 'value', 'label', 'b'),
-        E('label', 'out', 'outL', 'value'),
-      ],
-    },
-  },
-  {
-    id: 'async',
-    name: 'Async',
-    blurb: 'Delay nodes are async. Independent branches run in parallel and edits cancel stale runs.',
-    graph: {
-      version: 1,
-      nodes: [
-        N('t', 'value/text', 0, 0, { value: 'nodes on a phone' }),
-        N('d1', 'async/delay', 260, -20, { ms: 900 }),
-        N('case', 'text/case', 520, 0, { mode: 'title' }),
-        N('rnd', 'value/random', 0, 230, { min: 1, max: 100 }),
-        N('d2', 'async/delay', 260, 230, { ms: 450 }),
-        N('tpl', 'text/template', 780, 120, { template: '{a} · lucky number {b}' }),
-        N('out', 'view/display', 1040, 140),
-      ],
-      edges: [
-        E('t', 'value', 'd1', 'in'),
-        E('d1', 'out', 'case', 'text'),
-        E('rnd', 'value', 'd2', 'in'),
-        E('case', 'out', 'tpl', 'a'),
-        E('d2', 'out', 'tpl', 'b'),
-        E('tpl', 'out', 'out', 'value'),
-      ],
-    },
-  },
-  {
-    id: 'custom',
-    name: 'Custom nodes',
-    blurb: '“°F → °C” is written in TypeScript. “Hypotenuse” is itself a node map.',
-    graph: {
-      version: 1,
-      nodes: [
-        N('f', 'value/number', 0, 0, { value: 98.6 }),
-        N('conv', 'units/f-to-c', 260, 0),
-        N('hyp', 'fn/hypot', 260, 190, { a: 22.5, b: 30 }),
-        N('cmp', 'logic/compare', 520, 60, { op: '>' }),
-        N('if', 'logic/if', 760, 60, { then: 'fever', else: 'normal' }),
-        N('out', 'view/display', 1000, 90),
-      ],
-      edges: [
-        E('f', 'value', 'conv', 'f'),
-        E('conv', 'c', 'cmp', 'a'),
-        E('hyp', 'c', 'cmp', 'b'),
-        E('cmp', 'out', 'if', 'cond'),
-        E('if', 'out', 'out', 'value'),
-      ],
-    },
-  },
-  {
-    id: 'tidy',
-    name: 'Tidy me',
-    blurb: 'These nodes are piled up. Press the tidy button (or L). On a phone the layout wraps into rows that fit the screen.',
-    graph: {
-      version: 1,
-      nodes: [
-        N('a', 'value/number', 120, 60, { value: 3 }),
-        N('b', 'value/number', 40, 10, { value: 4 }),
-        N('add', 'math/add', 90, 120),
-        N('mul', 'math/multiply', 10, 90),
-        N('hyp', 'fn/hypot', 150, 20),
-        N('ex', 'math/expression', 60, 150, { vars: 'p, q, h', expr: '(p + q) / h' }),
-        N('cmp', 'logic/compare', 170, 110, { op: '>' }),
-        N('if', 'logic/if', 30, 40, { then: 'above', else: 'below' }),
-        N('show', 'view/display', 110, 170),
-        N('rng', 'list/range', 0, 130, { count: 40 }),
-        N('map', 'list/map', 140, 140, { expr: 'x * x' }),
-        N('plot', 'view/plot', 80, 30),
-      ],
-      edges: [
-        E('a', 'value', 'add', 'a'),
-        E('b', 'value', 'add', 'b'),
-        E('a', 'value', 'mul', 'a'),
-        E('b', 'value', 'mul', 'b'),
-        E('a', 'value', 'hyp', 'a'),
-        E('b', 'value', 'hyp', 'b'),
-        E('add', 'out', 'ex', 'p'),
-        E('mul', 'out', 'ex', 'q'),
-        E('hyp', 'c', 'ex', 'h'),
-        E('ex', 'out', 'cmp', 'a'),
-        E('cmp', 'out', 'if', 'cond'),
-        E('if', 'out', 'show', 'value'),
-        E('rng', 'list', 'map', 'list'),
-        E('map', 'list', 'plot', 'value'),
-      ],
-    },
-  },
-];
+    examples: [
+      ...mathGraph.examples!,
+      {
+        id: 'custom',
+        name: 'Custom nodes',
+        description: '“°F → °C” is written in TypeScript. “Hypotenuse” is itself a node map.',
+        graph: {
+          version: 1,
+          nodes: [
+            N('f', 'value/number', 0, 0, { value: 98.6 }),
+            N('conv', 'units/f-to-c', 260, 0),
+            N('hyp', 'fn/hypot', 260, 190, { a: 22.5, b: 30 }),
+            N('cmp', 'logic/compare', 520, 60, { op: '>' }),
+            N('if', 'logic/if', 760, 60, { then: 'fever', else: 'normal' }),
+            N('out', 'view/display', 1000, 90),
+          ],
+          edges: [E('f', 'value', 'conv', 'f'), E('conv', 'c', 'cmp', 'a'), E('hyp', 'c', 'cmp', 'b'), E('cmp', 'out', 'if', 'cond'), E('if', 'out', 'out', 'value')],
+        },
+      },
+      {
+        id: 'tidy',
+        name: 'Tidy me',
+        description: 'These nodes are piled up. Press the tidy button (or L). On a phone the layout wraps into rows that fit the screen.',
+        graph: {
+          version: 1,
+          nodes: [
+            N('a', 'value/number', 120, 60, { value: 3 }),
+            N('b', 'value/number', 40, 10, { value: 4 }),
+            N('add', 'math/add', 90, 120),
+            N('mul', 'math/multiply', 10, 90),
+            N('hyp', 'fn/hypot', 150, 20),
+            N('ex', 'math/expression', 60, 150, { vars: 'p, q, h', expr: '(p + q) / h' }),
+            N('cmp', 'logic/compare', 170, 110, { op: '>' }),
+            N('if', 'logic/if', 30, 40, { then: 'above', else: 'below' }),
+            N('show', 'view/display', 110, 170),
+            N('rng', 'list/range', 0, 130, { count: 40 }),
+            N('map', 'list/map', 140, 140, { expr: 'x * x' }),
+            N('plot', 'view/plot', 80, 30),
+          ],
+          edges: [
+            E('a', 'value', 'add', 'a'), E('b', 'value', 'add', 'b'), E('a', 'value', 'mul', 'a'), E('b', 'value', 'mul', 'b'),
+            E('a', 'value', 'hyp', 'a'), E('b', 'value', 'hyp', 'b'), E('add', 'out', 'ex', 'p'), E('mul', 'out', 'ex', 'q'),
+            E('hyp', 'c', 'ex', 'h'), E('ex', 'out', 'cmp', 'a'), E('cmp', 'out', 'if', 'cond'), E('if', 'out', 'show', 'value'),
+            E('rng', 'list', 'map', 'list'), E('map', 'list', 'plot', 'value'),
+          ],
+        },
+      },
+    ],
+  }),
+);
+registerGraphType(paletteGraph);
+
+const graphTypes: GraphType[] = [demoMath, networkGraph, paletteGraph];
+type Example = GraphExample;
 
 // ------------------------------------------------------------------ app
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
-const storeKey = (id: string) => `nodemap-demo:${id}`;
+const safe = <T>(fn: () => T, fallback: T): T => {
+  try {
+    return fn();
+  } catch {
+    return fallback;
+  }
+};
 const store = {
-  get(id: string): GraphJSON | null {
-    try {
-      const raw = localStorage.getItem(storeKey(id));
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
-    }
+  key: (type: string, id: string) => `nodemap-demo:${type}:${id}`,
+  get(type: string, id: string): GraphJSON | null {
+    return safe(() => JSON.parse(localStorage.getItem(this.key(type, id)) ?? 'null'), null);
   },
-  set(id: string, json: GraphJSON) {
-    try {
-      localStorage.setItem(storeKey(id), JSON.stringify(json));
-    } catch {
-      /* storage unavailable */
-    }
+  set(type: string, id: string, json: GraphJSON) {
+    safe(() => localStorage.setItem(this.key(type, id), JSON.stringify(json)), undefined);
   },
-  clear(id: string) {
-    try {
-      localStorage.removeItem(storeKey(id));
-    } catch {
-      /* storage unavailable */
-    }
+  clear(type: string, id: string) {
+    safe(() => localStorage.removeItem(this.key(type, id)), undefined);
   },
 };
 
-const graph = new Graph(registry);
-const evaluator = new Evaluator(graph, registry);
-const editor = new NodeEditor($('#canvas'), { graph, registry, evaluator });
+// One editor session per graph type: switching types builds a fresh registry, graph and editor.
+let gtype: GraphType = demoMath;
+let registry: Registry;
+let graph: Graph;
+let evaluator: Evaluator;
+let editor: NodeEditor;
+let examples: Example[] = [];
+let current: Example;
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+let layoutEngine: LayoutEngine = layered();
 
-// Wire style and layout engine pickers.
+const statusEl = $('#status');
+const blurbEl = $('#blurb');
 const wiresSel = $<HTMLSelectElement>('#wires');
 const engineSel = $<HTMLSelectElement>('#engine');
+const typeSel = $<HTMLSelectElement>('#gtype');
+
+for (const t of graphTypes) typeSel.append(new Option(`${t.icon ?? ''} ${t.title}`.trim(), t.id));
+
+function startSession(type: GraphType) {
+  editor?.destroy();
+  gtype = type;
+  registry = type.createRegistry();
+  graph = new Graph(registry);
+  evaluator = new Evaluator(graph, registry);
+  editor = new NodeEditor($('#canvas'), { graph, registry, evaluator, wires: wiresSel.value as 'smart' | 'curved', layout: layoutEngine });
+  examples = type.examples ?? [];
+  typeSel.value = type.id;
+  document.body.dataset.gtype = type.id;
+  // The "Call" panel only makes sense for maps that run as functions.
+  const callable = !registry.engine || registry.engine.callable;
+  ($('[data-panel="call"]') as HTMLElement).hidden = !callable;
+  if (!callable && openPanel === 'call') showPanel(null);
+
+  evaluator.on('start', () => statusEl.setAttribute('data-state', 'running'));
+  evaluator.on('done', (r) => {
+    statusEl.setAttribute('data-state', r.errors.length ? 'error' : 'ok');
+    if (registry.engine && 'online' in r.outputs) {
+      const o = r.outputs as { online: number; offline: number; worstLatency: number };
+      statusEl.textContent = `${o.online} online · ${o.offline} offline · worst ${o.worstLatency} ms`;
+    } else {
+      statusEl.textContent = r.errors.length
+        ? `${r.errors.length} error${r.errors.length > 1 ? 's' : ''}`
+        : `${r.executed.length}/${graph.nodes.size} ran · ${r.durationMs.toFixed(r.durationMs < 10 ? 1 : 0)} ms`;
+    }
+    renderCall();
+  });
+  graph.on('change', () => {
+    clearTimeout(saveTimer);
+    const at = current;
+    saveTimer = setTimeout(() => at && store.set(gtype.id, at.id, graph.toJSON()), 400);
+  });
+  buildTabs();
+}
+
+// Wire style and layout engine pickers.
 wiresSel.addEventListener('change', () => editor.setWires(wiresSel.value as 'smart' | 'curved'));
 let elk: Promise<LayoutEngine> | null = null;
 function loadElk(): Promise<LayoutEngine> {
@@ -246,7 +207,10 @@ function loadElk(): Promise<LayoutEngine> {
     const s = document.createElement('script');
     s.src = 'https://cdn.jsdelivr.net/npm/elkjs@0.12.1/lib/elk.bundled.js';
     s.onload = () => resolve(elkLayout(new (window as any).ELK()));
-    s.onerror = () => reject(new Error('ELK could not be loaded'));
+    s.onerror = () => {
+      elk = null;
+      reject(new Error('ELK could not be loaded'));
+    };
     document.head.append(s);
   }));
 }
@@ -254,7 +218,8 @@ engineSel.addEventListener('change', async () => {
   if (engineSel.value === 'elk') {
     statusEl.textContent = 'loading ELK…';
     try {
-      editor.setLayout(await loadElk());
+      layoutEngine = await loadElk();
+      editor.setLayout(layoutEngine);
       statusEl.textContent = 'ELK ready';
       void editor.autoLayout();
     } catch (err) {
@@ -262,45 +227,32 @@ engineSel.addEventListener('change', async () => {
       editor.notify(err instanceof Error ? err.message : String(err));
     }
   } else {
-    editor.setLayout(layered());
+    layoutEngine = layered();
+    editor.setLayout(layoutEngine);
     void editor.autoLayout();
   }
 });
-
-let current = examples[0];
-const statusEl = $('#status');
-const blurbEl = $('#blurb');
-
-evaluator.on('start', () => statusEl.setAttribute('data-state', 'running'));
-evaluator.on('done', (r) => {
-  statusEl.setAttribute('data-state', r.errors.length ? 'error' : 'ok');
-  statusEl.textContent = r.errors.length
-    ? `${r.errors.length} error${r.errors.length > 1 ? 's' : ''}`
-    : `${r.executed.length}/${graph.nodes.size} ran · ${r.durationMs.toFixed(r.durationMs < 10 ? 1 : 0)} ms`;
-  renderCall();
-});
-
-let saveTimer: ReturnType<typeof setTimeout> | undefined;
-graph.on('change', () => {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => store.set(current.id, graph.toJSON()), 400);
+typeSel.addEventListener('change', () => {
+  const t = graphTypes.find((g) => g.id === typeSel.value)!;
+  showTab(`${t.id}|${t.examples?.[0]?.id ?? ''}`);
 });
 
 const integrations: Record<string, { name: string; blurb: string; mount: (el: HTMLElement) => void; unmount?: () => void }> = {
   react: {
     name: 'React',
     blurb: '<NodeMap> with hooks. React state drives the map and reads its results.',
-    mount: (el) => mountReact(el, registry),
+    mount: (el) => mountReact(el, demoMath.createRegistry()),
     unmount: unmountReact,
   },
   element: {
     name: '<node-map>',
-    blurb: 'A custom element: one tag with inline JSON, events and methods.',
+    blurb: 'A custom element: one tag with inline JSON, events and methods. Set graph-type to switch what it edits.',
     mount: mountElement,
   },
 };
 let activeIntegration: string | null = null;
 
+/** Tab ids are "graphType|example" for maps, or an integration id. */
 function showTab(id: string) {
   if (activeIntegration) {
     integrations[activeIntegration].unmount?.();
@@ -317,12 +269,13 @@ function showTab(id: string) {
     blurbEl.textContent = integ.blurb;
     integ.mount($('#alt'));
     markTab(id);
-  } else loadExample(id);
-  try {
-    localStorage.setItem('nodemap-demo:tab', id);
-  } catch {
-    /* ignore */
+  } else {
+    const [typeId, exId] = id.split('|');
+    const t = graphTypes.find((g) => g.id === typeId) ?? demoMath;
+    if (t !== gtype || !editor) startSession(t);
+    loadExample(exId);
   }
+  safe(() => localStorage.setItem('nodemap-demo:tab', id), undefined);
 }
 
 function markTab(id: string) {
@@ -331,39 +284,36 @@ function markTab(id: string) {
 
 function loadExample(id: string, fresh = false) {
   current = examples.find((e) => e.id === id) ?? examples[0];
-  if (fresh) store.clear(current.id);
-  graph.load(structuredClone(store.get(current.id) ?? current.graph));
+  if (fresh) store.clear(gtype.id, current.id);
+  const saved = store.get(gtype.id, current.id);
+  graph.load(structuredClone(saved ?? current.graph));
   editor.history?.reset();
   editor.select({});
-  blurbEl.textContent = current.blurb;
-  markTab(current.id);
-  requestAnimationFrame(() => editor.fit());
+  blurbEl.textContent = current.description ?? '';
+  markTab(`${gtype.id}|${current.id}`);
+  const tidy = !saved && gtype.editor?.autoLayout;
+  requestAnimationFrame(() => (tidy ? void editor.autoLayout({ animate: false }) : editor.fit()));
 }
 
 const tabs = $('#tabs');
-for (const ex of examples) {
-  const b = document.createElement('button');
-  b.className = 'tab';
-  b.type = 'button';
-  b.role = 'tab';
-  b.dataset.id = ex.id;
-  b.textContent = ex.name;
-  b.addEventListener('click', () => showTab(ex.id));
-  tabs.append(b);
-}
-const divider = document.createElement('span');
-divider.className = 'tab-divider';
-divider.setAttribute('aria-hidden', 'true');
-tabs.append(divider);
-for (const [id, integ] of Object.entries(integrations)) {
-  const b = document.createElement('button');
-  b.className = 'tab tab-integ';
-  b.type = 'button';
-  b.role = 'tab';
-  b.dataset.id = id;
-  b.textContent = integ.name;
-  b.addEventListener('click', () => showTab(id));
-  tabs.append(b);
+function buildTabs() {
+  tabs.textContent = '';
+  const tab = (id: string, label: string, cls = 'tab') => {
+    const b = document.createElement('button');
+    b.className = cls;
+    b.type = 'button';
+    b.role = 'tab';
+    b.dataset.id = id;
+    b.textContent = label;
+    b.addEventListener('click', () => showTab(id));
+    tabs.append(b);
+  };
+  for (const ex of examples) tab(`${gtype.id}|${ex.id}`, ex.name);
+  const divider = document.createElement('span');
+  divider.className = 'tab-divider';
+  divider.setAttribute('aria-hidden', 'true');
+  tabs.append(divider);
+  for (const [id, integ] of Object.entries(integrations)) tab(id, integ.name, 'tab tab-integ');
 }
 
 // ------------------------------------------------------------------ panels
@@ -492,38 +442,38 @@ function renderHelp() {
   panelTitle.textContent = 'How to use it';
   panelBody.innerHTML = `
   <ul class="help">
+    <li><b>Graph type</b> the picker next to the logo switches what you are building: maths, a network, or colour palettes from a third-party pack</li>
     <li><b>Pan</b> drag the background · <b>Zoom</b> pinch, or scroll with a trackpad</li>
     <li><b>Move</b> drag any node · <b>Select</b> tap it, then use the toolbar</li>
-    <li><b>Connect</b> drag from a port to a port, or tap one port and then another</li>
-    <li><b>Rewire</b> drag a wire's end off an input · drop it on empty canvas to add a connected node</li>
-    <li><b>Add</b> long-press the background, or press <kbd>+</kbd></li>
-    <li><b>Add a connected node</b> select a node, then <kbd>+</kbd>: it goes after the node (or before, if the node still needs an input). Keep pressing <kbd>+</kbd> to grow a chain</li>
-    <li><b>Add on a port</b> tap an output (or input) port, then <kbd>+</kbd> · <b>Insert into a wire</b> tap the wire, then <kbd>+</kbd>. Nodes in the way shift to make room</li>
-    <li><b>Delete a wire</b> tap it, then the bin</li>
+    <li><b>Connect</b> drag from a port to a port, or tap one port and then another (or a node)</li>
+    <li><b>Add</b> long-press the background, or press <kbd>+</kbd>. With a node, port or wire selected, <kbd>+</kbd> adds a node wired to it and nudges its neighbours aside</li>
     <li><b>Tidy</b> the layout button (or <kbd>L</kbd>) arranges the map; wires route around nodes</li>
   </ul>
-  <pre class="code">import { Graph, Registry, Evaluator, NodeEditor, stdlib, defineNode } from 'mobile-nodemap';
+  <p class="note">Everything here is a plug-in. A graph type picks the nodes, port types, rules and engine; a pack is what a library publishes.</p>
+  <pre class="code">import { definePack, defineNode, defineGraphType, mathGraph } from 'mobile-nodemap';
 
-const registry = new Registry(stdlib).define(defineNode({
-  type: 'units/f-to-c', title: '°F → °C',
-  inputs:  [{ name: 'f', type: 'number', default: 72 }],
-  outputs: [{ name: 'c', type: 'number' }],
-  run: ({ f }) => ({ c: (f - 32) * 5 / 9 }),
-}));
+export const unitsPack = definePack({
+  id: 'acme/units',
+  nodes: [defineNode({
+    type: 'units/f-to-c', title: '°F → °C',
+    inputs: { f: 'number' }, outputs: { c: 'number' },
+    run: ({ f }) => ({ c: (f - 32) * 5 / 9 }),   // f is a number
+  })],
+});
 
-const graph = new Graph(registry);
-const evaluator = new Evaluator(graph, registry);
-new NodeEditor(el, { graph, registry, evaluator });</pre>`;
+export const lab = mathGraph.extend({
+  id: 'acme/lab', title: 'Lab', packs: [unitsPack], exclude: ['async/*'],
+});
+
+// &lt;node-map graph-type="acme/lab"&gt; after registerGraphType(lab)</pre>`;
 }
 
 function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
 
-let startTab = examples[0].id;
-try {
-  startTab = localStorage.getItem('nodemap-demo:tab') ?? startTab;
-} catch {
-  /* ignore */
-}
-showTab(startTab in integrations || examples.some((e) => e.id === startTab) ? startTab : examples[0].id);
+let startTab = safe(() => localStorage.getItem('nodemap-demo:tab'), null) ?? `${demoMath.id}|waves`;
+const known = (id: string) => id in integrations || graphTypes.some((t) => t.examples?.some((e) => id === `${t.id}|${e.id}`));
+if (!known(startTab)) startTab = `${demoMath.id}|waves`;
+if (startTab in integrations) startSession(demoMath);
+showTab(startTab);

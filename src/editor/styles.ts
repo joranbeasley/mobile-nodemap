@@ -36,6 +36,17 @@ export const css = /* css */ `
 .nm-node.nm-dragging { cursor: grabbing; box-shadow: var(--_shadow), 0 12px 28px rgb(0 0 0 / .18); z-index: 2; }
 .nm-head { display: flex; align-items: center; gap: 8px; padding: 9px 10px 8px; border-bottom: 1px solid var(--_border);
   border-radius: 10px 10px 0 0; background: linear-gradient(color-mix(in srgb, var(--nm-head) 14%, transparent), transparent); }
+.nm-more { padding: 0 12px; }
+.nm-more summary { cursor: pointer; color: var(--_muted); font-size: 12px; padding: 4px 0; list-style: none; display: flex; align-items: center; gap: 4px; min-height: 28px; }
+.nm-more summary::-webkit-details-marker { display: none; }
+.nm-more summary::before { content: "▸"; font-size: 10px; transition: transform .15s; }
+.nm-more[open] summary::before { transform: rotate(90deg); }
+.nm-more .nm-field { padding-inline: 0; }
+.nm-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; font-size: 14px; line-height: 1; color: var(--nm-head); }
+.nm-icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.nm-head .nm-icon + .nm-title { margin-left: -2px; }
+.nm-port-multi { border-radius: 4px; }
+.nm-sheet-item .nm-icon { width: 20px; color: var(--c); }
 .nm-title { font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nm-cat { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--_muted); }
 .nm-status { width: 8px; height: 8px; border-radius: 50%; background: var(--nm-head); flex: none; }
@@ -155,5 +166,17 @@ export function injectStyles(root: Document | ShadowRoot = document): void {
   const style = doc.createElement('style');
   style.id = 'nm-styles';
   style.textContent = css;
+  (isDoc ? (root as Document).head : root).appendChild(style);
+}
+
+/** Add a pack's stylesheet once per document or shadow root. */
+export function injectPackStyles(root: Document | ShadowRoot, id: string, cssText: string): void {
+  const isDoc = (root as Document).nodeType === 9;
+  const elId = `nm-pack-${id.replace(/[^\w-]/g, '_')}`;
+  if (isDoc ? (root as Document).getElementById(elId) : root.querySelector(`#${elId}`)) return;
+  const doc = isDoc ? (root as Document) : root.ownerDocument!;
+  const style = doc.createElement('style');
+  style.id = elId;
+  style.textContent = cssText;
   (isDoc ? (root as Document).head : root).appendChild(style);
 }

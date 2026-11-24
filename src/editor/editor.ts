@@ -2,10 +2,10 @@ import { Emitter } from '../core/emitter.js';
 import { Graph, ConnectionError } from '../core/graph.js';
 import { History } from '../core/history.js';
 import { Registry } from '../core/registry.js';
-import type { Edge, NodeInstance, NodeResult, NodeType, ParamDef, PortDef, PortRef } from '../core/types.js';
+import type { BuiltinParamDef, Edge, NodeInstance, NodeResult, NodeType, ParamDef, ParamKind, PortDef, PortRef } from '../core/types.js';
 import type { Evaluator } from '../runtime/evaluator.js';
 import { formatValue } from '../runtime/stdlib.js';
-import { injectStyles } from './styles.js';
+import { injectPackStyles, injectStyles } from './styles.js';
 import { Router } from '../layout/router.js';
 import { layered } from '../layout/layered.js';
 import { findFreeSpot } from '../layout/place.js';
@@ -114,6 +114,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
   private toolbar?: HTMLElement;
   private sheet?: HTMLElement;
   private records = new Map<string, NodeRecord>();
+  /** Nodes whose "More" params are open. */
+  private expanded = new Set<string>();
   private edgeEls = new Map<string, SVGGElement>();
   private vp: Viewport = { x: 0, y: 0, k: 1 };
   private pointers = new Map<number, { x: number; y: number }>();
@@ -148,6 +150,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
     this.wireStyle = options.wires ?? 'smart';
     this.layoutEngine = options.layout ?? layered();
     if (options.history !== false) this.history = new History(this.graph);
+    for (const [id, cssText] of this.registry.styles()) injectPackStyles(container.getRootNode() as Document | ShadowRoot, id, cssText);
 
     this.root = container;
     container.classList.add('nm-root');
@@ -632,7 +635,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       list.textContent = '';
       for (const [cat, types] of this.registry.categories()) {
         const items = types.filter(
-          (t) => compatible(t) && (!q || `${t.title} ${t.type} ${cat} ${t.description ?? ''}`.toLowerCase().includes(q)),
+          (t) => compatible(t) && (!q || `${t.title} ${t.type} ${cat} ${t.description ?? ''} ${(t.tags ?? []).join(' ')}`.toLowerCase().includes(q)),
         );
         if (!items.length) continue;
         list.append(h('div', { class: 'nm-sheet-cat' }, cat));
@@ -640,7 +643,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
           const btn = h(
             'button',
             { class: 'nm-sheet-item', type: 'button', style: `--c:${t.color ?? 'var(--nm-muted)'}` },
-            h('i'),
+            t.icon ? iconEl(t.icon) : h('i'),
             t.title ?? t.type,
             h('small', {}, t.description ?? ''),
           );
@@ -788,19 +791,28 @@ export class NodeEditor extends Emitter<EditorEvents> {
 
     const el = h('div', { class: 'nm-node', 'data-id': node.id, role: 'group', 'aria-label': def?.title ?? node.type });
     if (def?.color) el.style.setProperty('--nm-node-accent', def.color);
+    if (def?.width) el.style.width = `${def.width}px`;
     el.append(
       h(
         'div',
         { class: 'nm-head' },
         h('span', { class: 'nm-status' }),
+        ...(def?.icon ? [iconEl(def.icon)] : []),
         h('span', { class: 'nm-title' }, node.label ?? def?.title ?? node.type),
         h('span', { class: 'nm-cat' }, def?.category ?? ''),
       ),
     );
     const body = h('div', { class: 'nm-body' });
     if (!def) body.append(h('div', { class: 'nm-error' }, `Unknown node type "${node.type}"`));
-    for (const p of def?.params ?? []) {
-      body.append(h('label', { class: 'nm-field' }, h('span', {}, p.label ?? p.name), this.paramControl(node, p)));
+    const field = (p: ParamDef) => h('label', { class: 'nm-field' }, h('span', {}, p.label ?? p.name), this.paramControl(node, p));
+    const params = def?.params ?? [];
+    params.filter((p) => !p.advanced).forEach((p) => body.append(field(p)));
+    const advanced = params.filter((p) => p.advanced);
+    if (advanced.length) {
+      const more = h('details', { class: 'nm-more' }, h('summary', {}, `More (${advanced.length})`), ...advanced.map(field));
+      if (this.expanded.has(node.id)) more.open = true;
+      more.addEventListener('toggle', () => (more.open ? this.expanded.add(node.id) : this.expanded.delete(node.id)));
+      body.append(more);
     }
     for (const p of this.registry.outputsOf(node)) {
       body.append(
@@ -809,7 +821,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
           { class: 'nm-row nm-out', 'data-port': p.name },
           h('span', { class: 'nm-val' }),
           h('span', { class: 'nm-label' }, p.label ?? p.name),
-          h('span', { class: 'nm-port', 'data-dir': 'out', 'data-node': node.id, 'data-port': p.name, 'data-type': p.type ?? 'any', title: `${p.name}: ${p.type ?? 'any'}` }),
+          this.portEl(node.id, p, 'out'),
         ),
       );
     }
@@ -817,11 +829,13 @@ export class NodeEditor extends Emitter<EditorEvents> {
       const row = h(
         'div',
         { class: 'nm-row nm-in', 'data-port': p.name },
-        h('span', { class: 'nm-port', 'data-dir': 'in', 'data-node': node.id, 'data-port': p.name, 'data-type': p.type ?? 'any', title: `${p.name}: ${p.type ?? 'any'}` }),
+        this.portEl(node.id, p, 'in'),
         h('span', { class: 'nm-label' }, p.label ?? p.name),
         h('span', { class: 'nm-val' }),
       );
-      const inline = p.inline ?? (Registry.isPrimitive(p.type) || p.type === 'any');
+      const pt = this.registry.portType(p.type);
+      const inline = p.inline ?? (!p.multiple && (pt ? pt.inline !== false && !!pt.inline : Registry.isPrimitive(p.type) || p.type === 'any'));
+      if (p.multiple) row.classList.add('nm-multi');
       if (inline) row.append(h('span', { class: 'nm-inline' }, this.inlineControl(node, p)));
       body.append(row);
     }
@@ -853,10 +867,13 @@ export class NodeEditor extends Emitter<EditorEvents> {
     if (result) this.showResult(node.id, result);
   }
 
-  private paramControl(node: NodeInstance, p: ParamDef): HTMLElement {
-    const set = (v: unknown) => this.graph.setParam(node.id, p.name, v);
-    const value = node.params[p.name] ?? p.default;
-    const key = `p:${p.name}`;
+  private paramControl(node: NodeInstance, param: ParamDef): HTMLElement {
+    const set = (v: unknown) => this.graph.setParam(node.id, param.name, v);
+    const value = node.params[param.name] ?? param.default;
+    const key = `p:${param.name}`;
+    const custom = this.registry.paramKind(param.kind);
+    if (custom) return this.customControl(custom, node, param, value, key);
+    const p = param as BuiltinParamDef;
     switch (p.kind) {
       case 'number': {
         const numEl = h('input', { type: 'number', inputmode: 'decimal', 'data-key': key + ':n', step: String(p.step ?? 'any'), 'aria-label': p.label ?? p.name });
@@ -887,24 +904,57 @@ export class NodeEditor extends Emitter<EditorEvents> {
         const attrs = { 'data-key': key, placeholder: p.placeholder ?? '', spellcheck: 'false', autocapitalize: 'off', autocomplete: 'off', 'aria-label': p.label ?? p.name };
         const t = p.multiline ? h('textarea', { ...attrs, rows: '3' }) : h('input', { ...attrs, type: 'text' });
         t.value = String(value ?? '');
-        if (/expr|code|vars|fn/i.test(p.name)) t.classList.add('nm-mono');
+        if (p.code || /expr|code|vars|fn/i.test(p.name)) t.classList.add('nm-mono');
+        t.addEventListener('input', () => set(t.value));
+        return t;
+      }
+      default: {
+        // A param kind nobody registered: fall back to a text field so the value stays editable.
+        const t = h('input', { type: 'text', 'data-key': key, 'aria-label': param.label ?? param.name, title: `No editor for "${param.kind}"` });
+        t.value = typeof value === 'string' ? value : JSON.stringify(value ?? '');
         t.addEventListener('input', () => set(t.value));
         return t;
       }
     }
   }
 
+  private customControl(kind: ParamKind, node: NodeInstance, param: ParamDef, value: unknown, key: string): HTMLElement {
+    const el = kind.render({ param, node, value, key, set: (v) => this.graph.setParam(node.id, param.name, v) });
+    el.dataset.paramKind = kind.kind;
+    el.dataset.param = param.name;
+    return el;
+  }
+
+  private portEl(nodeId: string, p: PortDef, dir: Dir): HTMLElement {
+    const type = p.type ?? 'any';
+    const pt = this.registry.portType(type);
+    const el = h('span', {
+      class: 'nm-port' + (p.multiple ? ' nm-port-multi' : ''),
+      'data-dir': dir,
+      'data-node': nodeId,
+      'data-port': p.name,
+      'data-type': type,
+      title: `${p.label ?? p.name}: ${pt?.label ?? type}${p.multiple ? ' (many)' : ''}${p.description ? ` · ${p.description}` : ''}`,
+    });
+    if (pt?.color) el.style.setProperty('--nm-port-color', pt.color);
+    return el;
+  }
+
   private inlineControl(node: NodeInstance, p: PortDef): HTMLElement {
     const key = `i:${p.name}`;
-    const value = node.params[p.name] ?? p.default;
+    const pt = this.registry.portType(p.type);
+    const value = node.params[p.name] ?? p.default ?? pt?.default;
     const set = (v: unknown) => this.graph.setParam(node.id, p.name, v);
-    if (p.type === 'boolean') {
+    const kind = typeof pt?.inline === 'string' ? pt.inline : undefined;
+    const custom = kind ? this.registry.paramKind(kind) : undefined;
+    if (custom) return this.customControl(custom, node, { name: p.name, kind: custom.kind, label: p.label }, value, key);
+    if (p.type === 'boolean' || kind === 'boolean') {
       const cb = h('input', { type: 'checkbox', 'data-key': key, 'aria-label': p.name });
       cb.checked = !!value;
       cb.addEventListener('change', () => set(cb.checked));
       return cb;
     }
-    if (p.type === 'number' || (p.type === 'any' && typeof value === 'number')) {
+    if (p.type === 'number' || kind === 'number' || (p.type === 'any' && typeof value === 'number')) {
       const n = h('input', { type: 'number', inputmode: 'decimal', step: 'any', 'data-key': key, 'aria-label': p.name });
       n.value = String(value ?? 0);
       n.addEventListener('input', () => n.value !== '' && !isNaN(+n.value) && set(+n.value));
@@ -925,8 +975,14 @@ export class NodeEditor extends Emitter<EditorEvents> {
       const name = input.dataset.key!.replace(/^[pi]:/, '').replace(/:n$/, '');
       const v = node.params[name];
       if (v === undefined) return;
+      if (input.closest('[data-param-kind]')) return;
       if (input.type === 'checkbox') input.checked = !!v;
       else if (input.value !== String(v)) input.value = String(v);
+    });
+    el.querySelectorAll<HTMLElement>('[data-param-kind]').forEach((ctl) => {
+      if (ctl.contains(this.activeElement())) return;
+      const v = node.params[ctl.dataset.param!];
+      if (v !== undefined) this.registry.paramKind(ctl.dataset.paramKind!)?.update?.(ctl, v);
     });
   }
 
@@ -1076,6 +1132,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
     line.classList.add('nm-edge');
     const type = this.registry.outputsOf(this.graph.nodes.get(e.from.node)!).find((p) => p.name === e.from.port)?.type;
     if (type) line.setAttribute('data-type', type);
+    const color = this.registry.portType(type)?.color;
+    if (color) line.style.setProperty('--nm-port-color', color);
     const hit = document.createElementNS(SVGNS, 'path');
     hit.classList.add('nm-edge-hit');
     hit.dataset.edge = e.id;
@@ -1122,12 +1180,13 @@ export class NodeEditor extends Emitter<EditorEvents> {
     rec.el.querySelector('.nm-error')!.textContent = r.status === 'error' ? r.error ?? 'Error' : '';
     for (const row of rec.el.querySelectorAll<HTMLElement>('.nm-out')) {
       const v = r.outputs?.[row.dataset.port!];
-      row.querySelector('.nm-val')!.textContent = r.status === 'ok' ? formatValue(v, 24) : '';
+      row.querySelector('.nm-val')!.textContent = r.status === 'ok' && v !== undefined ? formatValue(v, 24) : '';
     }
     // Show the value arriving at each connected input of downstream nodes.
     for (const e of this.graph.outgoing(id)) {
       const row = this.records.get(e.to.node)?.el.querySelector<HTMLElement>(`.nm-in[data-port="${CSS.escape(e.to.port)}"] .nm-val`);
-      if (row) row.textContent = r.status === 'ok' ? formatValue(r.outputs?.[e.from.port], 18) : '';
+      const v = r.outputs?.[e.from.port];
+      if (row) row.textContent = r.status === 'ok' && v !== undefined && !row.closest('.nm-multi') ? formatValue(v, 18) : '';
     }
     const def = this.registry.get(node.type);
     if (def?.view) def.view.render(rec.el.querySelector('.nm-view')!, r, node);
@@ -1375,7 +1434,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
 
   private beginWire(g: Extract<Gesture, { kind: 'wire' }>): void {
     // Dragging from a connected input picks up the existing wire from its source.
-    if (g.anchor.dir === 'in') {
+    const multi = g.anchor.dir === 'in' && this.portDef(g.anchor)?.multiple;
+    if (g.anchor.dir === 'in' && !multi) {
       const existing = this.graph.incoming(g.anchor.node).find((e) => e.to.port === g.anchor.port);
       if (existing) {
         this.graph.disconnect(existing.id);
@@ -1507,6 +1567,14 @@ export class NodeEditor extends Emitter<EditorEvents> {
 }
 
 const noop = () => {};
+
+/** A node icon: inline SVG markup from the node type, or a short text / emoji. */
+function iconEl(icon: string): HTMLElement {
+  const el = h('span', { class: 'nm-icon', 'aria-hidden': 'true' });
+  if (icon.trim().startsWith('<svg')) el.innerHTML = icon;
+  else el.textContent = icon;
+  return el;
+}
 
 
 function defaults(t: NodeType): Record<string, unknown> {

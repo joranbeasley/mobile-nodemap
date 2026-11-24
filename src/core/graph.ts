@@ -48,7 +48,10 @@ export class Graph extends Emitter<GraphEvents> {
       y: init.y ?? 0,
       params: { ...params, ...init.params },
       ...(init.label ? { label: init.label } : {}),
+      ...(def?.version ? { v: def.version } : {}),
     };
+    const extra = def?.onCreate?.(node);
+    if (extra) Object.assign(node.params, extra);
     if (this.nodes.has(node.id)) throw new Error(`Duplicate node id "${node.id}"`);
     this.nodes.set(node.id, node);
     this.emit('change', { kind: 'node:add', node });
@@ -94,15 +97,25 @@ export class Graph extends Emitter<GraphEvents> {
       if (!inp) return `No input "${to.port}" on ${b.type}`;
       if (!this.registry.isCompatible(out.type, inp.type))
         return `Type mismatch: ${out.type ?? 'any'} → ${inp.type ?? 'any'}`;
+      if (inp.multiple && [...this.edges.values()].some((e) => e.from.node === from.node && e.from.port === from.port && e.to.node === to.node && e.to.port === to.port))
+        return 'Already connected';
+      const veto = this.registry.rules.canConnect?.(
+        { ...from, def: out, nodeType: a.type },
+        { ...to, def: inp, nodeType: b.type },
+        this,
+      );
+      if (veto) return veto;
     }
-    if (this.reaches(b.id, a.id)) return 'That connection would create a loop';
+    if (!this.registry?.rules.allowCycles && this.reaches(b.id, a.id)) return 'That connection would create a loop';
     return null;
   }
 
   connect(from: PortRef, to: PortRef, id?: string): Edge {
     const reason = this.canConnect(from, to);
     if (reason) throw new ConnectionError(reason);
-    const existing = this.incoming(to.node).find((e) => e.to.port === to.port);
+    // A plain input holds one wire, so a new one replaces it; `multiple` inputs collect them all.
+    const port = this.registry?.inputsOf(this.nodes.get(to.node)!).find((p) => p.name === to.port);
+    const existing = port?.multiple ? undefined : this.incoming(to.node).find((e) => e.to.port === to.port);
     if (existing) this.disconnect(existing.id);
     const edge: Edge = { id: id ?? uid('e'), from: { ...from }, to: { ...to } };
     this.edges.set(edge.id, edge);
@@ -185,6 +198,7 @@ export class Graph extends Emitter<GraphEvents> {
   toJSON(): GraphJSON {
     return {
       version: 1,
+      ...(this.registry?.id ? { type: this.registry.id } : {}),
       nodes: [...this.nodes.values()].map((n) => ({ ...n, params: { ...n.params } })),
       edges: [...this.edges.values()].map((e) => ({ id: e.id, from: { ...e.from }, to: { ...e.to } })),
       ...(Object.keys(this.meta).length ? { meta: { ...this.meta } } : {}),
@@ -195,7 +209,7 @@ export class Graph extends Emitter<GraphEvents> {
     this.nodes.clear();
     this.edges.clear();
     this.meta = { ...json.meta };
-    json.nodes.forEach((n) => this.nodes.set(n.id, { ...n, params: { ...n.params } }));
+    json.nodes.forEach((n) => this.nodes.set(n.id, this.migrate({ ...n, params: { ...n.params } })));
     json.edges.forEach((e) => this.edges.set(e.id, { id: e.id, from: { ...e.from }, to: { ...e.to } }));
     this.emit('change', { kind: 'load' });
     return this;
@@ -203,6 +217,15 @@ export class Graph extends Emitter<GraphEvents> {
 
   static fromJSON(json: GraphJSON, registry?: Registry): Graph {
     return new Graph(registry).load(json);
+  }
+
+  /** Upgrade a saved node whose type has a newer `version`. */
+  private migrate(n: NodeInstance): NodeInstance {
+    const def = this.registry?.get(n.type);
+    if (!def?.version || (n.v ?? 1) >= def.version) return n;
+    if (def.migrate) n.params = def.migrate(n.params, n.v ?? 1);
+    n.v = def.version;
+    return n;
   }
 
   private pruneDanglingEdges(nodeId: string): void {

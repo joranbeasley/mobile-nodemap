@@ -3,7 +3,8 @@ import { Registry } from '../core/registry.js';
 import type { GraphJSON } from '../core/types.js';
 import { Evaluator, type EvalReport } from '../runtime/evaluator.js';
 import { compile } from '../runtime/compile.js';
-import { stdlib } from '../runtime/stdlib.js';
+import { getGraphType, type GraphType } from '../core/graph-type.js';
+import { mathGraph } from '../graph-types/index.js';
 import { NodeEditor } from '../editor/editor.js';
 import type { LayoutEngine } from '../layout/types.js';
 
@@ -23,14 +24,14 @@ const hostCss = `
  *     <script type="application/json">{ "version": 1, "nodes": [...], "edges": [...] }</script>
  *   </node-map>
  *
- * Attributes: `wires` (smart | curved), `theme` (light | dark), `no-toolbar`, `no-eval`, `auto-layout`, `readonly-layout`.
- * Properties: `registry` (defaults to the standard library), `value` (graph JSON), `graph`, `editor`, `evaluator`, `layout`.
+ * Attributes: `graph-type` (a registered graph type id), `wires` (smart | curved), `theme` (light | dark), `no-toolbar`, `no-eval`, `auto-layout`.
+ * Properties: `graphType`, `registry` (defaults to the graph type's), `value` (graph JSON), `graph`, `editor`, `evaluator`, `layout`.
  * Methods: `autoLayout()`, `fit()`, `run(inputs)`, `call(inputs)`.
  * Events: `change` ({ value, change }), `select` ({ node, edge }), `evaluate` (EvalReport).
  * Style it with CSS custom properties (--nm-bg, --nm-accent, …); they pass into the shadow root.
  */
 export class NodeMapElement extends Base {
-  static observedAttributes = ['wires', 'theme'];
+  static observedAttributes = ['wires', 'theme', 'graph-type'];
 
   private _registry?: Registry;
   private _layout?: LayoutEngine;
@@ -41,12 +42,33 @@ export class NodeMapElement extends Base {
   private _canvas?: HTMLDivElement;
   private _offs: (() => void)[] = [];
 
+  /**
+   * The node types, rules and engine in use. Defaults to the graph type named by the
+   * `graph-type` attribute (or the inline JSON's `type`), else the built-in math graph.
+   */
   get registry(): Registry {
-    return (this._registry ??= new Registry(stdlib));
+    return (this._registry ??= this.resolveGraphType().createRegistry());
   }
   set registry(r: Registry) {
     this._registry = r;
     if (this._editor) this.mount();
+  }
+
+  /** Use a graph type object directly (no registration needed). */
+  set graphType(type: GraphType) {
+    this._graphType = type;
+    this._registry = undefined;
+    if (this._editor) this.mount();
+  }
+
+  private _graphType?: GraphType;
+
+  private resolveGraphType(): GraphType {
+    if (this._graphType) return this._graphType;
+    const id = this.getAttribute('graph-type') ?? this.inlineJson()?.type;
+    const t = id ? getGraphType(id) : undefined;
+    if (id && !t) console.warn(`<node-map>: unknown graph type "${id}"; register it with registerGraphType()`);
+    return t ?? mathGraph;
   }
 
   get layout(): LayoutEngine | undefined {
@@ -80,7 +102,7 @@ export class NodeMapElement extends Base {
 
   connectedCallback(): void {
     // Properties set before the element was defined live on the instance; re-apply them through the setters.
-    for (const prop of ['registry', 'layout', 'value'] as const) {
+    for (const prop of ['graphType', 'registry', 'layout', 'value'] as const) {
       if (Object.prototype.hasOwnProperty.call(this, prop)) {
         const v = (this as any)[prop];
         delete (this as any)[prop];
@@ -107,6 +129,10 @@ export class NodeMapElement extends Base {
   }
 
   attributeChangedCallback(name: string, _old: string | null, value: string | null): void {
+    if (name === 'graph-type' && this._editor && !this._graphType) {
+      this._registry = undefined;
+      this.mount();
+    }
     if (name === 'wires' && this._editor) this._editor.setWires(value === 'curved' ? 'curved' : 'smart');
     if (name === 'theme' && this._canvas) {
       if (value) this._canvas.dataset.theme = value;
@@ -164,7 +190,7 @@ export class NodeMapElement extends Base {
     this._offs.push(graph.on('change', (change) => fire('change', { change, value: graph.toJSON() })));
     this._offs.push(editor.on('select', (sel) => fire('select', sel)));
     if (this._evaluator) this._offs.push(this._evaluator.on('done', (report) => fire('evaluate', report)));
-    if (this.hasAttribute('auto-layout')) requestAnimationFrame(() => void editor.autoLayout({ animate: false }));
+    if (this.hasAttribute('auto-layout') || (!this._registry?.id ? false : getGraphType(this._registry.id)?.editor?.autoLayout)) requestAnimationFrame(() => void editor.autoLayout({ animate: false }));
   }
 
   private unmount(): void {
