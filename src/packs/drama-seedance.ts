@@ -146,9 +146,7 @@ function clips(shots: ShotInfo[], max: number): ShotInfo[][] {
  * Pure: no DOM needed. Use `seedancePack` for the .zip with the images.
  */
 export function seedanceScript(graph: Graph, id?: string, opts: SeedanceOptions = {}): SeedanceScript {
-  const maxClip = opts.maxClip ?? 15;
   const minClip = opts.minClip ?? 4;
-  const maxImages = opts.maxImages ?? 9;
   const sc = scope(graph, id);
 
   // ---- assets: one path per distinct image, named after what it shows
@@ -189,10 +187,18 @@ export function seedanceScript(graph: Graph, id?: string, opts: SeedanceOptions 
   const propImages = new Map([...props.values()].map((p) => [p.id, imagesOf(p, 'props', `${dramaName(p)} (prop)`)]));
 
   // An episode exported on its own still takes its season's style and aspect.
-  const seasonOf = (b: Block) => b.season ?? (b.episode && graph.outgoing(b.episode.node.id).map((e) => graph.nodes.get(e.to.node)).find((n) => n?.type === 'drama/season'));
-  const styleOf = (b: Block) => oneLine(String(b.episode?.node.params.style ?? '') || String(seasonOf(b)?.params.style ?? '') || opts.style || DEFAULT_STYLE);
+  // Settings come from the scene's episode, then its season, then opts: a scene or episode
+  // exported on its own still uses them.
+  const parent = (n: NodeInstance | undefined, type: string) => n && graph.outgoing(n.id).map((e) => graph.nodes.get(e.to.node)).find((x) => x?.type === type);
+  const episodeOf = (b: Block) => b.episode?.node ?? parent(b.scene.node, 'drama/episode');
+  const seasonOf = (b: Block) => b.season ?? parent(episodeOf(b), 'drama/season');
   const set = (v: unknown) => (v && v !== 'inherit' ? String(v) : '');
-  const aspectOf = (b: Block) => set(b.episode?.node.params.aspect) || set(seasonOf(b)?.params.aspect) || opts.aspect || '16:9';
+  const num = (v: unknown) => (typeof v === 'number' && v > 0 ? v : 0);
+  const styleOf = (b: Block) => oneLine(String(episodeOf(b)?.params.style ?? '') || String(seasonOf(b)?.params.style ?? '') || opts.style || DEFAULT_STYLE);
+  const aspectOf = (b: Block) => set(episodeOf(b)?.params.aspect) || set(seasonOf(b)?.params.aspect) || opts.aspect || '16:9';
+  const maxClipOf = (b: Block) => Math.max(minClip, num(episodeOf(b)?.params.maxClip) || num(seasonOf(b)?.params.maxClip) || opts.maxClip || 15);
+  const maxImagesOf = (b: Block) => Math.max(1, Math.round(num(episodeOf(b)?.params.maxImages) || num(seasonOf(b)?.params.maxImages) || opts.maxImages || 9));
+  const clipRange = new Set<number>();
 
   // ---- generations
   const generations: SeedanceGeneration[] = [];
@@ -201,6 +207,9 @@ export function seedanceScript(graph: Graph, id?: string, opts: SeedanceOptions 
     const s = b.scene;
     const ep = b.episode ? `e${b.episode.number}-` : '';
     const parts: string[] = [];
+    const maxClip = maxClipOf(b);
+    const maxImages = maxImagesOf(b);
+    clipRange.add(maxClip);
     const runs = clips(s.shots, maxClip);
     runs.forEach((run, ri) => {
       const refs: SeedanceAsset[] = [];
@@ -283,7 +292,7 @@ export function seedanceScript(graph: Graph, id?: string, opts: SeedanceOptions 
         refs.forEach((a, i) => md.push(`| @Image${i + 1} | ![${mdEsc(a.label)}](${a.path}) \`${a.path}\` | ${mdEsc(a.label)} |`));
         md.push('');
       } else md.push('No reference images: add pictures to the characters, locations or shots to keep them consistent.\n');
-      if (dropped.length) md.push(`> Left out (Seedance takes ${maxImages} images): ${dropped.map((a) => `\`${a.path}\``).join(', ')}\n`);
+      if (dropped.length) md.push(`> Left out (this script allows ${maxImages} images per generation; raise “reference images” on the episode or season for more): ${dropped.map((a) => `\`${a.path}\``).join(', ')}\n`);
       md.push('```text');
       md.push(gen.prompt);
       md.push('```');
@@ -301,7 +310,7 @@ export function seedanceScript(graph: Graph, id?: string, opts: SeedanceOptions 
   md.push(`${generations.length} generation${generations.length === 1 ? '' : 's'} · ${Math.floor(totalTime / 60)}:${String(totalTime % 60).padStart(2, '0')} of video · ${bySrc.size} reference image${bySrc.size === 1 ? '' : 's'}`);
   md.push('');
   md.push(
-    `**How to use.** Each generation is one Seedance clip (${minClip}–${maxClip} s). Upload its images in the order listed, so they become @Image1, @Image2 and so on, set the duration, and paste its prompt. Images are in the \`assets/\` folder next to this file. Join the clips in order.`,
+    `**How to use.** Each generation is one Seedance clip (${minClip}–${clipRange.size ? Math.max(...clipRange) : (opts.maxClip ?? 15)} s). Upload its images in the order listed, so they become @Image1, @Image2 and so on, set the duration, and paste its prompt. Images are in the \`assets/\` folder next to this file. Join the clips in order.`,
   );
   md.push('');
 

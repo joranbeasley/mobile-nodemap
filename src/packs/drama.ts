@@ -199,6 +199,28 @@ const images = (name = 'images', label = 'images', advanced = false) => ({ name,
 const look = () => [
   { name: 'style', label: 'video style', kind: 'text' as const, multiline: true, default: '', placeholder: 'e.g. 16mm film, warm stage lighting, coming-of-age drama', advanced: true },
   { name: 'aspect', label: 'aspect ratio', kind: 'select' as const, options: ['inherit', '16:9', '9:16', '1:1', '4:3', '21:9'], default: 'inherit', advanced: true },
+  {
+    name: 'maxImages',
+    label: 'reference images',
+    kind: 'number' as const,
+    default: 0,
+    min: 0,
+    max: 50,
+    step: 1,
+    advanced: true,
+    description: 'Most images per video clip. 0 = inherit (season, then 9, Seedance 2.0’s limit). Raise it for models that take more.',
+  },
+  {
+    name: 'maxClip',
+    label: 'clip seconds',
+    kind: 'number' as const,
+    default: 0,
+    min: 0,
+    max: 60,
+    step: 1,
+    advanced: true,
+    description: 'Longest video clip. 0 = inherit (season, then 15 s).',
+  },
 ];
 const number = (def = 1) => ({ name: 'number', label: 'number', kind: 'number' as const, default: def, min: 1, step: 1 });
 

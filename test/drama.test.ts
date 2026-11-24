@@ -121,7 +121,7 @@ describe('Seedance export', () => {
     const s = seedanceScript(g, 'ks');
     expect(s.generations[0].refs).toHaveLength(9);
     expect(s.generations[0].duration).toBe(15);
-    expect(s.markdown).toContain('Left out (Seedance takes 9 images)');
+    expect(s.markdown).toContain('Left out (this script allows 9 images per generation');
     expect(s.markdown).toContain('so it is cut to 15 s');
   });
 
@@ -139,5 +139,31 @@ describe('Seedance export', () => {
     expect(script.markdown).toContain('assets/characters/ben-1.svg');
     const end = bytes.length - 22;
     expect(new DataView(bytes.buffer).getUint16(end + 10, true)).toBe(script.assets.length + 1);
+  });
+});
+
+describe('Seedance settings', () => {
+  it('takes the image cap and clip length from the episode, then the season', () => {
+    const g = load('scene');
+    for (let i = 0; i < 12; i++) {
+      const c = g.addNode('drama/character', { id: `c${i}`, params: { images: [`data:image/png;base64,QUJD${i}`] } });
+      g.connect({ node: c.id, port: 'appears' }, { node: 'k1', port: 'characters' });
+    }
+    g.setParam('k1', 'duration', 25);
+    expect(seedanceScript(g, 'ks').generations[0].refs).toHaveLength(9);
+    // Put the scene in an episode in a season: the season's settings apply to the scene on its own too.
+    g.addNode('drama/episode', { id: 'ep' });
+    g.addNode('drama/season', { id: 'se', params: { maxImages: 20, maxClip: 30 } });
+    g.connect({ node: 'ks', port: 'episode' }, { node: 'ep', port: 'scenes' });
+    g.connect({ node: 'ep', port: 'season' }, { node: 'se', port: 'episodes' });
+    let s = seedanceScript(g, 'ks');
+    expect(s.generations[0].refs.length).toBeGreaterThan(12);
+    expect(s.generations[0].duration).toBe(28); // both shots (25 s + 3 s) fit one 30 s clip
+    expect(s.markdown).not.toContain('Left out');
+    // The episode beats the season.
+    g.setParam('ep', 'maxImages', 5);
+    s = seedanceScript(g, 'ep');
+    expect(s.generations[0].refs).toHaveLength(5);
+    expect(s.markdown).toContain('raise “reference images”');
   });
 });
