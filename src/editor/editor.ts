@@ -6,6 +6,7 @@ import type { BuiltinParamDef, Edge, NodeInstance, NodeResult, NodeType, ParamDe
 import type { Evaluator } from '../runtime/evaluator.js';
 import { formatValue } from '../runtime/stdlib.js';
 import { injectPackStyles, injectStyles } from './styles.js';
+import { flavorOf, getTheme, themeCss, type Theme } from '../themes/index.js';
 import { Router } from '../layout/router.js';
 import { layered } from '../layout/layered.js';
 import { findFreeSpot } from '../layout/place.js';
@@ -37,6 +38,11 @@ export interface EditorOptions {
   longPressMs?: number;
   /** 'smart' (default) routes orthogonal wires around nodes; 'curved' draws classic S-curves. */
   wires?: 'smart' | 'curved';
+  /**
+   * A theme (object or registered id), or a pair that follows the system setting:
+   * `{ light: 'paper', dark: 'graphite' }`. Without one the editor follows the page's colours.
+   */
+  theme?: string | Theme | { light: string | Theme; dark: string | Theme };
   /** Engine used by autoLayout(). Defaults to the built-in layered layout. */
   layout?: LayoutEngine;
   /** Place new and dropped nodes in free space next to what they connect to. Default true. */
@@ -47,6 +53,7 @@ export interface EditorEvents extends Record<string, unknown> {
   select: { node?: string; edge?: string };
   viewport: Viewport;
   error: string;
+  theme: Theme;
 }
 
 type Gesture =
@@ -114,6 +121,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
   private toolbar?: HTMLElement;
   private sheet?: HTMLElement;
   private records = new Map<string, NodeRecord>();
+  private themeOff?: () => void;
+  private currentTheme?: Theme;
   /** Nodes whose "More" params are open. */
   private expanded = new Set<string>();
   private edgeEls = new Map<string, SVGGElement>();
@@ -189,6 +198,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       this.disposers.push(ev.on('node', ({ id, result }) => this.showResult(id, result)));
       this.disposers.push(ev.live());
     }
+    if (options.theme) this.setTheme(options.theme);
     this.renderAll();
     requestAnimationFrame(() => this.fit());
   }
@@ -635,7 +645,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       list.textContent = '';
       for (const [cat, types] of this.registry.categories()) {
         const items = types.filter(
-          (t) => compatible(t) && (!q || `${t.title} ${t.type} ${cat} ${t.description ?? ''} ${(t.tags ?? []).join(' ')}`.toLowerCase().includes(q)),
+          (t) => compatible(t) && !this.registry.rules.canAddNode?.(t.type, this.graph) && (!q || `${t.title} ${t.type} ${cat} ${t.description ?? ''} ${(t.tags ?? []).join(' ')}`.toLowerCase().includes(q)),
         );
         if (!items.length) continue;
         list.append(h('div', { class: 'nm-sheet-cat' }, cat));
@@ -694,7 +704,47 @@ export class NodeEditor extends Emitter<EditorEvents> {
     this.emit('error', message);
   }
 
+  /** Switch theme (see EditorOptions.theme); null returns to the page's colours. */
+  setTheme(theme: EditorOptions['theme'] | null): void {
+    this.themeOff?.();
+    this.themeOff = undefined;
+    const root = this.root;
+    const clear = () => {
+      delete root.dataset.nmTheme;
+      delete root.dataset.nmHeader;
+      delete root.dataset.nodeColors;
+      delete root.dataset.theme;
+    };
+    if (!theme) return clear();
+    const resolve = (t: string | Theme) => (typeof t === 'string' ? getTheme(t) : t);
+    const apply = (t: Theme | undefined) => {
+      if (!t) return clear();
+      const host = root.getRootNode() as Document | ShadowRoot;
+      injectPackStyles(host, `theme-${t.id}`, themeCss(t));
+      root.dataset.nmTheme = t.id;
+      root.dataset.nmHeader = t.header ?? 'tint';
+      root.dataset.theme = t.mode;
+      if (t.nodeColors === false) root.dataset.nodeColors = 'off';
+      else delete root.dataset.nodeColors;
+      this.currentTheme = t;
+      this.emit('theme', t);
+    };
+    if (typeof theme === 'object' && 'light' in theme && 'dark' in theme) {
+      const mq = typeof matchMedia !== 'undefined' ? matchMedia('(prefers-color-scheme: dark)') : undefined;
+      const pick = () => apply(resolve(mq?.matches ? theme.dark : theme.light));
+      pick();
+      mq?.addEventListener('change', pick);
+      this.themeOff = () => mq?.removeEventListener('change', pick);
+    } else apply(resolve(theme as string | Theme));
+  }
+
+  /** The theme in use, if one was set. */
+  get theme(): Theme | undefined {
+    return this.root.dataset.nmTheme ? this.currentTheme : undefined;
+  }
+
   destroy(): void {
+    this.themeOff?.();
     cancelAnimationFrame(this.routeFrame);
     this.disposers.forEach((d) => d());
     this.history?.dispose();
@@ -790,7 +840,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
     const sel = active && 'selectionStart' in active ? [active.selectionStart, active.selectionEnd] : null;
 
     const el = h('div', { class: 'nm-node', 'data-id': node.id, role: 'group', 'aria-label': def?.title ?? node.type });
-    if (def?.color) el.style.setProperty('--nm-node-accent', def.color);
+    if (def?.color) el.style.setProperty('--nm-type-color', def.color);
+    el.dataset.flavor = flavorOf(def, this.registry.inputsOf(node), this.registry.outputsOf(node));
     if (def?.width) el.style.width = `${def.width}px`;
     el.append(
       h(

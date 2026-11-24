@@ -12,6 +12,14 @@ import {
   elkLayout,
   mathGraph,
   networkGraph,
+  functionGraph,
+  NodeLibrary,
+  localStorageStore,
+  listThemes,
+  getTheme,
+  emitSource,
+  camel,
+  type LibraryEntry,
   registerGraphType,
   type GraphJSON,
   type GraphType,
@@ -42,6 +50,11 @@ const hypotGraph: GraphJSON = {
 const N = (id: string, type: string, x: number, y: number, params: Record<string, unknown> = {}) => ({ id, type, x, y, params });
 const E = (from: string, fp: string, to: string, tp: string) => ({ id: `${from}.${fp}-${to}.${tp}`, from: { node: from, port: fp }, to: { node: to, port: tp } });
 
+// The library of custom nodes people build in the Function builder. Plain JSON, kept through a StoragePort.
+const libraryStore = localStorageStore<LibraryEntry[]>('nodemap-demo:');
+const library = new NodeLibrary();
+library.on('change', (entries) => void libraryStore.put('library', entries));
+
 const demoMath = registerGraphType(
   mathGraph.extend({
     id: 'demo/math',
@@ -64,6 +77,7 @@ const demoMath = registerGraphType(
       // A node made *from a node map*: compile() turns the map into a function, graphNode() wraps it.
       registry.define({ ...graphNode({ type: 'fn/hypot', title: 'Hypotenuse', category: 'Custom', color: '#be4bdb', graph: hypotGraph, registry }), description: 'A node built from another node map' });
       defineDemoNodes(registry);
+      registry.use(library.toPack());
     },
     examples: [
       ...mathGraph.examples!,
@@ -117,7 +131,20 @@ const demoMath = registerGraphType(
 );
 registerGraphType(paletteGraph);
 
-const graphTypes: GraphType[] = [demoMath, networkGraph, paletteGraph];
+// The function builder can use the playground's custom nodes and everything already in the library.
+const demoFunction = registerGraphType(
+  functionGraph.extend({
+    id: 'demo/function',
+    title: 'Function builder',
+    icon: 'λ',
+    examples: functionGraph.examples,
+    setup(registry) {
+      registry.use(library.toPack());
+    },
+  }),
+);
+
+const graphTypes: GraphType[] = [demoMath, demoFunction, networkGraph, paletteGraph];
 type Example = GraphExample;
 
 // ------------------------------------------------------------------ app
@@ -162,6 +189,28 @@ const typeSel = $<HTMLSelectElement>('#gtype');
 
 for (const t of graphTypes) typeSel.append(new Option(`${t.icon ?? ''} ${t.title}`.trim(), t.id));
 
+// Themes: "Page colours" follows this page's palette; the rest are the library's built-in themes.
+const themeSel = $<HTMLSelectElement>('#theme');
+themeSel.append(new Option('Page colours', ''));
+for (const mode of ['light', 'dark'] as const) {
+  const group = document.createElement('optgroup');
+  group.label = mode === 'light' ? 'Light themes' : 'Dark themes';
+  for (const t of listThemes().filter((x) => x.mode === mode)) group.append(new Option(t.name, t.id));
+  themeSel.append(group);
+}
+themeSel.value = safe(() => localStorage.getItem('nodemap-demo:theme'), null) ?? '';
+function applyTheme() {
+  const t = themeSel.value ? getTheme(themeSel.value) : undefined;
+  editor?.setTheme(t ?? null);
+  // Keep the page chrome in the same light/dark mode as the canvas.
+  if (t) document.documentElement.dataset.theme = t.mode;
+  else delete document.documentElement.dataset.theme;
+}
+themeSel.addEventListener('change', () => {
+  safe(() => localStorage.setItem('nodemap-demo:theme', themeSel.value), undefined);
+  applyTheme();
+});
+
 function startSession(type: GraphType) {
   editor?.destroy();
   gtype = type;
@@ -169,6 +218,10 @@ function startSession(type: GraphType) {
   graph = new Graph(registry);
   evaluator = new Evaluator(graph, registry);
   editor = new NodeEditor($('#canvas'), { graph, registry, evaluator, wires: wiresSel.value as 'smart' | 'curved', layout: layoutEngine });
+  applyTheme();
+  const building = type === demoFunction;
+  ($('[data-panel="build"]') as HTMLElement).hidden = !building;
+  if (!building && openPanel === 'build') showPanel(null);
   examples = type.examples ?? [];
   typeSel.value = type.id;
   document.body.dataset.gtype = type.id;
@@ -189,8 +242,10 @@ function startSession(type: GraphType) {
         : `${r.executed.length}/${graph.nodes.size} ran · ${r.durationMs.toFixed(r.durationMs < 10 ? 1 : 0)} ms`;
     }
     renderCall();
+    if (building) renderIssues();
   });
   graph.on('change', () => {
+    if (building) renderBuild();
     clearTimeout(saveTimer);
     const at = current;
     saveTimer = setTimeout(() => at && store.set(gtype.id, at.id, graph.toJSON()), 400);
@@ -321,7 +376,7 @@ function buildTabs() {
 const panel = $('#panel');
 const panelBody = $('#panel-body');
 const panelTitle = $('#panel-title');
-let openPanel: 'call' | 'json' | 'help' | null = null;
+let openPanel: 'call' | 'json' | 'help' | 'build' | null = null;
 
 function showPanel(kind: typeof openPanel) {
   openPanel = openPanel === kind ? null : kind;
@@ -333,6 +388,7 @@ function showPanel(kind: typeof openPanel) {
   if (openPanel === 'call') renderCall(true);
   if (openPanel === 'json') renderJson();
   if (openPanel === 'help') renderHelp();
+  if (openPanel === 'build') renderBuild(true);
 }
 document.querySelectorAll<HTMLButtonElement>('[data-panel]').forEach((b) =>
   b.addEventListener('click', () => showPanel(b.dataset.panel as typeof openPanel)),
@@ -438,6 +494,118 @@ function renderJson() {
   });
 }
 
+// ------------------------------------------------------------------ function builder
+
+let buildName = '';
+
+function issuesNow() {
+  return graph.validate();
+}
+
+/** Builder status line: the first problem, or a ready signature. */
+function renderIssues() {
+  if (gtype !== demoFunction) return;
+  const issues = issuesNow();
+  const err = issues.find((i) => i.level === 'error');
+  const sig = signature(graph);
+  statusEl.setAttribute('data-state', err ? 'error' : 'ok');
+  statusEl.textContent = err ? err.message : `ready · ${sig.inputs.length} input${sig.inputs.length === 1 ? '' : 's'} → 1 output`;
+}
+
+function slug(s: string) {
+  return s.toLowerCase().replace(/[^\w]+/g, '-').replace(/^-|-$/g, '') || 'node';
+}
+
+function renderBuild(rebuild = false) {
+  renderIssues();
+  if (openPanel !== 'build') return;
+  panelTitle.textContent = 'Build a custom node';
+  if (rebuild || !panelBody.querySelector('#b-name')) {
+    panelBody.innerHTML = `
+      <p class="note">Input nodes are the new node's arguments, top to bottom. The one Output is its result.</p>
+      <ul class="checks" id="b-checks" aria-live="polite"></ul>
+      <div class="sig" id="b-sig"></div>
+      <label class="field" for="b-name">Name<input id="b-name" autocomplete="off" spellcheck="false"></label>
+      <div class="row"><button type="button" class="btn primary" id="b-add">Add to library</button><span class="note" id="b-msg" role="status"></span></div>
+      <h3 class="sub-h">As one TypeScript function</h3>
+      <pre class="code" id="b-code"></pre>
+      <div class="row"><button type="button" class="btn" id="b-copy">Copy code</button><span class="note" id="b-copied" role="status"></span></div>
+      <h3 class="sub-h">Library</h3>
+      <ul class="lib" id="b-lib"></ul>`;
+    const nameEl = $<HTMLInputElement>('#b-name');
+    nameEl.value = buildName || current?.name || 'My node';
+    nameEl.addEventListener('input', () => {
+      buildName = nameEl.value;
+      renderBuild();
+    });
+    $('#b-add').addEventListener('click', addToLibrary);
+    $('#b-copy').addEventListener('click', () => {
+      const text = $('#b-code').textContent ?? '';
+      navigator.clipboard?.writeText(text).then(
+        () => ($('#b-copied').textContent = 'Copied'),
+        () => ($('#b-copied').textContent = 'Select the code and copy it'),
+      );
+    });
+  }
+  const name = $<HTMLInputElement>('#b-name').value.trim() || 'My node';
+  const issues = issuesNow();
+  const errors = issues.filter((i) => i.level === 'error');
+  $('#b-checks').innerHTML = (issues.length ? issues : [{ level: 'ok', message: 'Ready to compile' }])
+    .map((i) => `<li data-level="${i.level}">${escapeHtml(i.message)}</li>`)
+    .join('');
+  const sig = signature(graph);
+  const outEdge = [...graph.nodes.values()].filter((n) => n.type === 'graph/output').map((o) => graph.incoming(o.id)[0])[0];
+  const outType = outEdge ? registry.outputsOf(graph.nodes.get(outEdge.from.node)!).find((p) => p.name === outEdge.from.port)?.type ?? 'any' : '?';
+  $('#b-sig').textContent = `${camel(name)}(${sig.inputs.map((p) => `${p.name}: ${p.type}`).join(', ')}) → ${outType}`;
+  ($('#b-add') as HTMLButtonElement).disabled = errors.length > 0;
+  try {
+    $('#b-code').textContent = errors.length ? 'Fix the problems above to see the code.' : emitSource(graph, registry, { name: camel(name), single: true });
+  } catch (err) {
+    $('#b-code').textContent = err instanceof Error ? err.message : String(err);
+  }
+  const lib = $('#b-lib');
+  const entries = library.list();
+  lib.innerHTML = entries.length ? '' : '<li><span class="note">Nothing yet. Added nodes appear here and in the add menu under Library.</span></li>';
+  for (const e of entries) {
+    const li = document.createElement('li');
+    li.innerHTML = `<span>${escapeHtml(e.title)}<small>${escapeHtml(e.type)}</small></span>`;
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'btn';
+    rm.textContent = 'Remove';
+    rm.addEventListener('click', () => {
+      library.remove(e.type);
+      refreshSession();
+      renderBuild(true);
+    });
+    li.append(rm);
+    lib.append(li);
+  }
+}
+
+function addToLibrary() {
+  const name = $<HTMLInputElement>('#b-name').value.trim() || 'My node';
+  try {
+    library.add({ type: `lib/${slug(name)}`, title: name, description: 'Built in the function builder' }, graph, registry);
+    refreshSession();
+    renderBuild(true);
+    $('#b-msg').textContent = `Added “${name}”. Find it under Library in the add menu.`;
+  } catch (err) {
+    $('#b-msg').textContent = err instanceof Error ? err.message : String(err);
+  }
+}
+
+/** Rebuild the registry (to pick up library changes) without losing the map on screen. */
+function refreshSession() {
+  const json = graph.toJSON();
+  const at = current;
+  startSession(gtype);
+  current = at;
+  graph.load(json);
+  markTab(`${gtype.id}|${current.id}`);
+  requestAnimationFrame(() => editor.fit());
+}
+
 function renderHelp() {
   panelTitle.textContent = 'How to use it';
   panelBody.innerHTML = `
@@ -448,6 +616,8 @@ function renderHelp() {
     <li><b>Connect</b> drag from a port to a port, or tap one port and then another (or a node)</li>
     <li><b>Add</b> long-press the background, or press <kbd>+</kbd>. With a node, port or wire selected, <kbd>+</kbd> adds a node wired to it and nudges its neighbours aside</li>
     <li><b>Tidy</b> the layout button (or <kbd>L</kbd>) arranges the map; wires route around nodes</li>
+    <li><b>Themes</b> pick one of three light and three dark themes. Node shapes and colours follow each node's flavor: sources, transforms, sinks, views and control</li>
+    <li><b>Build your own node</b> in the λ Function builder: Inputs become arguments and the one Output is the result. <b>Build</b> adds it to your library and shows it as one TypeScript function</li>
   </ul>
   <p class="note">Everything here is a plug-in. A graph type picks the nodes, port types, rules and engine; a pack is what a library publishes.</p>
   <pre class="code">import { definePack, defineNode, defineGraphType, mathGraph } from 'mobile-nodemap';
@@ -472,8 +642,11 @@ function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
 
-let startTab = safe(() => localStorage.getItem('nodemap-demo:tab'), null) ?? `${demoMath.id}|waves`;
-const known = (id: string) => id in integrations || graphTypes.some((t) => t.examples?.some((e) => id === `${t.id}|${e.id}`));
-if (!known(startTab)) startTab = `${demoMath.id}|waves`;
-if (startTab in integrations) startSession(demoMath);
-showTab(startTab);
+void libraryStore.get('library').then((entries) => {
+  if (entries) library.load(entries);
+  let startTab = safe(() => localStorage.getItem('nodemap-demo:tab'), null) ?? `${demoMath.id}|waves`;
+  const known = (id: string) => id in integrations || graphTypes.some((t) => t.examples?.some((e) => id === `${t.id}|${e.id}`));
+  if (!known(startTab)) startTab = `${demoMath.id}|waves`;
+  if (startTab in integrations) startSession(demoMath);
+  showTab(startTab);
+});

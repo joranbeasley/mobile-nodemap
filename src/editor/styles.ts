@@ -8,7 +8,8 @@ export const css = /* css */ `
   --_border: var(--nm-border, #d9dbd3); --_text: var(--nm-text, #1d211c); --_muted: var(--nm-muted, #6b7166); --_accent: var(--nm-accent, #3b5bdb);
   --_wire: var(--nm-wire, #8d9387); --_danger: var(--nm-danger, #d63c2f); --_ok: var(--nm-ok, #2f9e44); --_shadow: var(--nm-shadow, 0 1px 2px rgb(20 24 18 / .08), 0 4px 14px rgb(20 24 18 / .08));
   --_t-number: var(--nm-t-number, #3b5bdb); --_t-string: var(--nm-t-string, #c2410c); --_t-boolean: var(--nm-t-boolean, #9c36b5); --_t-list: var(--nm-t-list, #0c8599); --_t-any: var(--nm-t-any, #868e96);
-  --_font: var(--nm-font, inherit); --_mono: var(--nm-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace);
+  --_font: var(--nm-font, inherit); --_radius: var(--nm-radius, 10px);
+  --_f-source: var(--nm-f-source, #2b8a3e); --_f-transform: var(--nm-f-transform, #3b5bdb); --_f-sink: var(--nm-f-sink, #c2255c); --_f-view: var(--nm-f-view, #1971c2); --_f-control: var(--nm-f-control, #e67700); --_mono: var(--nm-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace);
   position: relative; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none;
   -webkit-touch-callout: none; background-color: var(--_bg); color: var(--_text); font-family: var(--_font);
   background-image: radial-gradient(circle, var(--_dot) 1px, transparent 1.2px);
@@ -30,12 +31,28 @@ export const css = /* css */ `
 @keyframes nm-flow { to { stroke-dashoffset: -12; } }
 
 .nm-node { position: absolute; left: 0; top: 0; min-width: 176px; max-width: 250px; background: var(--_node);
-  border: 1px solid var(--_border); border-radius: 10px; box-shadow: var(--_shadow); font-size: 13px; line-height: 1.3;
-  --nm-head: var(--nm-node-accent, var(--_muted)); cursor: grab; }
+  border: 1px solid var(--_border); border-radius: var(--_radius); box-shadow: var(--_shadow); font-size: 13px; line-height: 1.3;
+  --nm-head: var(--nm-type-color, var(--nm-flavor, var(--_muted))); cursor: grab; }
 .nm-node.nm-selected { outline: 2.5px solid var(--_accent); outline-offset: 2px; }
 .nm-node.nm-dragging { cursor: grabbing; box-shadow: var(--_shadow), 0 12px 28px rgb(0 0 0 / .18); z-index: 2; }
 .nm-head { display: flex; align-items: center; gap: 8px; padding: 9px 10px 8px; border-bottom: 1px solid var(--_border);
-  border-radius: 10px 10px 0 0; background: linear-gradient(color-mix(in srgb, var(--nm-head) 14%, transparent), transparent); }
+  border-radius: var(--_radius) var(--_radius) 0 0; background: linear-gradient(color-mix(in srgb, var(--nm-head) 14%, transparent), transparent); }
+
+/* Flavors: a colour from the theme and a silhouette from the role. */
+.nm-node[data-flavor="source"] { --nm-flavor: var(--_f-source); border-left: 4px solid var(--nm-head); border-top-left-radius: calc(var(--_radius) * 2.4); border-bottom-left-radius: calc(var(--_radius) * 2.4); }
+.nm-node[data-flavor="transform"] { --nm-flavor: var(--_f-transform); }
+.nm-node[data-flavor="sink"] { --nm-flavor: var(--_f-sink); border-right: 4px solid var(--nm-head); border-top-right-radius: calc(var(--_radius) * 2.4); border-bottom-right-radius: calc(var(--_radius) * 2.4); }
+.nm-node[data-flavor="view"] { --nm-flavor: var(--_f-view); border-color: color-mix(in srgb, var(--nm-head) 45%, var(--_border)); box-shadow: var(--_shadow), 0 0 0 3px color-mix(in srgb, var(--nm-head) 12%, transparent); }
+.nm-node[data-flavor="control"] { --nm-flavor: var(--_f-control); border-style: dashed; border-color: color-mix(in srgb, var(--nm-head) 55%, var(--_border)); }
+.nm-node[data-flavor="source"] .nm-head { border-top-left-radius: calc(var(--_radius) * 2.4); }
+.nm-node[data-flavor="sink"] .nm-head { border-top-right-radius: calc(var(--_radius) * 2.4); }
+.nm-root[data-node-colors="off"] .nm-node { --nm-head: var(--nm-flavor, var(--_muted)); }
+/* Header styles a theme can pick. */
+.nm-root[data-nm-header="solid"] .nm-head { background: var(--nm-head); border-bottom-color: transparent; }
+.nm-root[data-nm-header="solid"] .nm-head .nm-title, .nm-root[data-nm-header="solid"] .nm-head .nm-icon { color: var(--_node); }
+.nm-root[data-nm-header="solid"] .nm-head .nm-cat { color: color-mix(in srgb, var(--_node) 75%, transparent); }
+.nm-root[data-nm-header="solid"] .nm-head .nm-status { background: var(--_node); }
+.nm-root[data-nm-header="line"] .nm-head { background: none; box-shadow: inset 0 3px 0 var(--nm-head); }
 .nm-more { padding: 0 12px; }
 .nm-more summary { cursor: pointer; color: var(--_muted); font-size: 12px; padding: 4px 0; list-style: none; display: flex; align-items: center; gap: 4px; min-height: 28px; }
 .nm-more summary::-webkit-details-marker { display: none; }
@@ -123,7 +140,7 @@ export const css = /* css */ `
 .nm-btn:hover { background: var(--_node-2); }
 .nm-btn:disabled { opacity: .35; cursor: default; background: transparent; }
 .nm-btn svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.nm-btn.nm-primary { background: var(--_accent); color: #fff; }
+.nm-btn.nm-primary { background: var(--_accent); color: var(--_bg); }
 .nm-btn.nm-danger { color: var(--_danger); }
 .nm-sep { width: 1px; background: var(--_border); margin: 6px 2px; }
 

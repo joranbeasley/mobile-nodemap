@@ -6,7 +6,8 @@ const num = (v: unknown, d = 0) => {
   return Number.isFinite(n) ? n : d;
 };
 
-const binary = (type: string, title: string, op: (a: number, b: number) => number, b = 0): NodeType => ({
+const binary = (type: string, title: string, op: (a: number, b: number) => number, b = 0, js?: (a: string, b: string) => string): NodeType => ({
+  emit: js ? ({ a, b }) => ({ out: js(`Number(${a})`, `Number(${b})`) }) : undefined,
   type,
   title,
   category: 'Math',
@@ -95,6 +96,7 @@ export const stdlib: NodeType[] = [
     type: INPUT_NODE,
     title: 'Graph input',
     category: 'Graph',
+    flavor: 'source',
     color: '#0e9f6e',
     description: 'A named argument of this node map. Falls back to its value param.',
     params: [
@@ -112,6 +114,7 @@ export const stdlib: NodeType[] = [
     type: OUTPUT_NODE,
     title: 'Graph output',
     category: 'Graph',
+    flavor: 'sink',
     color: '#0e9f6e',
     description: 'A named result of this node map.',
     params: [{ name: 'name', kind: 'text', default: 'result' }],
@@ -128,6 +131,7 @@ export const stdlib: NodeType[] = [
     params: [{ name: 'value', kind: 'number', default: 1, min: -10, max: 10, step: 0.1 }],
     outputs: [{ name: 'value', type: 'number' }],
     run: (_, { params }) => ({ value: num(params.value) }),
+    emit: (_, p) => ({ value: JSON.stringify(num(p.value)) }),
   },
   {
     type: 'value/text',
@@ -136,6 +140,7 @@ export const stdlib: NodeType[] = [
     params: [{ name: 'value', kind: 'text', default: 'hello' }],
     outputs: [{ name: 'value', type: 'string' }],
     run: (_, { params }) => ({ value: String(params.value ?? '') }),
+    emit: (_, p) => ({ value: JSON.stringify(String(p.value ?? '')) }),
   },
   {
     type: 'value/toggle',
@@ -144,6 +149,7 @@ export const stdlib: NodeType[] = [
     params: [{ name: 'value', kind: 'boolean', default: true }],
     outputs: [{ name: 'value', type: 'boolean' }],
     run: (_, { params }) => ({ value: !!params.value }),
+    emit: (_, p) => ({ value: String(!!p.value) }),
   },
   {
     type: 'value/random',
@@ -159,14 +165,14 @@ export const stdlib: NodeType[] = [
   },
 
   // Math
-  binary('math/add', 'Add', (a, b) => a + b),
-  binary('math/subtract', 'Subtract', (a, b) => a - b),
-  binary('math/multiply', 'Multiply', (a, b) => a * b, 1),
+  binary('math/add', 'Add', (a, b) => a + b, 0, (a, b) => `${a} + ${b}`),
+  binary('math/subtract', 'Subtract', (a, b) => a - b, 0, (a, b) => `${a} - ${b}`),
+  binary('math/multiply', 'Multiply', (a, b) => a * b, 1, (a, b) => `${a} * ${b}`),
   binary('math/divide', 'Divide', (a, b) => {
     if (b === 0) throw new Error('Division by zero');
     return a / b;
-  }, 1),
-  binary('math/power', 'Power', (a, b) => a ** b, 2),
+  }, 1, (a, b) => `((d) => { if (d === 0) throw new Error('Division by zero'); return ${a} / d; })(${b})`),
+  binary('math/power', 'Power', (a, b) => a ** b, 2, (a, b) => `${a} ** ${b}`),
   {
     type: 'math/fn',
     title: 'Function',
@@ -175,6 +181,7 @@ export const stdlib: NodeType[] = [
     inputs: [{ name: 'x', type: 'number', default: 0 }],
     outputs: [{ name: 'out', type: 'number' }],
     run: ({ x }, { params }) => ({ out: (Math as any)[String(params.fn)](num(x)) }),
+    emit: ({ x }, p) => ({ out: `Math.${String(p.fn).replace(/\W/g, '')}(Number(${x}))` }),
   },
   {
     type: 'math/clamp',
@@ -187,6 +194,7 @@ export const stdlib: NodeType[] = [
     ],
     outputs: [{ name: 'out', type: 'number' }],
     run: ({ x, min, max }) => ({ out: Math.min(num(max), Math.max(num(min), num(x))) }),
+    emit: ({ x, min, max }) => ({ out: `Math.min(Number(${max}), Math.max(Number(${min}), Number(${x})))` }),
   },
   {
     type: 'math/expression',
@@ -205,6 +213,10 @@ export const stdlib: NodeType[] = [
     run: (inputs, { params }) => {
       const vars = parseVars(params.vars);
       return { out: compileExpression(vars, String(params.expr))(...vars.map((v) => inputs[v])) };
+    },
+    emit: (inputs, p) => {
+      const vars = parseVars(p.vars);
+      return { out: `((${vars.join(', ')}) => (${String(p.expr || 'undefined')}))(${vars.map((v) => inputs[v]).join(', ')})` };
     },
   },
 
@@ -225,6 +237,10 @@ export const stdlib: NodeType[] = [
       const r = { '>': x > y, '>=': x >= y, '<': x < y, '<=': x <= y, '==': x === y, '!=': x !== y }[String(params.op)];
       return { out: !!r };
     },
+    emit: ({ a, b }, p) => {
+      const op = ({ '>': '>', '>=': '>=', '<': '<', '<=': '<=', '==': '===', '!=': '!==' } as Record<string, string>)[String(p.op)] ?? '>';
+      return { out: `Number(${a}) ${op} Number(${b})` };
+    },
   },
   {
     type: 'logic/if',
@@ -237,6 +253,7 @@ export const stdlib: NodeType[] = [
     ],
     outputs: [{ name: 'out', type: 'any' }],
     run: (i) => ({ out: i.cond ? i.then : i.else }),
+    emit: (i) => ({ out: `(${i.cond}) ? (${i.then}) : (${i.else})` }),
   },
   {
     type: 'logic/not',
@@ -245,6 +262,7 @@ export const stdlib: NodeType[] = [
     inputs: [{ name: 'in', type: 'boolean', default: false }],
     outputs: [{ name: 'out', type: 'boolean' }],
     run: (i) => ({ out: !i.in }),
+    emit: (i) => ({ out: `!(${i.in})` }),
   },
 
   // Text
@@ -308,6 +326,9 @@ export const stdlib: NodeType[] = [
       const b = num(end);
       return { list: Array.from({ length: n }, (_, i) => a + ((b - a) * i) / (n - 1)) };
     },
+    emit: ({ start, end, count }) => ({
+      list: `((a, b, n) => Array.from({ length: n }, (_, i) => a + ((b - a) * i) / (n - 1)))(Number(${start}), Number(${end}), Math.max(2, Math.min(5000, Math.round(Number(${count})))))`,
+    }),
   },
   {
     type: 'list/map',
@@ -325,6 +346,7 @@ export const stdlib: NodeType[] = [
       const f = compileExpression(['x', 'i', 'k'], String(params.expr));
       return { list: (Array.isArray(list) ? list : []).map((x, i) => f(x, i, k)) };
     },
+    emit: ({ list, k }, p) => ({ list: `(Array.isArray(${list}) ? ${list} : []).map((x, i) => ((k) => (${String(p.expr || 'x')}))(${k}))` }),
   },
   {
     type: 'list/reduce',

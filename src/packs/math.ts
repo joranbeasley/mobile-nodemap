@@ -14,6 +14,7 @@ const extras = [
     tags: ['pi', 'e', 'tau', 'phi'],
     params: [{ name: 'name', kind: 'select', default: 'π', options: ['π', 'τ', 'e', 'φ', '√2'] }],
     outputs: { value: 'number' },
+    emit: (_, p) => ({ value: ({ π: 'Math.PI', τ: '(Math.PI * 2)', e: 'Math.E', φ: '((1 + Math.sqrt(5)) / 2)', '√2': 'Math.SQRT2' } as Record<string, string>)[String(p.name)] ?? 'NaN' }),
     run: (_, { params }) => ({
       value: ({ π: Math.PI, τ: Math.PI * 2, e: Math.E, φ: (1 + Math.sqrt(5)) / 2, '√2': Math.SQRT2 } as Record<string, number>)[String(params.name)],
     }),
@@ -33,6 +34,7 @@ const extras = [
     },
     outputs: { out: 'number' },
     run: ({ x, inMin, inMax, outMin, outMax }) => ({ out: outMin + ((x - inMin) / (inMax - inMin || 1)) * (outMax - outMin) }),
+    emit: ({ x, inMin, inMax, outMin, outMax }) => ({ out: `${outMin} + ((${x} - ${inMin}) / ((${inMax} - ${inMin}) || 1)) * (${outMax} - ${outMin})` }),
   }),
   defineNode({
     type: 'math/sum',
@@ -43,6 +45,7 @@ const extras = [
     inputs: { values: { type: 'number', multiple: true } },
     outputs: { out: 'number' },
     run: ({ values }) => ({ out: values.reduce((a, b) => a + num(b), 0) }),
+    emit: ({ values }) => ({ out: `${values}.reduce((a, b) => a + Number(b), 0)` }),
   }),
   defineNode({
     type: 'view/plot-fn',

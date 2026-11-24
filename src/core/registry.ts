@@ -115,6 +115,13 @@ export interface NodePack {
 
 export const definePack = (pack: NodePack): NodePack => pack;
 
+export interface GraphIssue {
+  level: 'error' | 'warning';
+  message: string;
+  /** The node it is about, if any. */
+  node?: string;
+}
+
 export interface ConnectionEnd extends PortRef {
   def: PortDef;
   nodeType: string;
@@ -124,6 +131,10 @@ export interface ConnectionEnd extends PortRef {
 export interface GraphRules {
   /** Allow wires that form loops (dataflow maps can't run them; network maps need them). Default false. */
   allowCycles?: boolean;
+  /** Veto adding a node of this type (e.g. "only one output"). The add menu hides vetoed types. */
+  canAddNode?: (type: string, graph: Graph) => string | null | undefined | void;
+  /** Check a whole map: problems to show people before they run, save or compile it. */
+  validate?: (graph: Graph) => GraphIssue[];
   /** Veto a connection: return a reason to block it, or nothing to allow it. */
   canConnect?: (from: ConnectionEnd, to: ConnectionEnd, graph: Graph) => string | null | undefined | void;
 }

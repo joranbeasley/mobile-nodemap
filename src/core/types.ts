@@ -105,6 +105,11 @@ export interface NodeType {
   description?: string;
   /** Accent color for the node header (any CSS color). */
   color?: string;
+  /**
+   * The node's role, which themes style: 'source' | 'transform' | 'sink' | 'view' | 'control',
+   * or a pack's own. Inferred from the ports when left out.
+   */
+  flavor?: string;
   /** Short text, an emoji or an inline `<svg>` shown in the header and the add menu. */
   icon?: string;
   /** Extra search words for the add menu. */
@@ -117,6 +122,13 @@ export interface NodeType {
   outputs?: PortDef[];
   params?: ParamDef[];
   run?: RunFn;
+  /**
+   * Inline this node when a map is exported as source code (emitSource). Receives a JS
+   * expression for each input and returns a JS expression for each output. Nodes without it
+   * are called through a NodeRunner in the generated code.
+   *   emit: ({ a, b }) => ({ out: `(${a}) + (${b})` })
+   */
+  emit?: (inputs: Record<string, string>, params: Record<string, unknown>) => Record<string, string>;
   /** Set false for impure nodes (random, clock) so results are never reused from cache. */
   pure?: boolean;
   view?: NodeView;

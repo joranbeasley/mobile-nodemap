@@ -90,6 +90,7 @@ const nodes: NodeType[] = [
     category: 'Edge',
     color: '#e8590c',
     icon: icons.firewall,
+    flavor: 'control',
     description: 'Blocks everything behind it when "allow" is off',
     outputs: { protected: 'link' },
     params: [{ name: 'allow', label: 'allow traffic', kind: 'boolean', default: true }],

@@ -58,6 +58,21 @@ body { background: var(--surface); color: var(--ink); font-family: var(--f-ui); 
 #reset { height: 32px; font-size: 13px; padding: 0 10px; }
 .controls { display: flex; align-items: center; gap: 6px; }
 .pick { font: inherit; font-size: 13px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; height: 32px; padding: 0 6px; }
+.checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.checks li { display: flex; gap: 8px; align-items: baseline; line-height: 1.4; }
+.checks li::before { content: "✓"; color: var(--ok); font-weight: 700; flex: none; }
+.checks li[data-level="error"]::before { content: "✕"; color: var(--bad); }
+.checks li[data-level="warning"]::before { content: "!"; color: #e67700; }
+.sig { font-family: var(--f-mono); font-size: 13px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); overflow-wrap: anywhere; }
+.field { display: flex; flex-direction: column; gap: 4px; font-weight: 600; }
+.field input { font: inherit; font-weight: 400; font-size: 16px; color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.lib { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.lib li { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--line); }
+.lib li span { flex: 1; min-width: 0; }
+.lib li small { color: var(--muted); font-family: var(--f-mono); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib li .btn { height: 32px; font-size: 13px; }
+h3.sub-h { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 6px 0 0; }
 .pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 @media (max-width: 700px) { #blurb { flex-basis: 100%; } .controls { width: 100%; } #status { margin-right: auto; } }
 @media (max-width: 400px) { #status { display: none; } .controls .pick { flex: 1; min-width: 0; } }
@@ -95,7 +110,9 @@ code { font-family: var(--f-mono); font-size: .92em; }
 .gauge-value { font-family: var(--f-mono); font-size: 15px; fill: var(--ink); }
 .gauge-tick { font-family: var(--f-mono); font-size: 8px; fill: var(--muted); }
 
-#canvas { flex: 1; min-height: 0; outline: none;
+#canvas { flex: 1; min-height: 0; outline: none; }
+/* Without a library theme the canvas borrows the page's palette. */
+#canvas:not([data-nm-theme]) {
   --nm-bg: var(--paper); --nm-dot: var(--dot); --nm-node: var(--surface); --nm-node-2: var(--surface-2); --nm-border: var(--line);
   --nm-text: var(--ink); --nm-muted: var(--muted); --nm-accent: var(--accent); --nm-font: var(--f-ui); --nm-mono: var(--f-mono); }
 #canvas .nm-toolbar { bottom: 12px; }
@@ -140,6 +157,7 @@ kbd { font-family: var(--f-mono); font-size: 12px; border: 1px solid var(--line)
     </div>
     <nav id="tabs" role="tablist" aria-label="Examples"></nav>
     <div class="actions">
+      <button type="button" class="btn" data-panel="build" aria-pressed="false" hidden><span class="glyph">λ</span><span class="label">Build</span></button>
       <button type="button" class="btn" data-panel="call" aria-pressed="false"><span class="glyph">ƒ(x)</span><span class="label">Call</span></button>
       <button type="button" class="btn" data-panel="json" aria-pressed="false"><span class="glyph">{ }</span><span class="label">JSON</span></button>
       <button type="button" class="btn" data-panel="help" aria-pressed="false" aria-label="How to use it"><span class="glyph">?</span></button>
@@ -150,6 +168,7 @@ kbd { font-family: var(--f-mono); font-size: 12px; border: 1px solid var(--line)
     <div class="controls">
       <span id="status" role="status">ready</span>
       <select id="wires" class="pick" aria-label="Wire style"><option value="smart">Routed wires</option><option value="curved">Curved wires</option></select>
+      <select id="theme" class="pick" aria-label="Theme"></select>
       <select id="engine" class="pick" aria-label="Layout engine"><option value="layered">Built-in layout</option><option value="elk">ELK layout</option></select>
       <button type="button" class="btn" id="reset">Reset</button>
     </div>

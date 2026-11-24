@@ -14,6 +14,7 @@ export type {
   GraphEngine,
   EngineContext,
   ConnectionEnd,
+  GraphIssue,
 } from './registry.js';
 export { defineGraphType, registerGraphType, getGraphType, listGraphTypes, registryFor } from './graph-type.js';
 export type { GraphType, GraphTypeDef, GraphExample, GraphTypeEditorDefaults } from './graph-type.js';

@@ -1,5 +1,6 @@
 import { inflate, inside, simplify } from './geometry.js';
 import type { Point, Rect } from './types.js';
+import type { RouterPort } from '../ports/index.js';
 
 export interface RouterOptions {
   /** Clearance kept around every node. */
@@ -24,7 +25,7 @@ const DY = [0, 1, 0, -1];
  * extra, and segments already taken by wires from a different output cost extra, so
  * parallel wires spread into separate channels instead of drawing on top of each other.
  */
-export class Router {
+export class Router implements RouterPort {
   readonly margin: number;
   readonly stub: number;
   private bendCost: number;

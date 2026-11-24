@@ -4,7 +4,11 @@ A small, dependency-free TypeScript library for building **node maps** (node gra
 
 - **`mobile-nodemap/core`**: the data model and the extension API. `Graph`, `History`, plus `defineGraphType`, `definePack`, `defineNode`, `extendNode` and `Registry`. No DOM.
 - **`mobile-nodemap/runtime`**: the evaluator. Memoised, async, cancellable execution; `compile()` turns a map into a plain async function; `graphNode()` turns a map into a reusable node. No DOM.
-- **Built-in graph types and packs**: `mathGraph` / `mathPack` (about 35 nodes) and `networkGraph` / `networkPack` (devices plus a reachability engine).
+- **Built-in graph types and packs**: `mathGraph` / `mathPack` (about 35 nodes), `networkGraph` / `networkPack` (devices plus a reachability engine) and `functionGraph` (build your own nodes).
+- **Themes**: six built-in themes (three light, three dark) and node flavors. See [Themes and flavors](#themes-and-flavors).
+- **Ports and adapters**: standard interfaces (`GraphPort`, `NodeDefinition`, `EnginePort`, `StoragePort`, `RenderPort`, `NodeRunner`, …) with swappable adapters. See [Architecture](#architecture).
+
+Design records are in [docs/adr](docs/adr) and product requirements in [docs/prd](docs/prd).
 - **`mobile-nodemap/editor`**: `NodeEditor`, a touch-first DOM/SVG editor with pinch zoom, drag or tap-to-connect wiring, a long-press add menu, live results and undo.
 - **`mobile-nodemap/layout`**: auto-layout, wire routing and placement. A layered layout that wraps to fit portrait screens, an orthogonal router that steers wires around nodes, free-space placement, and an optional [ELK](https://eclipse.dev/elk/) adapter. No DOM.
 - **`mobile-nodemap/react`**: `<NodeMap>`, hooks (`useGraph`, `useEvaluator`, `useEvaluation`, `useGraphValue`) and `reactView()` for React-rendered node previews.
@@ -176,19 +180,45 @@ Nodes start as soon as their inputs are ready, so independent async branches run
 
 ## Maps as functions
 
-Add `graph/input` and `graph/output` nodes, then:
+A map with `graph/input` and `graph/output` nodes compiles to **one plain async function**. It composes the nodes' `run` functions directly, with no evaluator or editor involved:
 
 ```ts
-import { compile, graphNode } from 'mobile-nodemap/runtime';
+import { compile, compileFunction, signature, emitSource, registryRunner } from 'mobile-nodemap';
 
-const area = compile(graph, registry);          // (inputs) => Promise<outputs>
-await area({ radius: 2 });                      // { area: 12.566… }
-area.inputs; area.outputs;                      // the signature
+const cylinder = compile(graph, registry, 'cylinder');   // (inputs?, { signal? }) => Promise<outputs>
+await cylinder({ radius: 2, height: 5 });                 // { volume: 62.83… }
+signature(graph);                                         // { inputs: [...], outputs: [...] }
 
-registry.define(graphNode({ type: 'fn/area', title: 'Circle area', graph, registry }));
+const volume = compileFunction(graph, registry);          // single-output maps: returns the value itself
+await volume({ radius: 2, height: 5 });                   // 62.83…
+
+// The same map as the source of one standalone TypeScript (or JS) function:
+emitSource(graph, registry, { name: 'cylinderVolume', single: true });
 ```
 
-`graphNode()` lets people build their own nodes out of nodes.
+`emitSource` inlines every node that has an `emit` hook (most math nodes do). Other nodes are called through a `runner` argument (the `NodeRunner` port, e.g. `registryRunner(registry)`), so generated code depends on nothing but that interface. Errors throw `NodeRunError` with the failing node's id.
+
+## Function builder and library
+
+`functionGraph` is a canvas for building custom nodes:
+
+- **Input** leaves are the node's arguments, top to bottom.
+- Exactly **one Output** is its result. A second one is hidden from the add menu and refused by the API.
+- `graph.validate()` lists what's wrong, live: no output, an unconnected output, bad or duplicate input names, nodes that don't affect the output.
+
+```ts
+import { functionGraph, compileNode, NodeLibrary, localStorageStore, mathGraph } from 'mobile-nodemap';
+
+const node = compileNode(graph, functionGraph.createRegistry(), { type: 'lib/cylinder', title: 'Cylinder volume' });
+
+const library = new NodeLibrary();
+library.add({ type: 'lib/cylinder', title: 'Cylinder volume' }, graph, registry);   // compiles first; refuses broken maps
+const math = mathGraph.extend({ id: 'my-math', title: 'Math', packs: [library.toPack()] });
+
+const store = localStorageStore('app:');                  // any StoragePort adapter
+library.on('change', (entries) => store.put('library', entries));
+library.source('lib/cylinder', registry);                  // one TypeScript function
+```
 
 ## Layout, routing and placement
 
@@ -278,9 +308,48 @@ It renders in a shadow root. `--nm-*` CSS variables set on the element or any an
 
 Ports have a 44px touch target, form fields use 16px text (no iOS focus zoom), and the add menu is a bottom sheet on phones.
 
-## Theming
+## Themes and flavors
 
-Every colour is a CSS variable you can set on `.nm-root`, any ancestor, or `<node-map>`: `--nm-bg`, `--nm-dot`, `--nm-node`, `--nm-node-2`, `--nm-border`, `--nm-text`, `--nm-muted`, `--nm-accent`, `--nm-wire`, `--nm-danger`, `--nm-font`, `--nm-mono` and port colours `--nm-t-number`, `--nm-t-string`, `--nm-t-boolean`, `--nm-t-list`, `--nm-t-any`. Dark mode follows `prefers-color-scheme`, or set `data-theme="dark" | "light"` on the container.
+```ts
+new NodeEditor(el, { graph, registry, theme: 'midnight' });
+editor.setTheme({ light: 'paper', dark: 'graphite' });   // follows the system setting
+editor.setTheme(null);                                    // back to the page's own colours
+```
+
+Built in: **Daylight**, **Paper**, **Mint** (light) and **Midnight**, **Graphite**, **Synthwave** (dark). A theme is plain data:
+
+```ts
+import { defineTheme, registerTheme, daylight } from 'mobile-nodemap';
+
+registerTheme(defineTheme({
+  ...daylight, id: 'acme', name: 'Acme',
+  header: 'solid',                 // 'tint' | 'solid' | 'line'
+  radius: 6,
+  colors: { ...daylight.colors, accent: '#e8590c' },
+  flavors: { ...daylight.flavors, source: '#2f9e44' },
+  nodeColors: false,               // colour nodes by flavor, not by node type
+}));
+```
+
+Every node has a **flavor** that themes colour and the editor shapes: `source` (a rounded leading edge), `transform`, `sink` (a rounded trailing edge), `view` (a halo) and `control` (dashed). It is inferred from the ports, or set with `flavor` on the node type. Packs may add their own flavor names and colour them in a theme.
+
+Without a theme, every colour is a CSS variable you can set on `.nm-root`, any ancestor, or `<node-map>`: `--nm-bg`, `--nm-dot`, `--nm-node`, `--nm-node-2`, `--nm-border`, `--nm-text`, `--nm-muted`, `--nm-accent`, `--nm-wire`, `--nm-danger`, `--nm-font`, `--nm-mono`, `--nm-radius`, flavor colours `--nm-f-source` and so on, and port colours `--nm-t-number`, `--nm-t-string`, `--nm-t-boolean`, `--nm-t-list` and `--nm-t-any`. Dark mode follows `prefers-color-scheme`, or set `data-theme="dark" | "light"` on the container.
+
+## Architecture
+
+Ports and adapters ([ADR 0002](docs/adr/0002-ports-and-adapters.md)). The core (graph model, registry, compiler) has no DOM and no dependencies, and talks to the world through standard interfaces in `src/ports`:
+
+| Port | Role | Adapters shipped |
+| --- | --- | --- |
+| `GraphPort` | the standard graph interface | `Graph` |
+| `NodeDefinition` | the standard node interface | every node type |
+| `CompilerPort` | map → function or source | `defaultCompiler` (`compile`, `emitSource`) |
+| `RenderPort` | a UI that edits a session | `domEditor` (`NodeEditor`), `<NodeMap>`, `<node-map>` |
+| `EnginePort` | how a map runs | `dataflowEngine`, `networkEngine`, the memoised `Evaluator` |
+| `StoragePort` | where maps and libraries live | `memoryStore()`, `localStorageStore()` |
+| `LayoutEnginePort` | arranging nodes | `layered()`, `elkLayout()` |
+| `RouterPort` | wire paths around nodes | `Router` |
+| `NodeRunner` | how generated code calls nodes | `registryRunner()` |
 
 ## Security note
 

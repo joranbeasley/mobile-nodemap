@@ -1,4 +1,6 @@
 import { Emitter } from './emitter.js';
+import type { GraphPort } from '../ports/index.js';
+import type { GraphIssue } from './registry.js';
 import type { Registry } from './registry.js';
 import type { Edge, GraphJSON, NodeInstance, PortRef } from './types.js';
 
@@ -25,7 +27,7 @@ const uid = (prefix: string) => `${prefix}${Date.now().toString(36)}${(counter++
  * Inputs accept one edge (connecting again replaces it); outputs fan out freely.
  * Pass a Registry to get port validation and type checks on `connect()`.
  */
-export class Graph extends Emitter<GraphEvents> {
+export class Graph extends Emitter<GraphEvents> implements GraphPort {
   readonly nodes = new Map<string, NodeInstance>();
   readonly edges = new Map<string, Edge>();
   meta: Record<string, unknown> = {};
@@ -37,6 +39,8 @@ export class Graph extends Emitter<GraphEvents> {
   addNode(type: string, init: Partial<Omit<NodeInstance, 'type'>> = {}): NodeInstance {
     const def = this.registry?.get(type);
     if (this.registry && !def) throw new Error(`Unknown node type "${type}"`);
+    const veto = this.registry?.rules.canAddNode?.(type, this);
+    if (veto) throw new ConnectionError(veto);
     const params: Record<string, unknown> = {};
     def?.params?.forEach((p) => {
       if (p.default !== undefined) params[p.name] = p.default;
@@ -82,6 +86,11 @@ export class Graph extends Emitter<GraphEvents> {
     node.params[name] = value;
     this.emit('change', { kind: 'node:params', node, name });
     this.pruneDanglingEdges(id);
+  }
+
+  /** Problems with the whole map, from the graph type's `validate` rule. */
+  validate(): GraphIssue[] {
+    return this.registry?.rules.validate?.(this) ?? [];
   }
 
   /** Returns a reason the connection is invalid, or null if it can be made. */

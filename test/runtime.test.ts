@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Graph, Registry } from '../src/core';
-import { Evaluator, compile, graphNode, stdlib } from '../src/runtime';
+import { Evaluator, compile, graphNode, signature, stdlib } from '../src/runtime';
 
 const registry = () => new Registry(stdlib);
 
@@ -92,7 +92,8 @@ describe('compile / graphNode', () => {
   it('turns a graph into an async function', async () => {
     const reg = registry();
     const f = compile(sumGraph(reg), reg);
-    expect(f.inputs.map((i) => i.name)).toEqual(['x', 'y']);
+    expect(typeof f).toBe('function');
+    expect(signature(sumGraph(reg)).inputs.map((i) => i.name)).toEqual(['x', 'y']);
     expect(await f({ x: 5, y: 6 })).toEqual({ sum: 11 });
     expect(await f()).toEqual({ sum: 3 });
   });

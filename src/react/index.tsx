@@ -15,7 +15,7 @@ import type { Registry } from '../core/registry.js';
 import type { GraphType } from '../core/graph-type.js';
 import type { GraphJSON, NodeInstance, NodeResult, NodeView } from '../core/types.js';
 import { Evaluator, type EvalReport } from '../runtime/evaluator.js';
-import { NodeEditor } from '../editor/editor.js';
+import { NodeEditor, type EditorOptions } from '../editor/editor.js';
 import type { LayoutEngine } from '../layout/types.js';
 
 const EMPTY: GraphJSON = { version: 1, nodes: [], edges: [] };
@@ -33,7 +33,8 @@ export interface NodeMapProps {
   layout?: LayoutEngine;
   toolbar?: boolean;
   placement?: boolean;
-  theme?: 'light' | 'dark';
+  /** 'light' | 'dark' for the default palette, or a theme (id, object, or { light, dark } pair). */
+  theme?: EditorOptions['theme'];
   /** Tidy the map once on mount. */
   autoLayout?: boolean;
   onChange?: (value: GraphJSON, change: GraphChange) => void;
@@ -93,6 +94,11 @@ export const NodeMap = forwardRef<NodeEditor | null, NodeMapProps>(function Node
   useEffect(() => {
     if (editor && props.layout) editor.setLayout(props.layout);
   }, [editor, props.layout]);
+  const themeKey = typeof props.theme === 'object' ? JSON.stringify(props.theme) : props.theme;
+  useEffect(() => {
+    if (!editor) return;
+    editor.setTheme(props.theme === 'light' || props.theme === 'dark' ? null : props.theme ?? null);
+  }, [editor, themeKey]);
 
   useImperativeHandle(ref, () => editor!, [editor]);
 
@@ -100,7 +106,7 @@ export const NodeMap = forwardRef<NodeEditor | null, NodeMapProps>(function Node
     <div
       ref={el}
       className={props.className}
-      data-theme={props.theme}
+      data-theme={props.theme === 'light' || props.theme === 'dark' ? props.theme : undefined}
       style={{ position: 'relative', width: '100%', height: '100%', ...props.style }}
     />
   );

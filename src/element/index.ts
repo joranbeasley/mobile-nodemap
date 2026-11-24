@@ -24,7 +24,7 @@ const hostCss = `
  *     <script type="application/json">{ "version": 1, "nodes": [...], "edges": [...] }</script>
  *   </node-map>
  *
- * Attributes: `graph-type` (a registered graph type id), `wires` (smart | curved), `theme` (light | dark), `no-toolbar`, `no-eval`, `auto-layout`.
+ * Attributes: `graph-type` (a registered graph type id), `wires` (smart | curved), `theme` (light | dark, or a theme id such as midnight, paper, synthwave), `no-toolbar`, `no-eval`, `auto-layout`.
  * Properties: `graphType`, `registry` (defaults to the graph type's), `value` (graph JSON), `graph`, `editor`, `evaluator`, `layout`.
  * Methods: `autoLayout()`, `fit()`, `run(inputs)`, `call(inputs)`.
  * Events: `change` ({ value, change }), `select` ({ node, edge }), `evaluate` (EvalReport).
@@ -134,10 +134,7 @@ export class NodeMapElement extends Base {
       this.mount();
     }
     if (name === 'wires' && this._editor) this._editor.setWires(value === 'curved' ? 'curved' : 'smart');
-    if (name === 'theme' && this._canvas) {
-      if (value) this._canvas.dataset.theme = value;
-      else delete this._canvas.dataset.theme;
-    }
+    if (name === 'theme' && this._canvas) this.applyTheme(value);
   }
 
   async autoLayout(opts?: Parameters<NodeEditor['autoLayout']>[0]): Promise<void> {
@@ -177,7 +174,7 @@ export class NodeMapElement extends Base {
     const graph = (this._graph = new Graph(registry));
     if (json) graph.load(json);
     this._evaluator = this.hasAttribute('no-eval') ? undefined : new Evaluator(graph, registry);
-    if (this.getAttribute('theme')) this._canvas.dataset.theme = this.getAttribute('theme')!;
+
     const editor = (this._editor = new NodeEditor(this._canvas, {
       graph,
       registry,
@@ -186,11 +183,22 @@ export class NodeMapElement extends Base {
       wires: this.getAttribute('wires') === 'curved' ? 'curved' : 'smart',
       layout: this._layout,
     }));
+    this.applyTheme(this.getAttribute('theme'));
     const fire = (type: string, detail: unknown) => this.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true }));
     this._offs.push(graph.on('change', (change) => fire('change', { change, value: graph.toJSON() })));
     this._offs.push(editor.on('select', (sel) => fire('select', sel)));
     if (this._evaluator) this._offs.push(this._evaluator.on('done', (report) => fire('evaluate', report)));
     if (this.hasAttribute('auto-layout') || (!this._registry?.id ? false : getGraphType(this._registry.id)?.editor?.autoLayout)) requestAnimationFrame(() => void editor.autoLayout({ animate: false }));
+  }
+
+  /** 'light' / 'dark' follow the default palette; any other value is a registered theme id. */
+  private applyTheme(value: string | null): void {
+    if (!this._canvas) return;
+    if (!value || value === 'light' || value === 'dark') {
+      this._editor?.setTheme(null);
+      if (value) this._canvas.dataset.theme = value;
+      else delete this._canvas.dataset.theme;
+    } else this._editor?.setTheme(value);
   }
 
   private unmount(): void {
