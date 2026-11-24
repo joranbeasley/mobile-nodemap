@@ -185,3 +185,54 @@ describe('Making room for new nodes', () => {
     editor.destroy();
   });
 });
+
+describe('Overview zoom', () => {
+  const setup = () => {
+    const reg = new Registry(stdlib);
+    const g = new Graph(reg);
+    g.addNode('value/number', { id: 'n', x: 400, y: 300, params: { value: 1 } });
+    const el = document.createElement('div');
+    document.body.append(el);
+    const editor = new NodeEditor(el, { graph: g, registry: reg });
+    return { g, el, editor };
+  };
+  const tap = (target: Element) => {
+    const o = { bubbles: true, pointerId: 7, pointerType: 'touch', clientX: 10, clientY: 10, button: 0 };
+    target.dispatchEvent(new PointerEvent('pointerdown', o));
+    target.dispatchEvent(new PointerEvent('pointerup', o));
+  };
+
+  it('marks the overview and turns a tap on a node’s field into “zoom in on the node”', async () => {
+    const { g, el, editor } = setup();
+    editor.setViewport({ k: 0.3, x: 0, y: 0 });
+    expect(editor.isOverview).toBe(true);
+    expect(el.classList.contains('nm-overview')).toBe(true);
+    // Tap straight on the node's number field.
+    tap(el.querySelector('[data-id="n"] input[type="number"]')!);
+    expect(editor.selection.node).toBe('n');
+    await new Promise((r) => setTimeout(r, 450));
+    expect(editor.viewport.k).toBeGreaterThanOrEqual(0.6);
+    expect(editor.isOverview).toBe(false);
+    expect(el.classList.contains('nm-overview')).toBe(false);
+    expect(g.nodes.get('n')!.params.value).toBe(1);   // nothing was edited
+    expect(document.querySelector('.nm-edit')).toBeNull(); // and no edit sheet
+    editor.destroy();
+  });
+
+  it('at a readable zoom, taps on fields are left to the field', () => {
+    const { el, editor } = setup();
+    editor.setViewport({ k: 1 });
+    expect(editor.isOverview).toBe(false);
+    tap(el.querySelector('[data-id="n"] input[type="number"]')!);
+    expect(editor.selection.node).toBeUndefined();
+    expect(editor.viewport.k).toBe(1);
+    editor.destroy();
+  });
+
+  it('zoomToNode centres a node at a comfortable zoom', () => {
+    const { editor } = setup();
+    editor.setViewport({ k: 0.25 });
+    editor.zoomToNode('n', { animate: false });
+    expect(editor.viewport.k).toBe(1);
+  });
+});

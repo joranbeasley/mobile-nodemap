@@ -36,6 +36,11 @@ export interface EditorOptions {
   maxZoom?: number;
   /** Long-press duration that opens the add-node sheet, in ms. Default 450. */
   longPressMs?: number;
+  /**
+   * Below this zoom the map is an overview: tapping a node zooms in on it instead of
+   * touching its fields or ports. Default 0.6 (the readable zoom phones open at). 0 turns it off.
+   */
+  overviewZoom?: number;
   /** 'smart' (default) routes orthogonal wires around nodes; 'curved' draws classic S-curves. */
   wires?: 'smart' | 'curved';
   /**
@@ -142,7 +147,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
   private toastTimer?: ReturnType<typeof setTimeout>;
   /** Ignore sheet taps until this time: the finger that opened the sheet would otherwise "click" an item as it lifts. */
   private sheetGuard = 0;
-  private opts: Required<Pick<EditorOptions, 'minZoom' | 'maxZoom' | 'longPressMs' | 'placement'>>;
+  private opts: Required<Pick<EditorOptions, 'minZoom' | 'maxZoom' | 'longPressMs' | 'placement' | 'overviewZoom'>>;
+  private zoomAnim = 0;
   private wireStyle: 'smart' | 'curved';
   private layoutEngine: LayoutEngine;
   private routingPaused = false;
@@ -160,6 +166,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       minZoom: options.minZoom ?? 0.2,
       maxZoom: options.maxZoom ?? 2.5,
       longPressMs: options.longPressMs ?? 450,
+      overviewZoom: options.overviewZoom ?? 0.6,
       placement: options.placement ?? true,
     };
     this.wireStyle = options.wires ?? 'smart';
@@ -228,7 +235,49 @@ export class NodeEditor extends Emitter<EditorEvents> {
     const s = 22 * this.vp.k;
     this.root.style.backgroundSize = `${s}px ${s}px`;
     this.root.style.backgroundPosition = `${this.vp.x}px ${this.vp.y}px`;
+    this.root.classList.toggle('nm-overview', this.isOverview);
     this.emit('viewport', this.viewport);
+  }
+
+  /** True when zoomed out below `overviewZoom`: taps on nodes zoom in instead of editing. */
+  get isOverview(): boolean {
+    return this.vp.k < this.opts.overviewZoom - 1e-6;
+  }
+
+  /**
+   * Zoom in on a node: centre it at a comfortable zoom (fitting it on screen), animated.
+   * Tapping a node in the overview does this.
+   */
+  zoomToNode(id: string, opts: { animate?: boolean; zoom?: number } = {}): void {
+    const n = this.graph.nodes.get(id);
+    const rec = this.records.get(id);
+    if (!n || !rec) return;
+    const r = this.root.getBoundingClientRect();
+    const bottomUi = this.toolbar ? 70 : 0;
+    // An unmeasured container (not laid out yet) doesn't limit the zoom.
+    const availW = r.width ? Math.max(1, r.width - 32) : Infinity;
+    const availH = r.height ? Math.max(1, r.height - 32 - bottomUi) : Infinity;
+    const wanted = opts.zoom ?? Math.max(1, this.opts.overviewZoom);
+    const k = Math.min(this.opts.maxZoom, wanted, availW / rec.w, availH / rec.h);
+    const target = {
+      k,
+      x: r.width / 2 - (n.x + rec.w / 2) * k,
+      y: (r.height - bottomUi) / 2 - (n.y + rec.h / 2) * k,
+    };
+    const reduce = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    cancelAnimationFrame(this.zoomAnim);
+    if (opts.animate === false || reduce || typeof requestAnimationFrame === 'undefined') return this.setViewport(target);
+    const from = { ...this.vp };
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const t = Math.min(1, (now - t0) / 280);
+      const e = 1 - Math.pow(1 - t, 3);
+      // Interpolate scale geometrically so the zoom feels even.
+      const kk = from.k * Math.pow(target.k / from.k, e);
+      this.setViewport({ k: kk, x: from.x + (target.x - from.x) * e, y: from.y + (target.y - from.y) * e });
+      if (t < 1) this.zoomAnim = requestAnimationFrame(step);
+    };
+    this.zoomAnim = requestAnimationFrame(step);
   }
 
   zoomAt(factor: number, cx?: number, cy?: number): void {
@@ -943,6 +992,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
   }
 
   destroy(): void {
+    cancelAnimationFrame(this.zoomAnim);
     this.closePalette();
     this.themeOff?.();
     cancelAnimationFrame(this.routeFrame);
@@ -1539,8 +1589,12 @@ export class NodeEditor extends Emitter<EditorEvents> {
   }
 
   private onDown(e: PointerEvent): void {
-    const t = e.target as Element;
-    if (t.closest('input, select, textarea, button, .nm-sheet, .nm-toolbar, .nm-hud')) return;
+    let t = e.target as Element;
+    // In the overview a node is one big target: its fields and ports don't respond.
+    if (this.isOverview && t.closest('.nm-node') && !t.closest('.nm-sheet, .nm-toolbar, .nm-hud, .nm-card')) {
+      if (t.closest('input, select, textarea, button, summary')) e.preventDefault();
+      t = t.closest('.nm-node')!;
+    } else if (t.closest('input, select, textarea, button, .nm-sheet, .nm-toolbar, .nm-hud')) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     try {
@@ -1673,6 +1727,12 @@ export class NodeEditor extends Emitter<EditorEvents> {
             const p = this.pending;
             this.cancelPending();
             this.autoConnect(p, g.id);
+          } else if (this.isOverview) {
+            // Zoomed out: a tap is "take me there", never an edit.
+            this.lastTap = undefined;
+            this.hideDetails();
+            this.select({ node: g.id });
+            this.zoomToNode(g.id);
           } else {
             // A second tap on the same node opens its Edit sheet; a first tap selects it.
             const now = performance.now();

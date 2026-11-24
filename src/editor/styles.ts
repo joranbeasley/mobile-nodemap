@@ -33,6 +33,8 @@ export const css = /* css */ `
 .nm-node { position: absolute; left: 0; top: 0; min-width: 176px; max-width: 250px; background: var(--_node);
   border: 1px solid var(--_border); border-radius: var(--_radius); box-shadow: var(--_shadow); font-size: 13px; line-height: 1.3;
   --nm-head: var(--nm-type-color, var(--nm-flavor, var(--_muted))); cursor: grab; }
+.nm-overview .nm-node { cursor: zoom-in; }
+.nm-overview .nm-node * { pointer-events: none; }
 .nm-node.nm-selected { outline: 2.5px solid var(--_accent); outline-offset: 2px; }
 .nm-node.nm-dragging { cursor: grabbing; box-shadow: var(--_shadow), 0 12px 28px rgb(0 0 0 / .18); z-index: 2; }
 .nm-head { display: flex; align-items: center; gap: 8px; padding: 9px 10px 8px; border-bottom: 1px solid var(--_border);
