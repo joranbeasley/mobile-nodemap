@@ -126,6 +126,17 @@ export const css = /* css */ `
 .nm-sheet-head { padding: 6px 14px 10px; display: flex; flex-direction: column; gap: 6px; }
 .nm-sheet-head strong { font-size: 15px; }
 .nm-sheet-head small { color: var(--_muted); }
+.nm-seg { display: flex; gap: 3px; padding: 3px; border-radius: 11px; background: var(--_node-2); border: 1px solid var(--_border); }
+.nm-seg button { flex: 1 1 0; min-width: 0; min-height: 38px; border: 0; border-radius: 8px; background: transparent; color: var(--_muted);
+  font: inherit; font-size: 14px; font-weight: 500; padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.nm-seg button[aria-checked="true"] { background: var(--_node); color: var(--_text); box-shadow: 0 1px 2px rgb(0 0 0 / .12); }
+.nm-seg button:disabled { opacity: .35; cursor: default; }
+.nm-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.nm-chips > span { color: var(--_muted); font-size: 12px; margin-right: 2px; }
+.nm-chips button { min-height: 32px; padding: 0 12px; border-radius: 999px; border: 1.5px solid var(--nm-port-color, var(--_t-any)); background: transparent;
+  color: var(--_text); font: inherit; font-size: 13px; cursor: pointer; }
+.nm-chips button[aria-checked="true"] { background: var(--nm-port-color, var(--_t-any)); color: var(--_node); }
+.nm-seg button:focus-visible, .nm-chips button:focus-visible { outline: 2px solid var(--_accent); outline-offset: 1px; }
 .nm-sheet-list { overflow-y: auto; padding: 0 8px 12px; touch-action: pan-y; overscroll-behavior: contain; }
 .nm-sheet-cat { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--_muted); padding: 12px 8px 4px; }
 .nm-sheet-item { display: flex; width: 100%; align-items: center; gap: 10px; text-align: left; border: 0; background: transparent; color: var(--_text);

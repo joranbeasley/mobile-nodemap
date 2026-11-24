@@ -382,22 +382,130 @@ export class NodeEditor extends Emitter<EditorEvents> {
     if (dx || dy) this.setViewport({ x: this.vp.x + dx, y: this.vp.y + dy });
   }
 
-  /** Open the add-node sheet. With `connectFrom`, the new node is wired to that port. */
-  openPalette(at?: { x: number; y: number }, connectFrom?: Anchor): void {
+  /**
+   * The "+" action. With a node selected, the sheet opens ready to add a node wired to it
+   * (upstream or downstream, whichever that node needs next); otherwise it adds a free node.
+   */
+  openAddSheet(): void {
+    if (this.selected.node && this.graph.nodes.has(this.selected.node)) this.openPalette(undefined, undefined, { around: this.selected.node });
+    else this.openPalette();
+  }
+
+  /** Which side of `nodeId` a new node most likely belongs on, and which port to use. */
+  suggestConnection(nodeId: string): Anchor | null {
+    const node = this.graph.nodes.get(nodeId);
+    if (!node) return null;
+    const outs = this.registry.outputsOf(node);
+    const ins = this.registry.inputsOf(node);
+    const linkedIn = new Set(this.graph.incoming(nodeId).map((e) => e.to.port));
+    const linkedOut = new Set(this.graph.outgoing(nodeId).map((e) => e.from.port));
+    const freeIn = ins.find((p) => !linkedIn.has(p.name));
+    const freeOut = outs.find((p) => !linkedOut.has(p.name));
+    // Downstream when its result is not used yet; upstream when it still has an open input.
+    if (outs.length && (freeOut || !freeIn || !ins.length)) return { node: nodeId, port: (freeOut ?? outs[0]).name, dir: 'out' };
+    if (ins.length) return { node: nodeId, port: (freeIn ?? ins[0]).name, dir: 'in' };
+    return null;
+  }
+
+  /**
+   * Open the add-node sheet. With `connectFrom`, the new node is wired to that port.
+   * With `around`, the sheet lets the person choose to add before or after that node (or unconnected).
+   */
+  openPalette(at?: { x: number; y: number }, connectFrom?: Anchor, opts: { around?: string } = {}): void {
     this.closePalette();
     this.sheetGuard = this.pointers.size ? Infinity : performance.now() + 350;
     const backdrop = h('div', { class: 'nm-sheet-backdrop' });
     const search = h('input', { type: 'search', placeholder: 'Search nodes', 'aria-label': 'Search nodes', id: 'nm-search' });
     const list = h('div', { class: 'nm-sheet-list', role: 'listbox' });
-    const title = connectFrom ? 'Add a connected node' : 'Add a node';
-    const sheet = h(
-      'div',
-      { class: 'nm-sheet', role: 'dialog', 'aria-label': title },
-      h('div', { class: 'nm-sheet-grip' }),
-      h('div', { class: 'nm-sheet-head' }, h('strong', {}, title), search),
-      list,
-    );
+    const titleEl = h('strong', {}, '');
+    const hint = h('small', {}, '');
+    const head = h('div', { class: 'nm-sheet-head' }, titleEl);
+    const sheet = h('div', { class: 'nm-sheet', role: 'dialog' }, h('div', { class: 'nm-sheet-grip' }), head, list);
+
+    const around = opts.around ? this.graph.nodes.get(opts.around) : undefined;
+    const aroundName = around ? around.label ?? this.registry.get(around.type)?.title ?? around.type : '';
+    let anchor: Anchor | undefined = connectFrom ?? (around ? this.suggestConnection(around.id) ?? undefined : undefined);
+    const lastPort: Record<Dir, string | undefined> = { in: undefined, out: undefined };
+    if (anchor) lastPort[anchor.dir] = anchor.port;
+
+    const describe = () => {
+      if (!anchor) {
+        titleEl.textContent = 'Add a node';
+        hint.textContent = around ? `Not connected to ${aroundName}` : '';
+        return;
+      }
+      const n = this.graph.nodes.get(anchor.node);
+      const name = n ? n.label ?? this.registry.get(n.type)?.title ?? n.type : '';
+      titleEl.textContent = anchor.dir === 'out' ? `Add after ${name}` : `Add before ${name}`;
+      hint.textContent = anchor.dir === 'out' ? `Takes its “${anchor.port}” output` : `Feeds its “${anchor.port}” input`;
+    };
+
+    // Re-renders the header and the list; set below once both exist.
+    let update = () => {};
+    if (around) {
+      // Before / after / unconnected, then a port picker when there is more than one choice.
+      const outs = this.registry.outputsOf(around);
+      const ins = this.registry.inputsOf(around);
+      const seg = h('div', { class: 'nm-seg', role: 'radiogroup', 'aria-label': 'Where the new node goes' });
+      const chips = h('div', { class: 'nm-chips', role: 'radiogroup', 'aria-label': 'Port' });
+      const modes: { dir: Dir | null; label: string; enabled: boolean }[] = [
+        { dir: 'in', label: `→ ${aroundName}`, enabled: ins.length > 0 },
+        { dir: 'out', label: `${aroundName} →`, enabled: outs.length > 0 },
+        { dir: null, label: 'Unconnected', enabled: true },
+      ];
+      const linkedIn = new Set(this.graph.incoming(around.id).map((e) => e.to.port));
+      const sync = () => {
+        seg.querySelectorAll<HTMLButtonElement>('button').forEach((b, i) =>
+          b.setAttribute('aria-checked', String((anchor?.dir ?? null) === modes[i].dir)),
+        );
+        chips.textContent = '';
+        const ports = anchor ? (anchor.dir === 'out' ? outs : ins) : [];
+        chips.hidden = ports.length < 2;
+        if (ports.length > 1) {
+          chips.append(h('span', {}, anchor!.dir === 'out' ? 'from' : 'into'));
+          for (const p of ports) {
+            const c = h('button', { type: 'button', role: 'radio', 'data-type': p.type ?? 'any', 'aria-checked': String(p.name === anchor!.port) }, p.label ?? p.name);
+            if (anchor!.dir === 'in' && linkedIn.has(p.name)) c.title = 'Already connected; the new node replaces that wire';
+            c.addEventListener('click', () => {
+              anchor = { ...anchor!, port: p.name };
+              lastPort[anchor.dir] = p.name;
+              update();
+            });
+            chips.append(c);
+          }
+        }
+        describe();
+      };
+      modes.forEach((m) => {
+        const b = h('button', { type: 'button', role: 'radio', 'aria-checked': 'false' }, m.label);
+        b.disabled = !m.enabled;
+        b.addEventListener('click', () => {
+          if (!m.dir) anchor = undefined;
+          else {
+            const ports = m.dir === 'out' ? outs : ins;
+            const fallback = m.dir === 'in' ? ins.find((p) => !linkedIn.has(p.name)) ?? ins[0] : outs[0];
+            anchor = { node: around.id, dir: m.dir, port: lastPort[m.dir] ?? fallback.name };
+            if (!ports.some((p) => p.name === anchor!.port)) anchor.port = fallback.name;
+          }
+          update();
+        });
+        seg.append(b);
+      });
+      head.append(hint, seg, chips);
+      update = () => {
+        sync();
+        render();
+      };
+      sync();
+    } else {
+      head.append(hint);
+      describe();
+    }
+    head.append(search);
+    sheet.setAttribute('aria-label', titleEl.textContent ?? 'Add a node');
+
     const compatible = (t: NodeType) => {
+      const connectFrom = anchor;
       if (!connectFrom) return true;
       const src = this.portDef(connectFrom);
       const probe = { type: t.type, params: defaults(t) };
@@ -426,7 +534,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
           btn.addEventListener('click', () => {
             if (performance.now() < this.sheetGuard) return;
             this.closePalette();
-            this.addNode(t.type, at, connectFrom);
+            this.addNode(t.type, at, anchor);
           });
           list.append(btn);
         }
@@ -930,7 +1038,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       btn('redo', 'Redo', () => this.history?.redo()),
       btn('tidy', 'Tidy layout', () => void this.autoLayout()),
       btn('fit', 'Show whole map', () => this.fit({ minScale: 0 })),
-      btn('plus', 'Add node', () => this.openPalette(), 'nm-primary'),
+      btn('plus', 'Add node', () => this.openAddSheet(), 'nm-primary'),
     );
     this.toolbar.addEventListener('pointerdown', (e) => e.stopPropagation());
     this.root.append(this.toolbar);
@@ -980,7 +1088,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       else if (mod && e.key.toLowerCase() === 'z') e.shiftKey ? this.history?.redo() : this.history?.undo();
       else if (mod && e.key.toLowerCase() === 'y') this.history?.redo();
       else if (mod && e.key.toLowerCase() === 'd') this.duplicateSelection();
-      else if (e.key === 'a' || e.key === 'A' || e.key === ' ') this.openPalette();
+      else if (e.key === 'a' || e.key === 'A' || e.key === ' ') this.openAddSheet();
       else if (e.key === 'f') this.fit({ minScale: 0 });
       else if (e.key === 'l') void this.autoLayout();
       else return;
