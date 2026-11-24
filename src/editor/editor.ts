@@ -299,7 +299,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
         const own = connectFrom.dir === 'out' ? rec.offsets.get(`in:${edge.to.port}`) : rec.offsets.get(`out:${edge.from.port}`);
         const x = connectFrom.dir === 'out' ? src.x + srcRec.w + 70 : src.x - 70 - rec.w;
         this.graph.moveNode(node.id, Math.round(x), Math.round(anchorY - (own?.y ?? 40)));
-        this.place_(node.id, { axis: 'y' });
+        this.makeRoom(node.id, connectFrom);
       } else this.place_(node.id, { axis: 'both' });
     }
     this.select({ node: node.id });
@@ -387,8 +387,100 @@ export class NodeEditor extends Emitter<EditorEvents> {
    * (upstream or downstream, whichever that node needs next); otherwise it adds a free node.
    */
   openAddSheet(): void {
-    if (this.selected.node && this.graph.nodes.has(this.selected.node)) this.openPalette(undefined, undefined, { around: this.selected.node });
-    else this.openPalette();
+    // A tapped port wins: add a node on that port (downstream of an output, upstream of an input).
+    if (this.pending) {
+      const p = this.pending;
+      this.cancelPending();
+      return this.openPalette(undefined, p, { around: p.node });
+    }
+    if (this.selected.edge && this.graph.edges.has(this.selected.edge)) return this.openPalette(undefined, undefined, { splice: this.selected.edge });
+    if (this.selected.node && this.graph.nodes.has(this.selected.node)) return this.openPalette(undefined, undefined, { around: this.selected.node });
+    this.openPalette();
+  }
+
+  /**
+   * Insert a node of `type` into a wire: source → new node → target. Nodes downstream
+   * slide right to make a column for it.
+   */
+  spliceNode(type: string, edgeId: string): NodeInstance | null {
+    const e = this.graph.edges.get(edgeId);
+    if (!e) return null;
+    const from: Anchor = { ...e.from, dir: 'out' };
+    const to: Anchor = { ...e.to, dir: 'in' };
+    const src = this.graph.nodes.get(e.from.node)!;
+    const node = this.graph.addNode(type, { x: src.x, y: src.y });
+    this.autoConnect(to, node.id); // replaces the old wire into the target
+    this.autoConnect(from, node.id);
+    if (this.opts.placement) {
+      const rec = this.records.get(node.id)!;
+      const edge = this.graph.incoming(node.id).find((x) => x.from.node === from.node);
+      const own = edge ? rec.offsets.get(`in:${edge.to.port}`) : undefined;
+      const srcRec = this.records.get(src.id)!;
+      this.graph.moveNode(node.id, Math.round(src.x + srcRec.w + 70), Math.round(this.portPos(from, 'out').y - (own?.y ?? 40)));
+      this.makeRoom(node.id, from);
+    }
+    this.select({ node: node.id });
+    this.ensureVisible(node.id);
+    return node;
+  }
+
+  /**
+   * Make space for a just-placed node without scattering the map. If it lands among the
+   * other nodes wired to the same port (siblings), it joins their column and the nodes
+   * below shift down; otherwise a column opens up and the nodes beyond it shift sideways.
+   * Moves are animated.
+   */
+  private makeRoom(id: string, from: Anchor): void {
+    const n = this.graph.nodes.get(id);
+    const rec = this.records.get(id);
+    if (!n || !rec) return;
+    const gap = 28;
+    const colGap = 70;
+    const before = new Map([...this.graph.nodes.values()].map((o) => [o.id, { x: o.x, y: o.y }]));
+    const size = (oid: string) => this.records.get(oid) ?? { w: 180, h: 80 };
+    const others = () => [...this.graph.nodes.values()].filter((o) => o.id !== id);
+    const hitsOf = (g: number) =>
+      others().filter((o) => overlaps({ x: n.x, y: n.y, w: rec.w, h: rec.h }, { x: o.x, y: o.y, ...size(o.id) }, g));
+
+    const hits = hitsOf(gap - 1);
+    if (hits.length) {
+      const siblings = new Set(
+        (from.dir === 'out' ? this.graph.outgoing(from.node).map((e) => e.to.node) : this.graph.incoming(from.node).map((e) => e.from.node)).filter(
+          (x) => x !== id,
+        ),
+      );
+      // Nodes the new one feeds (or is fed by) belong further along the flow, never in its column.
+      const along = (oid: string) => (from.dir === 'out' ? this.graph.reaches(id, oid) : this.graph.reaches(oid, id));
+      const column = hits.filter((o) => !along(o.id) && (siblings.has(o.id) || Math.abs(o.x - n.x) < rec.w / 2));
+      if (column.length) {
+        // Join the column under the nodes it collides with, then cascade the rest down.
+        const bottom = Math.max(...column.map((o) => o.y + size(o.id).h));
+        this.graph.moveNode(id, n.x, Math.round(bottom + gap));
+        this.pushAway(id);
+      } else if (from.dir === 'out') {
+        // Open a column: everything from the first collision rightwards moves right.
+        const edge = Math.min(...hits.map((o) => o.x));
+        const dx = n.x + rec.w + colGap - edge;
+        for (const o of others()) if (o.x >= edge - 1) this.graph.moveNode(o.id, Math.round(o.x + dx), o.y);
+      } else {
+        const edge = Math.max(...hits.map((o) => o.x + size(o.id).w));
+        const dx = edge + colGap - n.x;
+        for (const o of others()) if (o.x + size(o.id).w <= edge + 1) this.graph.moveNode(o.id, Math.round(o.x - dx), o.y);
+      }
+      // Anything still in the way (an unrelated node elsewhere): fall back to the nearest free spot.
+      if (hitsOf(8).length) this.place_(id, { axis: 'y' });
+    }
+
+    // Animate the neighbours from where they were to where they now belong.
+    const moved: Positions = {};
+    for (const o of others()) {
+      const b = before.get(o.id);
+      if (b && (b.x !== o.x || b.y !== o.y)) {
+        moved[o.id] = { x: o.x, y: o.y };
+        this.graph.moveNode(o.id, b.x, b.y);
+      }
+    }
+    if (Object.keys(moved).length) void this.animateTo(moved, 220);
   }
 
   /** Which side of `nodeId` a new node most likely belongs on, and which port to use. */
@@ -411,7 +503,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
    * Open the add-node sheet. With `connectFrom`, the new node is wired to that port.
    * With `around`, the sheet lets the person choose to add before or after that node (or unconnected).
    */
-  openPalette(at?: { x: number; y: number }, connectFrom?: Anchor, opts: { around?: string } = {}): void {
+  openPalette(at?: { x: number; y: number }, connectFrom?: Anchor, opts: { around?: string; splice?: string } = {}): void {
     this.closePalette();
     this.sheetGuard = this.pointers.size ? Infinity : performance.now() + 350;
     const backdrop = h('div', { class: 'nm-sheet-backdrop' });
@@ -424,11 +516,22 @@ export class NodeEditor extends Emitter<EditorEvents> {
 
     const around = opts.around ? this.graph.nodes.get(opts.around) : undefined;
     const aroundName = around ? around.label ?? this.registry.get(around.type)?.title ?? around.type : '';
+    const splice = opts.splice ? this.graph.edges.get(opts.splice) : undefined;
     let anchor: Anchor | undefined = connectFrom ?? (around ? this.suggestConnection(around.id) ?? undefined : undefined);
+    if (splice) anchor = { ...splice.from, dir: 'out' };
     const lastPort: Record<Dir, string | undefined> = { in: undefined, out: undefined };
     if (anchor) lastPort[anchor.dir] = anchor.port;
 
     const describe = () => {
+      if (splice) {
+        const name = (nid: string) => {
+          const x = this.graph.nodes.get(nid)!;
+          return x.label ?? this.registry.get(x.type)?.title ?? x.type;
+        };
+        titleEl.textContent = 'Insert into wire';
+        hint.textContent = `Between ${name(splice.from.node)} “${splice.from.port}” and ${name(splice.to.node)} “${splice.to.port}”`;
+        return;
+      }
       if (!anchor) {
         titleEl.textContent = 'Add a node';
         hint.textContent = around ? `Not connected to ${aroundName}` : '';
@@ -507,6 +610,16 @@ export class NodeEditor extends Emitter<EditorEvents> {
     const compatible = (t: NodeType) => {
       const connectFrom = anchor;
       if (!connectFrom) return true;
+      if (splice) {
+        // Needs an input that takes the source's type and an output the target accepts.
+        const probe = { type: t.type, params: defaults(t) };
+        const srcType = this.portDef({ ...splice.from, dir: 'out' })?.type;
+        const dstType = this.portDef({ ...splice.to, dir: 'in' })?.type;
+        return (
+          this.registry.inputsOf(probe).some((p) => this.registry.isCompatible(srcType, p.type)) &&
+          this.registry.outputsOf(probe).some((p) => this.registry.isCompatible(p.type, dstType))
+        );
+      }
       const src = this.portDef(connectFrom);
       const probe = { type: t.type, params: defaults(t) };
       const ports = connectFrom.dir === 'out' ? this.registry.inputsOf(probe) : this.registry.outputsOf(probe);
@@ -534,7 +647,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
           btn.addEventListener('click', () => {
             if (performance.now() < this.sheetGuard) return;
             this.closePalette();
-            this.addNode(t.type, at, anchor);
+            if (splice) this.spliceNode(t.type, splice.id);
+            else this.addNode(t.type, at, anchor);
           });
           list.append(btn);
         }
@@ -1292,7 +1406,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
     this.hud.textContent = '';
     const cancel = h('button', { type: 'button' }, 'Cancel');
     cancel.addEventListener('click', () => this.cancelPending());
-    this.hud.append(anchor.dir === 'out' ? 'Tap an input to connect' : 'Tap an output to connect', cancel);
+    this.hud.append(anchor.dir === 'out' ? 'Tap an input, or + for a new node' : 'Tap an output, or + for a new node', cancel);
     this.hud.hidden = false;
   }
 

@@ -498,6 +498,7 @@ function renderHelp() {
     <li><b>Rewire</b> drag a wire's end off an input · drop it on empty canvas to add a connected node</li>
     <li><b>Add</b> long-press the background, or press <kbd>+</kbd></li>
     <li><b>Add a connected node</b> select a node, then <kbd>+</kbd>: it goes after the node (or before, if the node still needs an input). Keep pressing <kbd>+</kbd> to grow a chain</li>
+    <li><b>Add on a port</b> tap an output (or input) port, then <kbd>+</kbd> · <b>Insert into a wire</b> tap the wire, then <kbd>+</kbd>. Nodes in the way shift to make room</li>
     <li><b>Delete a wire</b> tap it, then the bin</li>
     <li><b>Tidy</b> the layout button (or <kbd>L</kbd>) arranges the map; wires route around nodes</li>
   </ul>
