@@ -14,6 +14,7 @@ import {
   networkGraph,
   umlGraph,
   dramaGraph,
+  setDramaFileSaver,
   functionGraph,
   NodeLibrary,
   localStorageStore,
@@ -145,6 +146,13 @@ const demoFunction = registerGraphType(
     },
   }),
 );
+
+// Published as a claude.ai artifact, files are handed over through the `downloads` capability.
+type Downloads = { save(f: { filename: string; data: Blob | string }): Promise<unknown> };
+(window as unknown as { claude?: { use(name: string): Promise<Downloads | null> } }).claude
+  ?.use('downloads')
+  .then((d) => d && setDramaFileSaver((f) => d.save(f)))
+  .catch(() => undefined);
 
 const graphTypes: GraphType[] = [demoMath, demoFunction, networkGraph, umlGraph, dramaGraph, paletteGraph];
 type Example = GraphExample;

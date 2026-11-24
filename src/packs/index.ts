@@ -5,3 +5,5 @@ export { umlPack, umlEngine, umlView, umlToTypeScript, parseMembers as parseUmlM
 export type { UmlMember, UmlStatus } from './uml.js';
 export { dramaPack, dramaEngine, dramaView, imagesParam, imageList, imageFileToDataUrl, openLightbox, shotList, appearances, shotInfo, sceneInfo, episodeInfo, dramaName, runtime as dramaRuntime, DRAMA, FRAMINGS, MOVES, TIMES } from './drama.js';
 export type { DramaStatus, ShotInfo, SceneInfo, EpisodeInfo } from './drama.js';
+export { seedanceScript, seedancePack, setDramaFileSaver, saveDramaFile, zip as zipFiles } from './drama-seedance.js';
+export type { SeedanceOptions, SeedanceScript, SeedanceAsset, SeedanceGeneration, FileSaver } from './drama-seedance.js';

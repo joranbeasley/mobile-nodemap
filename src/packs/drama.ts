@@ -1,6 +1,7 @@
 import { defineNode, definePack, type GraphEngine } from '../core/registry.js';
 import type { Graph } from '../core/graph.js';
 import type { NodeInstance, NodeResult, NodeType, ParamKind, PortTypeDef } from '../core/types.js';
+import { saveDramaFile, seedancePack, seedanceScript } from './drama-seedance.js';
 
 /**
  * Drama productions: a cast of characters, locations and props feed shots; shots make up
@@ -194,6 +195,11 @@ const T = {
 
 const description = (advanced = false, placeholder = '') => ({ name: 'description', label: 'description', kind: 'text' as const, multiline: true, default: '', placeholder, advanced });
 const images = (name = 'images', label = 'images', advanced = false) => ({ name, label, kind: 'images', default: [], advanced });
+/** Look and feel for video prompts (Seedance export); an episode's beats its season's. */
+const look = () => [
+  { name: 'style', label: 'video style', kind: 'text' as const, multiline: true, default: '', placeholder: 'e.g. 16mm film, warm stage lighting, coming-of-age drama', advanced: true },
+  { name: 'aspect', label: 'aspect ratio', kind: 'select' as const, options: ['inherit', '16:9', '9:16', '1:1', '4:3', '21:9'], default: 'inherit', advanced: true },
+];
 const number = (def = 1) => ({ name: 'number', label: 'number', kind: 'number' as const, default: def, min: 1, step: 1 });
 
 const locationNode = defineNode({
@@ -314,7 +320,7 @@ const episodeNode = defineNode({
   description: 'A titled, numbered episode made of scenes',
   inputs: { scenes: { type: DRAMA.scene, multiple: true, label: 'scenes' } },
   outputs: { season: { type: DRAMA.episode, label: 'season' } },
-  params: [number(), description(false, 'Optional synopsis'), images('images', 'poster', true)],
+  params: [number(), description(false, 'Optional synopsis'), images('images', 'poster', true), ...look()],
   onCreate: (n) => void (n.label ??= 'Untitled episode'),
   meta: { drama: 'episode' },
 });
@@ -330,7 +336,7 @@ const seasonNode = defineNode({
   tags: ['series', 'show', 'production', 'term'],
   description: 'A run of episodes',
   inputs: { episodes: { type: DRAMA.episode, multiple: true, label: 'episodes' } },
-  params: [number(), description(true, 'What the season is about')],
+  params: [number(), description(true, 'What the season is about'), ...look()],
   onCreate: (n) => void (n.label ??= 'Season'),
   meta: { drama: 'season' },
 });
@@ -542,7 +548,17 @@ const details = (node: NodeInstance, ctx: { graph: Graph }) => {
   }
   if (node.type === T.scene || node.type === T.episode || node.type === T.season) {
     const title = node.type === T.scene ? `Scene ${Number(node.params.number ?? 1)}` : dramaName(node);
-    return { title, subtitle: 'Shot list', code: { lang: 'text', text: shotList(g, node.id) } };
+    const script = seedanceScript(g, node.id);
+    const n = script.generations.length;
+    return {
+      title,
+      subtitle: `Seedance script · ${n} generation${n === 1 ? '' : 's'} · ${script.assets.length} image${script.assets.length === 1 ? '' : 's'}`,
+      code: { lang: 'md', text: script.markdown },
+      actions: [
+        { label: 'Download pack (.zip)', primary: true, run: () => void seedancePack(g, node.id).then((p) => saveDramaFile({ filename: p.filename, data: p.blob })).catch(() => undefined) },
+        { label: 'script.md', run: () => void Promise.resolve(saveDramaFile({ filename: `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-seedance.md`, data: script.markdown })).catch(() => undefined) },
+      ],
+    };
   }
   return { title: dramaName(node), subtitle: 'Appearances', code: { lang: 'text', text: castText(g, node) } };
 };

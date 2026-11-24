@@ -39,7 +39,8 @@ The library needs proof that the extension model handles very different domains:
 - Episodes (title, number, optional description) are made of scenes, and seasons of episodes. Each piece belongs to one parent; characters and locations are reused freely.
 - Pictures: tap + on a selected node to add photos from the camera or library (shrunk before they are stored), tap a picture to view it full screen, × to remove it.
 - The engine shows on each node where it is used ("3 scenes · 5 shots"), scene sluglines ("INT. SCHOOL HALL — DAY"), cast lists and running times, and flags shots with no location or scene, empty scenes and duplicate scene numbers.
-- Tapping a scene, episode or season shows a copyable shot list; tapping a character, location or prop lists every shot they are in.
+- Tapping a character, location or prop lists every shot they are in.
+- **Video generation.** Tapping a scene, episode or season shows a Markdown script for Seedance: a reference sheet of characters, locations and props with their pictures, then one "generation" per clip of 15 s or less. Each lists the images to upload (as @Image1…@Image9) and a ready-to-paste prompt with timed shots, framing, camera moves, who is on screen and which storyboard frame to match. **Download pack (.zip)** saves `script.md` with every image under `assets/`, at the paths the script links to. A video style and aspect ratio can be set per episode or season.
 
 ## Function builder (`functionGraph`, id `function`)
 

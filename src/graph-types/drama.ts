@@ -102,7 +102,7 @@ export const dramaGraph = defineGraphType({
     {
       id: 'term',
       name: 'Spring term',
-      description: 'Tap a scene or episode for its shot list, or a character to see every shot they are in. Select a node, then tap a picture to view it or “+” to add your own.',
+      description: 'Tap a scene or episode for its Seedance video script and asset pack, or a character to see every shot they are in. Select a node, then tap a picture to view it or “+” to add your own.',
       graph: production(
         [
           who('maya', 'Maya', 'Stage manager. Runs everything from the wings with a clipboard and a headset.', [art.person('#d0ebff', '#c68642', '#2b2b2b', '#1971c2')], 'Priya S.'),
@@ -132,7 +132,7 @@ export const dramaGraph = defineGraphType({
 
           episode('ep1', 1, 'The Read-Through', 'Rehearsals start badly and Theo walks out.'),
           episode('ep2', 2, 'Opening Night'),
-          node('season', 'season', { number: 1, description: 'One term, one play, one understudy.' }, 'Spring term'),
+          node('season', 'season', { number: 1, description: 'One term, one play, one understudy.', style: 'Warm, grounded British school drama. 35mm film look, practical stage lighting, gentle handheld energy', aspect: '16:9' }, 'Spring term'),
         ],
         [
           ['hall', ['s1a', 's1b', 's1c', 's4a', 's4c']],

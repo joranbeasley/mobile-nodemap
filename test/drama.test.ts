@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from 'vitest';
-import { Graph, Evaluator, NodeEditor, dramaGraph, shotList, appearances, sceneInfo, getGraphType, type DramaStatus } from '../src/index';
+import { Graph, Evaluator, NodeEditor, dramaGraph, shotList, appearances, sceneInfo, getGraphType, seedanceScript, seedancePack, type DramaStatus } from '../src/index';
 
 const load = (id: string) => Graph.fromJSON(dramaGraph.examples!.find((e) => e.id === id)!.graph, dramaGraph.createRegistry());
 const run = (g: Graph) => new Evaluator(g, g.registry!).run();
@@ -88,5 +88,56 @@ describe('Drama graph type', () => {
     expect(title('ks')).toBe('Scene 1 · MORNING');
     expect(imgs().querySelectorAll('.dr-thumb')).toHaveLength(2);
     editor.destroy();
+  });
+});
+
+describe('Seedance export', () => {
+  it('writes one generation per clip of up to 15 s with numbered image references', () => {
+    const g = load('term');
+    const s = seedanceScript(g, 'ep1');
+    expect(s.generations.map((x) => x.duration)).toEqual([12, 5, 13, 13]);
+    const first = s.generations[0];
+    expect(first.refs.length).toBeLessThanOrEqual(9);
+    expect(first.refs[0].path).toBe('assets/characters/maya-1.png');
+    expect(first.prompt).toContain('Maya is @Image1');
+    expect(first.prompt).toMatch(/Shot 1 \(0–8 s\): Wide shot, slow dolly-in\./);
+    expect(first.prompt).toContain('35mm film look'); // the season's style, even for one episode
+    expect(s.markdown).toMatch(/^# The Read-Through: Seedance script/);
+    expect(s.markdown).toContain('| @Image1 | ![Maya (character)](assets/characters/maya-1.png)');
+    expect(s.markdown).toContain('![School hall (location)](assets/locations/school-hall-2.png)');
+    // Every path the markdown uses is in the asset list, once.
+    const paths = new Set(s.assets.map((a) => a.path));
+    for (const m of s.markdown.matchAll(/\]\((assets\/[^)]+)\)/g)) expect(paths.has(m[1])).toBe(true);
+    expect(paths.size).toBe(s.assets.length);
+  });
+
+  it('caps reference images and splits long shots', () => {
+    const g = load('scene');
+    for (let i = 0; i < 9; i++) {
+      const c = g.addNode('drama/character', { id: `c${i}`, params: { images: [`data:image/png;base64,QUJD${i}`] } });
+      g.connect({ node: c.id, port: 'appears' }, { node: 'k1', port: 'characters' });
+    }
+    g.setParam('k1', 'duration', 22);
+    const s = seedanceScript(g, 'ks');
+    expect(s.generations[0].refs).toHaveLength(9);
+    expect(s.generations[0].duration).toBe(15);
+    expect(s.markdown).toContain('Left out (Seedance takes 9 images)');
+    expect(s.markdown).toContain('so it is cut to 15 s');
+  });
+
+  it('packs script.md and the images into a zip', async () => {
+    const g = load('scene');
+    g.setParam('a', 'images', ['data:image/png;base64,iVBORw0KGgo=']);
+    const { filename, blob, script } = await seedancePack(g, 'ks');
+    expect(filename).toBe('scene-1-seedance.zip');
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    expect([...bytes.slice(0, 4)]).toEqual([0x50, 0x4b, 0x03, 0x04]);
+    const text = new TextDecoder('latin1').decode(bytes);
+    expect(text).toContain('script.md');
+    expect(text).toContain('assets/characters/ana-1.png');
+    // Without a canvas, SVG sketches go in as SVG and the script points at them.
+    expect(script.markdown).toContain('assets/characters/ben-1.svg');
+    const end = bytes.length - 22;
+    expect(new DataView(bytes.buffer).getUint16(end + 10, true)).toBe(script.assets.length + 1);
   });
 });
