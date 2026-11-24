@@ -3,7 +3,8 @@ import type { GraphJSON } from '../core/types.js';
 import { ipIssues, networkEngine, networkPack } from '../packs/network.js';
 
 const N = (id: string, type: string, params: Record<string, unknown> = {}, label?: string) => ({ id, type, x: 0, y: 0, params, ...(label ? { label } : {}) });
-const OUT_PORT: Record<string, string> = { 'net/internet': 'wan', 'net/router': 'lan', 'net/firewall': 'protected', 'net/switch': 'ports', 'net/ap': 'clients' };
+const OUT_PORT: Record<string, string> = { 'net/internet': 'wan', 'net/router': 'lan', 'net/firewall': 'protected', 'net/switch': 'ports', 'net/ap': 'clients', 'net/server': 'data' };
+const DATA = new Set(['net/disk', 'net/database', 'net/cache', 'net/bucket', 'net/queue']);
 /** Build a network map from "a → b" links; ports are picked from the device types. */
 function net(nodes: ReturnType<typeof N>[], links: [string, string][]): GraphJSON {
   const type = new Map(nodes.map((n) => [n.id, n.type]));
@@ -11,7 +12,11 @@ function net(nodes: ReturnType<typeof N>[], links: [string, string][]): GraphJSO
     version: 1,
     type: 'network',
     nodes,
-    edges: links.map(([a, b]) => ({ id: `${a}-${b}`, from: { node: a, port: OUT_PORT[type.get(a)!] }, to: { node: b, port: 'uplink' } })),
+    edges: links.map(([a, b]) => ({
+      id: `${a}-${b}`,
+      from: { node: a, port: OUT_PORT[type.get(a)!] },
+      to: { node: b, port: DATA.has(type.get(b)!) ? 'host' : 'uplink' },
+    })),
   };
 }
 
@@ -22,13 +27,19 @@ function net(nodes: ReturnType<typeof N>[], links: [string, string][]): GraphJSO
 export const networkGraph = defineGraphType({
   id: 'network',
   title: 'Network',
-  description: 'Devices and links. The engine finds each device’s fastest path to the internet and whether it has a backup.',
+  description: 'Devices, links and the data behind them. The engine finds each device’s fastest path to the internet, whether it has a backup, and which disks, databases, caches, buckets and queues are reachable.',
   icon: '⌁',
   packs: [networkPack],
   engine: networkEngine,
   rules: {
     allowCycles: true,
-    validate: (graph) => [...ipIssues(graph.nodes.values())].map(([node, message]) => ({ level: 'warning' as const, message, node })),
+    validate: (graph) => [
+      ...[...ipIssues(graph.nodes.values())].map(([node, message]) => ({ level: 'warning' as const, message, node })),
+      // Data stores need a server to live on.
+      ...[...graph.nodes.values()]
+        .filter((n) => graph.registry?.get(n.type)?.meta?.role === 'data' && !graph.incoming(n.id).length)
+        .map((n) => ({ level: 'warning' as const, message: `${n.label ?? graph.registry?.get(n.type)?.title} is not attached to a server`, node: n.id })),
+    ],
     canConnect: (from, to, graph) => {
       const role = (id: string) => graph.registry?.get(graph.nodes.get(id)!.type)?.meta?.role;
       if (role(from.node) === 'internet' && role(to.node) === 'endpoint') return 'Connect devices to the internet through a router';
@@ -51,6 +62,8 @@ export const networkGraph = defineGraphType({
           N('desk', 'net/laptop', { ip: '192.168.1.20' }, 'Desk laptop'),
           N('lap', 'net/laptop', { bandwidth: '300', ip: '192.168.1.21' }, 'Sofa laptop'),
           N('phone', 'net/phone', { ip: '192.168.1.22' }, 'Phone'),
+          N('drives', 'net/disk', { kind: 'HDD', raid: 'RAID 1', size: 8192, used: 7300, latency: 6 }, 'Media drives'),
+          N('photos', 'net/bucket', { provider: 'Backblaze B2', used: 640 }, 'Photo backup'),
         ],
         [
           ['isp', 'router'],
@@ -61,13 +74,15 @@ export const networkGraph = defineGraphType({
           ['fw', 'ap'],
           ['ap', 'lap'],
           ['ap', 'phone'],
+          ['nas', 'drives'],
+          ['nas', 'photos'],
         ],
       ),
     },
     {
       id: 'office',
       name: 'Redundant office',
-      description: 'Two providers, two routers and a switch ring (a loop). Power off a router: servers keep a path.',
+      description: 'Two providers, two routers, a switch ring (a loop) and the data behind the servers. Power off the database server and see what goes dark.',
       graph: net(
         [
           N('isp1', 'net/internet', { latency: 8 }),
@@ -80,6 +95,11 @@ export const networkGraph = defineGraphType({
           N('db', 'net/server', { ip: '10.0.1.20', kind: 'Database', cores: 32, memory: '256', storage: 4096 }, 'Database'),
           N('ap', 'net/ap'),
           N('guest', 'net/phone', {}, 'Guest phone'),
+          N('orders', 'net/database', { engine: 'PostgreSQL', role: 'primary', size: 500, used: 320 }, 'Orders DB'),
+          N('dbvol', 'net/disk', { kind: 'NVMe', raid: 'RAID 10', size: 2048, used: 900 }, 'DB volume'),
+          N('sessions', 'net/cache', { engine: 'Redis', size: 16, used: 9, hitRate: 94 }, 'Session cache'),
+          N('jobs', 'net/queue', { engine: 'Kafka', backlog: 2400, retention: 7 }, 'Jobs'),
+          N('backups', 'net/bucket', { provider: 'S3', used: 3400, versioning: true }, 'Backups'),
         ],
         [
           ['isp1', 'r1'],
@@ -94,6 +114,12 @@ export const networkGraph = defineGraphType({
           ['s2', 'db'],
           ['s2', 'ap'],
           ['ap', 'guest'],
+          ['db', 'orders'],
+          ['db', 'dbvol'],
+          ['web', 'sessions'],
+          ['web', 'jobs'],
+          ['web', 'backups'],
+          ['db', 'backups'],
         ],
       ),
     },

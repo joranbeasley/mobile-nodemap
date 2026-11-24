@@ -17,6 +17,14 @@ const icons = {
 
 const link = (multiple = true) => ({ type: 'link', multiple });
 
+const dataIcons = {
+  disk: svg('<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>'),
+  database: svg('<ellipse cx="12" cy="5" rx="7" ry="2.5"/><path d="M5 5v14c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5V5"/><path d="M5 10c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5M5 15c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5"/>'),
+  cache: svg('<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>'),
+  bucket: svg('<path d="M4 6h16l-2 14H6z"/><ellipse cx="12" cy="6" rx="8" ry="2"/>'),
+  queue: svg('<rect x="3" y="8" width="4" height="8" rx="1"/><rect x="10" y="8" width="4" height="8" rx="1"/><rect x="17" y="8" width="4" height="8" rx="1"/>'),
+};
+
 export const SERVER_TYPES = ['Application', 'Web', 'Database', 'File / NAS', 'Mail', 'DNS', 'Media', 'Game', 'Backup', 'Other'];
 
 const storageText = (gb: number) => (gb >= 1024 ? `${Math.round((gb / 1024) * 10) / 10} TB` : `${gb} GB`);
@@ -26,6 +34,18 @@ export function deviceSpecs(node: Pick<NodeInstance, 'type' | 'params'>): string
   const p = node.params;
   if (node.type === 'net/server') {
     return [p.kind ?? 'Application', `${p.cores ?? 4} cores`, `${p.memory ?? 16} GB RAM`, storageText(Number(p.storage ?? 512)), p.os ?? 'Linux'].join(' · ');
+  }
+  switch (node.type) {
+    case 'net/disk':
+      return [p.kind ?? 'SSD', p.raid && p.raid !== 'none' ? p.raid : ''].filter(Boolean).join(' · ');
+    case 'net/database':
+      return [p.engine ?? 'PostgreSQL', p.role ?? 'primary'].join(' · ');
+    case 'net/cache':
+      return [p.engine ?? 'Redis', `${p.hitRate ?? 92}% hits`].join(' · ');
+    case 'net/bucket':
+      return [p.provider ?? 'S3', p.versioning ? 'versioned' : ''].filter(Boolean).join(' · ');
+    case 'net/queue':
+      return [p.engine ?? 'Kafka', `${Number(p.backlog ?? 0).toLocaleString('en')} queued`, `${p.retention ?? 7} d retention`].join(' · ');
   }
   return p.os ? String(p.os) : '';
 }
@@ -62,7 +82,22 @@ export const statusView = {
       el.textContent = '';
       return;
     }
-    const label = { source: 'upstream', online: 'online', offline: 'offline', down: 'powered off', blocking: 'blocking' }[s.state];
+    const label = { source: 'upstream', online: 'online', offline: 'offline', down: 'powered off', blocking: 'blocking', available: 'available', unavailable: 'unavailable' }[s.state];
+    const esc0 = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+    if (s.state === 'available' || s.state === 'unavailable' || (s.state === 'down' && s.usedGb !== undefined)) {
+      // A data store: where it's reached from, how full it is, and anything to watch.
+      const pct = s.usage !== undefined ? Math.round(s.usage * 100) : undefined;
+      const fill =
+        s.usedGb !== undefined
+          ? `<span class="nm-net-usage" data-warn="${(s.usage ?? 0) >= 0.85}" title="${pct ?? ''}${pct !== undefined ? '% used' : ''}">${pct !== undefined ? `<i style="width:${Math.min(100, pct)}%"></i>` : ''}</span><span class="nm-net-cap">${storageText(s.usedGb)}${s.sizeGb ? ` of ${storageText(s.sizeGb)}` : ' used'}${pct !== undefined ? ` · ${pct}%` : ''}</span>`
+          : '';
+      const via = s.state === 'available' ? `<span>${s.latency} ms</span><span>via ${s.hosts} server${s.hosts === 1 ? '' : 's'}</span>` : '';
+      const specs = node ? deviceSpecs(node) : '';
+      const warn = s.warning ? `<span class="nm-net-warn">⚠ ${esc0(s.warning)}</span>` : '';
+      const hostsLine = s.state === 'available' ? `<span class="nm-net-path" data-ok="${s.redundant}">${s.redundant ? '2+ servers' : 'single server'}</span>` : '';
+      el.innerHTML = `<div class="nm-net" data-state="${s.state}"><b>${label}</b>${via}${fill}${specs ? `<span class="nm-net-spec">${esc0(specs)}</span>` : ''}${warn}${hostsLine}</div>`;
+      return;
+    }
     const facts =
       s.state === 'online' || s.state === 'blocking'
         ? `<span>${s.latency} ms</span><span>${s.hops} hop${s.hops === 1 ? '' : 's'}</span><span>${fmtBw(s.bandwidth!)}</span>`
@@ -77,6 +112,27 @@ export const statusView = {
     el.innerHTML = `<div class="nm-net" data-state="${s.state}"><b>${label}</b>${facts}${ip}${spec}${path}</div>`;
   },
 };
+
+/**
+ * Data: disks, databases, caches, object storage and queues. They attach to servers through a
+ * server's "data" output. A store is available while at least one of its servers is online.
+ */
+export const dataStore = defineNode({
+  type: 'net/data',
+  title: 'Data store',
+  category: 'Data',
+  color: '#e67700',
+  flavor: 'sink',
+  width: 200,
+  inputs: { host: { type: 'data', multiple: true, label: 'host', description: 'The server(s) this lives on or is reached through' } },
+  params: [
+    { name: 'up', label: 'online', kind: 'boolean', default: true },
+    { name: 'size', label: 'capacity (GB)', description: '0 means unlimited', kind: 'number', default: 1024, step: 64, advanced: true },
+    { name: 'used', label: 'used (GB)', kind: 'number', default: 256, step: 16, advanced: true },
+    { name: 'latency', label: 'latency ms', kind: 'number', default: 1, min: 0, max: 50, step: 0.1, advanced: true },
+  ],
+  meta: { role: 'data' },
+});
 
 const nodes: NodeType[] = [
   defineNode({
@@ -143,6 +199,8 @@ const nodes: NodeType[] = [
     color: '#7048e8',
     icon: icons.server,
     inputs: { uplink: { type: 'link', multiple: true, label: 'nic' } },
+    outputs: { data: { type: 'data', label: 'data', description: 'Attach disks, databases, caches, buckets and queues' } },
+    flavor: 'view',
     params: [
       { name: 'kind', label: 'type', kind: 'select', default: 'Application', options: SERVER_TYPES },
       { name: 'cores', label: 'CPU cores', kind: 'number', default: 4, min: 1, max: 128, step: 1, advanced: true },
@@ -177,7 +235,76 @@ const nodes: NodeType[] = [
     ],
     meta: { role: 'endpoint' },
   }),
+  ...dataStores(),
 ].map((n) => ({ ...n, view: statusView, params: ordered(n.params) }));
+
+function dataStores(): NodeType[] {
+  return [
+    extendNode(dataStore, {
+      type: 'net/disk',
+      title: 'Disk / volume',
+      icon: dataIcons.disk,
+      tags: ['storage', 'ssd', 'hdd', 'raid', 'volume', 'drive'],
+      params: [
+        { name: 'kind', label: 'type', kind: 'select', default: 'SSD', options: ['SSD', 'NVMe', 'HDD', 'SAN volume'] },
+        { name: 'raid', label: 'RAID', kind: 'select', default: 'none', options: ['none', 'RAID 1', 'RAID 5', 'RAID 6', 'RAID 10'], advanced: true },
+        { name: 'latency', label: 'latency ms', kind: 'number', default: 0.2, min: 0, max: 50, step: 0.1, advanced: true },
+      ],
+    }),
+    extendNode(dataStore, {
+      type: 'net/database',
+      title: 'Database',
+      icon: dataIcons.database,
+      tags: ['db', 'sql', 'postgres', 'mysql', 'mongo'],
+      params: [
+        { name: 'engine', label: 'engine', kind: 'select', default: 'PostgreSQL', options: ['PostgreSQL', 'MySQL', 'MariaDB', 'SQL Server', 'MongoDB', 'Cassandra', 'SQLite'] },
+        { name: 'role', label: 'role', kind: 'select', default: 'primary', options: ['primary', 'replica'], advanced: true },
+        { name: 'size', label: 'capacity (GB)', description: '0 means unlimited', kind: 'number', default: 500, step: 50, advanced: true },
+        { name: 'used', label: 'used (GB)', kind: 'number', default: 120, step: 10, advanced: true },
+        { name: 'latency', label: 'latency ms', kind: 'number', default: 2, min: 0, max: 50, step: 0.1, advanced: true },
+      ],
+    }),
+    extendNode(dataStore, {
+      type: 'net/cache',
+      title: 'Cache',
+      icon: dataIcons.cache,
+      tags: ['redis', 'memcached', 'memory'],
+      params: [
+        { name: 'engine', label: 'engine', kind: 'select', default: 'Redis', options: ['Redis', 'Valkey', 'Memcached', 'Varnish'] },
+        { name: 'size', label: 'memory (GB)', kind: 'number', default: 16, step: 1, advanced: true },
+        { name: 'used', label: 'used (GB)', kind: 'number', default: 6, step: 1, advanced: true },
+        { name: 'hitRate', label: 'hit rate %', kind: 'number', default: 92, min: 0, max: 100, step: 1, advanced: true },
+        { name: 'latency', label: 'latency ms', kind: 'number', default: 0.3, min: 0, max: 10, step: 0.1, advanced: true },
+      ],
+    }),
+    extendNode(dataStore, {
+      type: 'net/bucket',
+      title: 'Object storage',
+      icon: dataIcons.bucket,
+      tags: ['bucket', 's3', 'blob', 'backup', 'files'],
+      params: [
+        { name: 'provider', label: 'provider', kind: 'select', default: 'S3', options: ['S3', 'Google Cloud Storage', 'Azure Blob', 'MinIO', 'Backblaze B2'] },
+        { name: 'size', label: 'capacity (GB)', description: '0 means unlimited', kind: 'number', default: 0, step: 100, advanced: true },
+        { name: 'used', label: 'used (GB)', kind: 'number', default: 1200, step: 100, advanced: true },
+        { name: 'versioning', label: 'versioning', kind: 'boolean', default: true, advanced: true },
+        { name: 'latency', label: 'latency ms', kind: 'number', default: 20, min: 0, max: 200, step: 1, advanced: true },
+      ],
+    }),
+    extendNode(dataStore, {
+      type: 'net/queue',
+      title: 'Message queue',
+      icon: dataIcons.queue,
+      tags: ['kafka', 'rabbitmq', 'sqs', 'events', 'stream'],
+      params: [
+        { name: 'engine', label: 'engine', kind: 'select', default: 'Kafka', options: ['Kafka', 'RabbitMQ', 'SQS', 'NATS', 'Redis Streams'] },
+        { name: 'backlog', label: 'messages waiting', kind: 'number', default: 1200, step: 100 },
+        { name: 'retention', label: 'retention (days)', kind: 'number', default: 7, min: 1, max: 90, step: 1, advanced: true },
+        { name: 'size', label: 'capacity (GB)', description: '0 means unlimited', kind: 'number', default: 0, step: 64, advanced: true },
+        { name: 'used', label: 'used (GB)', kind: 'number', default: 40, step: 8, advanced: true },
+      ],
+    }),
+  ];
+}
 
 /** Show what makes a device itself first (power, then its own specs), generic network settings last. */
 function ordered(params: NodeType['params']): NodeType['params'] {
@@ -214,7 +341,15 @@ export function ipIssues(nodes: Iterable<NodeInstance>): Map<string, string> {
 // ------------------------------------------------------------------ engine
 
 export interface NetworkStatus {
-  state: 'source' | 'online' | 'offline' | 'down' | 'blocking';
+  state: 'source' | 'online' | 'offline' | 'down' | 'blocking' | 'available' | 'unavailable';
+  /** Data stores: online servers it can be reached through. */
+  hosts?: number;
+  /** Data stores: used / capacity (0..1), when the capacity is limited. */
+  usage?: number;
+  usedGb?: number;
+  sizeGb?: number;
+  /** Something to look at (nearly full, low hit rate, growing backlog). */
+  warning?: string;
   ip?: string;
   /** What is wrong with the IP address, if anything. */
   ipIssue?: string;
@@ -239,7 +374,10 @@ export const networkEngine: GraphEngine = {
     const bandwidth = (n: NodeInstance) => (role(n) === 'internet' ? Infinity : Number(n.params.bandwidth ?? 1000) || Infinity);
     const passes = (n: NodeInstance) => n.params.up !== false && !(role(n) === 'firewall' && n.params.allow === false);
     const adj = new Map(nodes.map((n) => [n.id, new Set<string>()]));
+    // Cables carry traffic; data attachments (server → disk, database…) don't.
+    const isData = (id: string) => role(graph.nodes.get(id)!) === 'data';
     for (const e of graph.edges.values()) {
+      if (isData(e.from.node) || isData(e.to.node)) continue;
       adj.get(e.from.node)?.add(e.to.node);
       adj.get(e.to.node)?.add(e.from.node);
     }
@@ -281,8 +419,10 @@ export const networkEngine: GraphEngine = {
     let online = 0;
     let offline = 0;
     let worst = 0;
+    const statusOf = new Map<string, NetworkStatus>();
     for (const n of nodes) {
       const r = role(n);
+      if (r === 'data') continue;
       const b = best.get(n.id);
       let status: NetworkStatus;
       let result: NodeResult;
@@ -319,9 +459,55 @@ export const networkEngine: GraphEngine = {
         st.ip = ip;
         if (addressing.has(n.id)) st.ipIssue = addressing.get(n.id);
       }
+      statusOf.set(n.id, result.outputs!.status as NetworkStatus);
       publish(n.id, result);
     }
-    return { outputs: { online, offline, worstLatency: Math.round(worst * 10) / 10 } };
+
+    // Data stores: reachable through any online server they're attached to.
+    let dataAvailable = 0;
+    let dataUnavailable = 0;
+    for (const n of nodes) {
+      if (role(n) !== 'data') continue;
+      const p = n.params;
+      const size = Number(p.size ?? 0) || 0;
+      const used = Math.max(0, Number(p.used ?? 0) || 0);
+      const usage = size > 0 ? used / size : undefined;
+      const base = { usedGb: used, sizeGb: size, usage };
+      if (p.up === false) {
+        publish(n.id, { status: 'skipped', outputs: { status: { state: 'down', ...base } } });
+        continue;
+      }
+      const hosts = graph
+        .incoming(n.id)
+        .map((e) => statusOf.get(e.from.node))
+        .filter((st): st is NetworkStatus => !!st && st.state === 'online');
+      if (!hosts.length) {
+        dataUnavailable++;
+        const why = graph.incoming(n.id).length ? 'No online server to reach it through' : 'Not attached to a server';
+        publish(n.id, { status: 'error', error: why, outputs: { status: { state: 'unavailable', hosts: 0, ...base } } });
+        continue;
+      }
+      dataAvailable++;
+      const via = Math.min(...hosts.map((h) => h.latency ?? 0));
+      const warning =
+        usage !== undefined && usage >= 0.85
+          ? `Nearly full: ${Math.round(usage * 100)}%`
+          : n.type === 'net/cache' && Number(p.hitRate ?? 100) < 80
+            ? `Low hit rate: ${p.hitRate}%`
+            : n.type === 'net/queue' && Number(p.backlog ?? 0) > 10000
+              ? 'Backlog is growing'
+              : undefined;
+      const status: NetworkStatus = {
+        state: 'available',
+        hosts: hosts.length,
+        latency: Math.round((via + latency(n)) * 10) / 10,
+        redundant: hosts.length > 1,
+        warning,
+        ...base,
+      };
+      publish(n.id, { status: 'ok', outputs: { status } });
+    }
+    return { outputs: { online, offline, worstLatency: Math.round(worst * 10) / 10, dataAvailable, dataUnavailable } };
   },
 };
 
@@ -334,6 +520,13 @@ const css = `
 .nm-net span { font-variant-numeric: tabular-nums; }
 .nm-net-path { width: 100%; }
 .nm-net-spec { width: 100%; color: var(--_text); }
+.nm-net[data-state="available"] b { background: var(--_ok); }
+.nm-net[data-state="unavailable"] b { background: var(--_danger); }
+.nm-net-usage { width: 100%; height: 6px; border-radius: 3px; background: var(--_border); overflow: hidden; display: block; }
+.nm-net-usage i { display: block; height: 100%; background: #e67700; border-radius: 3px; }
+.nm-net-usage[data-warn="true"] i { background: var(--_danger); }
+.nm-net-cap { width: 100%; color: var(--_text); font-variant-numeric: tabular-nums; }
+.nm-net-warn { width: 100%; color: var(--_danger); font-weight: 600; }
 .nm-net-ip { width: 100%; font-family: var(--_mono); color: var(--_text); }
 .nm-net-ip[data-bad="true"] { color: var(--_danger); }
 .nm-net-path[data-ok="false"] { color: #e8590c; }
@@ -344,7 +537,10 @@ const css = `
 export const networkPack = definePack({
   id: 'nodemap/network',
   title: 'Network',
-  portTypes: [{ id: 'link', label: 'Link', color: '#0ca678', inline: false }],
+  portTypes: [
+    { id: 'link', label: 'Link', color: '#0ca678', inline: false },
+    { id: 'data', label: 'Data', color: '#e67700', inline: false },
+  ],
   nodes,
   css,
 });

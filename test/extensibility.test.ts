@@ -285,3 +285,40 @@ describe('Server specs', () => {
     editor.destroy();
   });
 });
+
+describe('Network data stores', () => {
+  const office = () => {
+    const reg = networkGraph.createRegistry();
+    return { reg, g: Graph.fromJSON(networkGraph.examples!.find((e) => e.id === 'office')!.graph, reg) };
+  };
+  const st = (r: Awaited<ReturnType<typeof run>>, id: string) => r.results.get(id)!.outputs!.status as any;
+
+  it('disks, databases, caches, buckets and queues attach to servers and report availability', async () => {
+    const { reg, g } = office();
+    for (const t of ['net/disk', 'net/database', 'net/cache', 'net/bucket', 'net/queue']) expect(reg.get(t)!.meta!.role).toBe('data');
+    const r = await run(g);
+    expect(st(r, 'orders')).toMatchObject({ state: 'available', hosts: 1, redundant: false, usedGb: 320, sizeGb: 500 });
+    expect(st(r, 'orders').usage).toBeCloseTo(0.64);
+    expect(st(r, 'backups')).toMatchObject({ state: 'available', hosts: 2, redundant: true });
+    expect(st(r, 'orders').latency).toBeGreaterThan(st(r, 'db').latency); // reached through its server
+    expect(r.outputs).toMatchObject({ dataAvailable: 5, dataUnavailable: 0 });
+    // Data attachments are not cables: device reachability is unchanged.
+    expect(r.outputs.online).toBe(3);
+  });
+
+  it('goes unavailable when its servers are down, and flags full or unattached stores', async () => {
+    const { g } = office();
+    g.setParam('db', 'up', false);
+    let r = await run(g);
+    expect(st(r, 'orders').state).toBe('unavailable');
+    expect(r.results.get('orders')!.status).toBe('error');
+    expect(st(r, 'backups')).toMatchObject({ state: 'available', hosts: 1, redundant: false }); // still via the web server
+    g.setParam('db', 'up', true);
+    g.setParam('orders', 'used', 470);
+    r = await run(g);
+    expect(st(r, 'orders').warning).toBe('Nearly full: 94%');
+    const loose = g.addNode('net/cache', { id: 'loose' });
+    expect(g.validate().some((i) => i.node === loose.id && /not attached/.test(i.message))).toBe(true);
+    expect(g.canConnect({ node: 's1', port: 'ports' }, { node: 'loose', port: 'host' })).toMatch(/Type mismatch/);
+  });
+});
