@@ -23,6 +23,11 @@ People want to build their own nodes visually, then reuse them in other maps and
   - `source(type)` emits a single TypeScript function.
   - Persistence goes through `StoragePort`.
 
+### Addendum: names and inspection
+
+- A node must be compiled with a `name`, which becomes its title and the generated function's name. A `description` is optional. Blank names are refused, because an unnamed node is unfindable in the add menu and in exported code.
+- Compiled nodes keep their source graph. Their `details()` shows their JavaScript and an **Edit in graph** action. `NodeLibrary` turns that into an `edit` event the host answers by opening the builder. Saving with the same `type` updates the node in every map that uses it.
+
 ## Consequences
 
 - Building, validating, compiling, sharing and exporting are one flow, on a phone.

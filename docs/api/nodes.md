@@ -1,0 +1,122 @@
+# Nodes
+
+`import { defineNode, extendNode } from 'mobile-nodemap'`
+
+## `defineNode(spec): NodeType`
+
+Defines a node type. Ports can be written as shorthand, and `run` is then typed from them:
+
+```ts
+const lerp = defineNode({
+  type: 'acme/lerp',
+  title: 'Lerp',
+  inputs: { a: 'number', b: 'number', t: { type: 'number', default: 0.5 } },
+  outputs: { out: 'number' },
+  run: ({ a, b, t }) => ({ out: a + (b - a) * t }),   // a, b, t: number
+});
+```
+
+Shorthand value types: `'number'` → `number`, `'string'` → `string`, `'boolean'` → `boolean`, `'list'` → `unknown[]`, and anything else → `any`. `multiple: true` makes the value an array.
+
+## `extendNode(base, patch): NodeType`
+
+Derives a node type. `inputs`, `outputs` and `params` are merged by name (the patch wins, and new ones are appended); `meta` is merged; everything else is overridden.
+
+```ts
+const router = extendNode(device, { type: 'net/router', title: 'Router', outputs: { lan: 'link' } });
+```
+
+## `NodeType`
+
+| Field | Type | Purpose |
+| --- | --- | --- |
+| `type` | `string` | Required, unique, namespaced id. |
+| `title`, `category`, `description`, `tags`, `docs` | | Add menu and search. |
+| `color` | CSS colour | Header colour (themes may override, see `nodeColors`). |
+| `icon` | text, emoji or `<svg…>` | Header and add menu. |
+| `flavor` | `'source' \| 'transform' \| 'sink' \| 'view' \| 'control' \| string` | Role, for themes. Inferred when left out. |
+| `width` | `number` | Fixed width in px. |
+| `inputs`, `outputs` | `PortDef[]` | |
+| `params` | `ParamDef[]` | |
+| `ports(params)` | `→ { inputs?, outputs? }` | Ports that depend on params. |
+| `run(inputs, ctx)` | `→ outputs \| Promise<outputs>` | `ctx`: `{ node, params, graphInputs, signal }`. Throw to report an error. |
+| `pure` | `boolean` | `false` = never cache. |
+| `view` | `{ render(el, result, node) }` | Custom preview inside the node. See `reactView` for React. |
+| `emit(inputs, params)` | `→ Record<port, jsExpression>` | Inline this node in `emitSource` output. |
+| `details(node)` | `→ NodeDetails` | What the editor shows when the node is tapped. |
+| `onCreate(node)` | `→ params \| void` | New nodes only (not on load). |
+| `version`, `migrate(params, from)` | | Upgrade saved params. |
+| `meta` | `Record<string, unknown>` | For engines and tools (the network engine reads `meta.role`). |
+
+## `PortDef`
+
+```ts
+interface PortDef {
+  name: string;
+  type?: string;          // 'any' when left out
+  label?: string;
+  description?: string;
+  default?: unknown;      // value when unconnected and no inline value is set
+  inline?: boolean;       // show an inline editor when unconnected (default: primitive types)
+  multiple?: boolean;     // inputs: accept many wires; the value is an array, ordered top to bottom
+}
+```
+
+## `ParamDef`
+
+Every param has `name`, `label?`, `description?` and `advanced?` (fold it behind "More"). The built-in kinds are:
+
+| `kind` | Extra fields |
+| --- | --- |
+| `'number'` | `default`, `min`, `max`, `step`. With both `min` and `max` set, a slider is added. |
+| `'text'` | `default`, `multiline`, `placeholder`, `code` (monospace) |
+| `'boolean'` | `default` |
+| `'select'` | `default`, `options: string[]` |
+| any other string | A registered `ParamKind`; any extra fields are passed through |
+
+## `ParamKind`: custom param editors
+
+```ts
+registry.defineParamKind({
+  kind: 'color',
+  render({ param, node, value, set, key }) {   // return an element; call set(v) on change
+    const input = document.createElement('input');
+    input.type = 'color';
+    input.dataset.key = key;                    // keeps focus across re-renders
+    input.value = String(value);
+    input.oninput = () => set(input.value);
+    return input;
+  },
+  update(el, value) { (el as HTMLInputElement).value = String(value); },   // optional: undo / API changes
+});
+```
+
+## `PortTypeDef`: custom value types
+
+```ts
+registry.definePortType({
+  id: 'color', label: 'Colour', color: '#d6336c',
+  accepts: ['string'],             // other types that may connect into it
+  coerce: (v) => normalise(v),     // convert values arriving from accepted types
+  inline: 'color',                 // inline editor: 'number' | 'text' | 'boolean' | a param kind | false
+  default: '#888888',
+});
+```
+
+## `NodeDetails`
+
+```ts
+interface NodeDetails {
+  title: string;
+  subtitle?: string;
+  code?: { lang: string; text: string };                         // shown with a Copy button
+  actions?: { label: string; primary?: boolean; run(): void }[];
+}
+```
+
+Custom nodes from the [library](library.md) return their JavaScript and an "Edit in graph" action.
+
+## Helpers
+
+- `normalizeNode(spec)` and `normalizePorts(spec)` turn shorthand into plain `NodeType` and `PortDef[]`.
+- `flavorOf(def, inputs, outputs)`: see [themes](themes.md).

@@ -8,7 +8,7 @@ A small, dependency-free TypeScript library for building **node maps** (node gra
 - **Themes**: six built-in themes (three light, three dark) and node flavors. See [Themes and flavors](#themes-and-flavors).
 - **Ports and adapters**: standard interfaces (`GraphPort`, `NodeDefinition`, `EnginePort`, `StoragePort`, `RenderPort`, `NodeRunner`, …) with swappable adapters. See [Architecture](#architecture).
 
-Design records are in [docs/adr](docs/adr) and product requirements in [docs/prd](docs/prd).
+**API reference: [docs/api](docs/api)**. Design records are in [docs/adr](docs/adr) and product requirements in [docs/prd](docs/prd).
 - **`mobile-nodemap/editor`**: `NodeEditor`, a touch-first DOM/SVG editor with pinch zoom, drag or tap-to-connect wiring, a long-press add menu, live results and undo.
 - **`mobile-nodemap/layout`**: auto-layout, wire routing and placement. A layered layout that wraps to fit portrait screens, an orthogonal router that steers wires around nodes, free-space placement, and an optional [ELK](https://eclipse.dev/elk/) adapter. No DOM.
 - **`mobile-nodemap/react`**: `<NodeMap>`, hooks (`useGraph`, `useEvaluator`, `useEvaluation`, `useGraphValue`) and `reactView()` for React-rendered node previews.
@@ -209,15 +209,17 @@ emitSource(graph, registry, { name: 'cylinderVolume', single: true });
 ```ts
 import { functionGraph, compileNode, NodeLibrary, localStorageStore, mathGraph } from 'mobile-nodemap';
 
-const node = compileNode(graph, functionGraph.createRegistry(), { type: 'lib/cylinder', title: 'Cylinder volume' });
+// A name is required; the description is optional. The type id defaults to lib/<name-as-slug>.
+const node = compileNode(graph, functionGraph.createRegistry(), { name: 'Cylinder volume', description: 'πr²h' });
 
 const library = new NodeLibrary();
-library.add({ type: 'lib/cylinder', title: 'Cylinder volume' }, graph, registry);   // compiles first; refuses broken maps
+library.add({ name: 'Cylinder volume', description: 'πr²h' }, graph, registry);   // compiles first; refuses broken maps
+library.on('edit', (entry) => openInBuilder(entry.graph));                          // "Edit in graph" was chosen
 const math = mathGraph.extend({ id: 'my-math', title: 'Math', packs: [library.toPack()] });
 
 const store = localStorageStore('app:');                  // any StoragePort adapter
 library.on('change', (entries) => store.put('library', entries));
-library.source('lib/cylinder', registry);                  // one TypeScript function
+library.source('lib/cylinder-volume', registry);           // one TypeScript function
 ```
 
 ## Layout, routing and placement
@@ -307,6 +309,8 @@ It renders in a shadow root. `--nm-*` CSS variables set on the element or any an
 | Undo / redo | toolbar | <kbd>Ctrl/⌘ Z</kbd>, <kbd>Ctrl/⌘ Shift Z</kbd> |
 
 Ports have a 44px touch target, form fields use 16px text (no iOS focus zoom), and the add menu is a bottom sheet on phones.
+
+**Tap a custom node** in any editor to see its details card: its name and description, its JavaScript (one function, with Copy) and **Edit in graph**, which opens its source map in the function builder. Saving there with the same type updates the node everywhere. Any node type can provide a card through `details(node)`.
 
 ## Themes and flavors
 

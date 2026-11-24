@@ -21,6 +21,8 @@ People repeat the same sub-maps. They want to package one as a node, reuse it el
 | F5 | `NodeLibrary`: add, replace, remove, `toPack()`, `source()`, JSON in and out, change events | Shipped |
 | F6 | Persistence through `StoragePort` (`localStorageStore`, `memoryStore`, or a custom adapter) | Shipped |
 | F7 | Demo: a Build panel with checks, signature, name, "Add to library", generated TypeScript and the library list | Shipped |
+| F8 | Compiling a node requires a **name**; the **description** is optional. Blank names are refused by `compileNode` and `NodeLibrary.add`, and the Build panel disables saving | Shipped |
+| F9 | Tapping a custom node shows its **JavaScript** (one function, copyable) and **Edit in graph**, which opens the source map in the builder; saving updates the node in place, keeping its type | Shipped |
 
 ## UX
 
@@ -28,6 +30,5 @@ The status line shows the first problem, or "ready · 2 inputs → 1 output". Th
 
 ## Open questions
 
-- Editing a library node opens its map again ("open definition").
 - Versioning library entries, and updating maps that use an older version.
 - Sharing libraries via URL or file import and export in the demo.

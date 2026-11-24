@@ -339,6 +339,9 @@ function markTab(id: string) {
 
 function loadExample(id: string, fresh = false) {
   current = examples.find((e) => e.id === id) ?? examples[0];
+  editingType = undefined;
+  buildName = gtype === demoFunction ? current.name : buildName;
+  buildDesc = gtype === demoFunction ? current.description ?? '' : buildDesc;
   if (fresh) store.clear(gtype.id, current.id);
   const saved = store.get(gtype.id, current.id);
   graph.load(structuredClone(saved ?? current.graph));
@@ -497,6 +500,9 @@ function renderJson() {
 // ------------------------------------------------------------------ function builder
 
 let buildName = '';
+let buildDesc = '';
+/** Set while editing an existing library node: saving replaces it and keeps its type id. */
+let editingType: string | undefined;
 
 function issuesNow() {
   return graph.validate();
@@ -512,32 +518,33 @@ function renderIssues() {
   statusEl.textContent = err ? err.message : `ready · ${sig.inputs.length} input${sig.inputs.length === 1 ? '' : 's'} → 1 output`;
 }
 
-function slug(s: string) {
-  return s.toLowerCase().replace(/[^\w]+/g, '-').replace(/^-|-$/g, '') || 'node';
-}
-
 function renderBuild(rebuild = false) {
   renderIssues();
   if (openPanel !== 'build') return;
-  panelTitle.textContent = 'Build a custom node';
+  panelTitle.textContent = editingType ? 'Edit a library node' : 'Build a custom node';
   if (rebuild || !panelBody.querySelector('#b-name')) {
     panelBody.innerHTML = `
       <p class="note">Input nodes are the new node's arguments, top to bottom. The one Output is its result.</p>
       <ul class="checks" id="b-checks" aria-live="polite"></ul>
       <div class="sig" id="b-sig"></div>
-      <label class="field" for="b-name">Name<input id="b-name" autocomplete="off" spellcheck="false"></label>
+      <label class="field" for="b-name"><span>Name <span class="req">required</span></span><input id="b-name" autocomplete="off" spellcheck="false" placeholder="e.g. Cylinder volume" required></label>
+      <label class="field" for="b-desc"><span>Description <span class="opt">optional</span></span><textarea id="b-desc" rows="2" placeholder="What it does, for the add menu"></textarea></label>
       <div class="row"><button type="button" class="btn primary" id="b-add">Add to library</button><span class="note" id="b-msg" role="status"></span></div>
       <h3 class="sub-h">As one TypeScript function</h3>
       <pre class="code" id="b-code"></pre>
       <div class="row"><button type="button" class="btn" id="b-copy">Copy code</button><span class="note" id="b-copied" role="status"></span></div>
       <h3 class="sub-h">Library</h3>
       <ul class="lib" id="b-lib"></ul>`;
+    panelBody.scrollTop = 0;
     const nameEl = $<HTMLInputElement>('#b-name');
-    nameEl.value = buildName || current?.name || 'My node';
+    const descEl = $<HTMLTextAreaElement>('#b-desc');
+    nameEl.value = buildName;
+    descEl.value = buildDesc;
     nameEl.addEventListener('input', () => {
       buildName = nameEl.value;
       renderBuild();
     });
+    descEl.addEventListener('input', () => (buildDesc = descEl.value));
     $('#b-add').addEventListener('click', addToLibrary);
     $('#b-copy').addEventListener('click', () => {
       const text = $('#b-code').textContent ?? '';
@@ -547,19 +554,23 @@ function renderBuild(rebuild = false) {
       );
     });
   }
-  const name = $<HTMLInputElement>('#b-name').value.trim() || 'My node';
+  const name = $<HTMLInputElement>('#b-name').value.trim();
   const issues = issuesNow();
   const errors = issues.filter((i) => i.level === 'error');
-  $('#b-checks').innerHTML = (issues.length ? issues : [{ level: 'ok', message: 'Ready to compile' }])
-    .map((i) => `<li data-level="${i.level}">${escapeHtml(i.message)}</li>`)
-    .join('');
+  $('#b-checks').innerHTML = [
+    ...issues.map((i) => `<li data-level="${i.level}">${escapeHtml(i.message)}</li>`),
+    name ? '' : '<li data-level="error">Give the node a name</li>',
+    !issues.length && name ? '<li data-level="ok">Ready to compile</li>' : '',
+  ].join('');
   const sig = signature(graph);
   const outEdge = [...graph.nodes.values()].filter((n) => n.type === 'graph/output').map((o) => graph.incoming(o.id)[0])[0];
   const outType = outEdge ? registry.outputsOf(graph.nodes.get(outEdge.from.node)!).find((p) => p.name === outEdge.from.port)?.type ?? 'any' : '?';
-  $('#b-sig').textContent = `${camel(name)}(${sig.inputs.map((p) => `${p.name}: ${p.type}`).join(', ')}) → ${outType}`;
-  ($('#b-add') as HTMLButtonElement).disabled = errors.length > 0;
+  $('#b-sig').textContent = `${camel(name || 'unnamed')}(${sig.inputs.map((p) => `${p.name}: ${p.type}`).join(', ')}) → ${outType}`;
+  const add = $('#b-add') as HTMLButtonElement;
+  add.disabled = errors.length > 0 || !name;
+  add.textContent = editingType ? 'Update in library' : 'Add to library';
   try {
-    $('#b-code').textContent = errors.length ? 'Fix the problems above to see the code.' : emitSource(graph, registry, { name: camel(name), single: true });
+    $('#b-code').textContent = errors.length ? 'Fix the problems above to see the code.' : emitSource(graph, registry, { name: camel(name || 'unnamed'), single: true });
   } catch (err) {
     $('#b-code').textContent = err instanceof Error ? err.message : String(err);
   }
@@ -568,32 +579,58 @@ function renderBuild(rebuild = false) {
   lib.innerHTML = entries.length ? '' : '<li><span class="note">Nothing yet. Added nodes appear here and in the add menu under Library.</span></li>';
   for (const e of entries) {
     const li = document.createElement('li');
-    li.innerHTML = `<span>${escapeHtml(e.title)}<small>${escapeHtml(e.type)}</small></span>`;
+    li.innerHTML = `<span>${escapeHtml(e.name)}<small>${escapeHtml(e.description ?? e.type)}</small></span>`;
+    const ed = document.createElement('button');
+    ed.type = 'button';
+    ed.className = 'btn';
+    ed.textContent = 'Edit';
+    ed.addEventListener('click', () => library.edit(e.type));
     const rm = document.createElement('button');
     rm.type = 'button';
     rm.className = 'btn';
     rm.textContent = 'Remove';
     rm.addEventListener('click', () => {
       library.remove(e.type);
+      if (editingType === e.type) editingType = undefined;
       refreshSession();
       renderBuild(true);
     });
-    li.append(rm);
+    li.append(ed, rm);
     lib.append(li);
   }
 }
 
 function addToLibrary() {
-  const name = $<HTMLInputElement>('#b-name').value.trim() || 'My node';
+  const name = $<HTMLInputElement>('#b-name').value.trim();
+  const description = $<HTMLTextAreaElement>('#b-desc').value.trim();
   try {
-    library.add({ type: `lib/${slug(name)}`, title: name, description: 'Built in the function builder' }, graph, registry);
+    const node = library.add({ name, description: description || undefined, type: editingType }, graph, registry);
+    const verb = editingType ? 'Updated' : 'Added';
+    editingType = node.type;
     refreshSession();
     renderBuild(true);
-    $('#b-msg').textContent = `Added “${name}”. Find it under Library in the add menu.`;
+    $('#b-msg').textContent = `${verb} “${name}”. Tap it in any map to see its code.`;
   } catch (err) {
     $('#b-msg').textContent = err instanceof Error ? err.message : String(err);
   }
 }
+
+// "Edit in graph" on a library node (from its details card, or the list above) opens its source graph here.
+library.on('edit', (entry) => {
+  if (activeIntegration) showTab(`${demoFunction.id}|${demoFunction.examples![0].id}`);
+  if (gtype !== demoFunction) startSession(demoFunction);
+  current = { id: `lib:${entry.type}`, name: entry.name, description: entry.description, graph: entry.graph };
+  graph.load(structuredClone(entry.graph));
+  editor.history?.reset();
+  editingType = entry.type;
+  buildName = entry.name;
+  buildDesc = entry.description ?? '';
+  blurbEl.textContent = `Editing “${entry.name}” from your library. Save to update every map that uses it.`;
+  markTab('');
+  requestAnimationFrame(() => editor.fit());
+  if (openPanel !== 'build') showPanel('build');
+  else renderBuild(true);
+});
 
 /** Rebuild the registry (to pick up library changes) without losing the map on screen. */
 function refreshSession() {

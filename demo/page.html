@@ -65,6 +65,9 @@ body { background: var(--surface); color: var(--ink); font-family: var(--f-ui); 
 .checks li[data-level="warning"]::before { content: "!"; color: #e67700; }
 .sig { font-family: var(--f-mono); font-size: 13px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); overflow-wrap: anywhere; }
 .field { display: flex; flex-direction: column; gap: 4px; font-weight: 600; }
+#panel-body > *, .call > * { flex: none; }
+.field .req, .field .opt { font-weight: 400; font-size: 12px; color: var(--muted); margin-left: 6px; }
+.field textarea { font: inherit; font-weight: 400; font-size: 16px; color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; resize: vertical; }
 .field input { font: inherit; font-weight: 400; font-size: 16px; color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .lib { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }

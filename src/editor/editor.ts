@@ -54,6 +54,7 @@ export interface EditorEvents extends Record<string, unknown> {
   viewport: Viewport;
   error: string;
   theme: Theme;
+  details: { node: string };
 }
 
 type Gesture =
@@ -122,6 +123,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
   private sheet?: HTMLElement;
   private records = new Map<string, NodeRecord>();
   private themeOff?: () => void;
+  private card?: HTMLElement;
+  private detailsFor?: string;
   private currentTheme?: Theme;
   /** Nodes whose "More" params are open. */
   private expanded = new Set<string>();
@@ -265,6 +268,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
     if (this.selected.node) this.records.get(this.selected.node)?.el.classList.remove('nm-selected');
     if (this.selected.edge) this.edgeEls.get(this.selected.edge)?.classList.remove('nm-selected');
     this.selected = sel;
+    if (this.detailsFor && this.detailsFor !== sel.node) this.hideDetails();
     if (sel.node) this.records.get(sel.node)?.el.classList.add('nm-selected');
     if (sel.edge) this.edgeEls.get(sel.edge)?.classList.add('nm-selected');
     this.updateToolbar();
@@ -704,6 +708,76 @@ export class NodeEditor extends Emitter<EditorEvents> {
     this.emit('error', message);
   }
 
+  /**
+   * Show a node's details card (its type's `details()`: text, code, actions). Custom nodes
+   * show their JavaScript and "Edit in graph". Tapping such a node calls this.
+   */
+  showDetails(id: string): void {
+    const node = this.graph.nodes.get(id);
+    const d = node && this.registry.get(node.type)?.details?.(node);
+    this.hideDetails();
+    if (!node || !d) return;
+    const close = h('button', { type: 'button', class: 'nm-card-close', 'aria-label': 'Close details' }, '×');
+    close.addEventListener('click', () => this.hideDetails());
+    const card = h(
+      'section',
+      { class: 'nm-card', role: 'dialog', 'aria-label': d.title },
+      h('header', {}, h('div', {}, h('strong', {}, d.title), ...(d.subtitle ? [h('p', {}, d.subtitle)] : [])), close),
+    );
+    if (d.code) {
+      const pre = h('pre', { class: 'nm-card-code', tabindex: '0', 'data-lang': d.code.lang }, d.code.text);
+      const status = h('span', { class: 'nm-card-status', role: 'status' });
+      const copy = h('button', { type: 'button', class: 'nm-card-btn' }, `Copy ${d.code.lang.toUpperCase()}`);
+      copy.addEventListener('click', () => {
+        const done = () => (status.textContent = 'Copied');
+        const fail = () => {
+          getSelection()?.selectAllChildren(pre);
+          status.textContent = 'Selected: copy with your keyboard or menu';
+        };
+        try {
+          navigator.clipboard?.writeText(d.code!.text).then(done, fail) ?? fail();
+        } catch {
+          fail();
+        }
+      });
+      card.append(pre);
+      const row = h('div', { class: 'nm-card-actions' }, copy);
+      for (const a of d.actions ?? []) {
+        const b = h('button', { type: 'button', class: `nm-card-btn${a.primary ? ' nm-card-primary' : ''}` }, a.label);
+        b.addEventListener('click', () => {
+          this.hideDetails();
+          a.run();
+        });
+        row.prepend(b);
+      }
+      row.append(status);
+      card.append(row);
+    } else if (d.actions?.length) {
+      const row = h('div', { class: 'nm-card-actions' });
+      for (const a of d.actions) {
+        const b = h('button', { type: 'button', class: `nm-card-btn${a.primary ? ' nm-card-primary' : ''}` }, a.label);
+        b.addEventListener('click', () => {
+          this.hideDetails();
+          a.run();
+        });
+        row.append(b);
+      }
+      card.append(row);
+    }
+    card.addEventListener('pointerdown', (e) => e.stopPropagation());
+    card.addEventListener('wheel', (e) => e.stopPropagation());
+    this.root.append(card);
+    this.card = card;
+    this.detailsFor = id;
+    this.emit('details', { node: id });
+  }
+
+  hideDetails(): void {
+    this.card?.remove();
+    this.card = undefined;
+    this.detailsFor = undefined;
+  }
+
   /** Switch theme (see EditorOptions.theme); null returns to the page's colours. */
   setTheme(theme: EditorOptions['theme'] | null): void {
     this.themeOff?.();
@@ -788,6 +862,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
           r.el.remove();
         }
         this.records.delete(c.node.id);
+        if (this.detailsFor === c.node.id) this.hideDetails();
         this.scheduleRoute();
         if (this.selected.node === c.node.id) this.select({});
         break;
@@ -1308,7 +1383,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       if (t.closest('input,textarea,select')) return;
       const mod = e.metaKey || e.ctrlKey;
       if (e.key === 'Delete' || e.key === 'Backspace') this.deleteSelection();
-      else if (e.key === 'Escape') this.cancelPending(), this.closePalette(), this.select({});
+      else if (e.key === 'Escape') this.cancelPending(), this.closePalette(), this.hideDetails(), this.select({});
       else if (mod && e.key.toLowerCase() === 'z') e.shiftKey ? this.history?.redo() : this.history?.undo();
       else if (mod && e.key.toLowerCase() === 'y') this.history?.redo();
       else if (mod && e.key.toLowerCase() === 'd') this.duplicateSelection();
@@ -1464,7 +1539,11 @@ export class NodeEditor extends Emitter<EditorEvents> {
             const p = this.pending;
             this.cancelPending();
             this.autoConnect(p, g.id);
-          } else this.select({ node: g.id });
+          } else {
+            this.select({ node: g.id });
+            // Nodes with details (e.g. custom nodes) show them on tap.
+            if (this.registry.get(this.graph.nodes.get(g.id)!.type)?.details) this.showDetails(g.id);
+          }
         }
         break;
       case 'wire': {

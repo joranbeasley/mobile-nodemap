@@ -144,6 +144,23 @@ export const css = /* css */ `
 .nm-btn.nm-danger { color: var(--_danger); }
 .nm-sep { width: 1px; background: var(--_border); margin: 6px 2px; }
 
+.nm-card { position: absolute; z-index: 7; left: max(12px, env(safe-area-inset-left, 0px)); right: max(12px, env(safe-area-inset-right, 0px));
+  bottom: calc(76px + env(safe-area-inset-bottom, 0px)); max-height: min(60%, 460px); display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 14px;
+  background: var(--_node); color: var(--_text); border: 1px solid var(--_border); border-radius: calc(var(--_radius) + 4px); box-shadow: var(--_shadow), 0 12px 32px rgb(0 0 0 / .18);
+  animation: nm-up .16s ease-out; user-select: text; -webkit-user-select: text; }
+@media (min-width: 720px) { .nm-card { left: auto; width: 460px; } }
+.nm-card header { display: flex; align-items: flex-start; gap: 10px; }
+.nm-card header div { flex: 1; min-width: 0; }
+.nm-card header strong { font-size: 15px; }
+.nm-card header p { margin: 2px 0 0; color: var(--_muted); font-size: 13px; line-height: 1.4; }
+.nm-card-close { border: 0; background: var(--_node-2); color: var(--_text); width: 36px; height: 36px; border-radius: 10px; font-size: 18px; cursor: pointer; flex: none; }
+.nm-card-code { margin: 0; flex: 1; min-height: 0; overflow: auto; font-family: var(--_mono); font-size: 12px; line-height: 1.5; white-space: pre;
+  background: var(--_node-2); border: 1px solid var(--_border); border-radius: 8px; padding: 10px 12px; color: var(--_text); }
+.nm-card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.nm-card-btn { font: inherit; font-size: 14px; font-weight: 500; min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--_border); background: var(--_node-2); color: var(--_text); cursor: pointer; }
+.nm-card-primary { background: var(--_accent); border-color: var(--_accent); color: var(--_bg); }
+.nm-card-btn:focus-visible, .nm-card-close:focus-visible, .nm-card-code:focus-visible { outline: 2px solid var(--_accent); outline-offset: 1px; }
+.nm-card-status { color: var(--_muted); font-size: 12px; }
 .nm-sheet-backdrop { position: absolute; inset: 0; background: rgb(0 0 0 / .25); z-index: 8; }
 .nm-sheet { position: absolute; left: 0; right: 0; bottom: 0; max-height: 72%; display: flex; flex-direction: column; z-index: 9;
   background: var(--_node); border-radius: 18px 18px 0 0; box-shadow: 0 -8px 30px rgb(0 0 0 / .2); padding-bottom: env(safe-area-inset-bottom, 0px);

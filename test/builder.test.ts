@@ -105,7 +105,7 @@ describe('Function builder', () => {
     const lib = new NodeLibrary();
     const changes: unknown[] = [];
     lib.on('change', (l) => changes.push(l));
-    const node = lib.add({ type: 'lib/cylinder', title: 'Cylinder volume' }, example('cylinder'), builder);
+    const node = lib.add({ type: 'lib/cylinder', name: 'Cylinder volume', description: 'πr²h' }, example('cylinder'), builder);
     expect(node.inputs!.map((p) => p.name)).toEqual(['radius', 'height']);
     expect(node.outputs).toEqual([{ name: 'volume', type: 'number' }]);
     expect(changes).toHaveLength(1);
@@ -128,7 +128,7 @@ describe('Function builder', () => {
 
   it('refuses to compile a map with errors', () => {
     const reg = functionGraph.createRegistry();
-    expect(() => compileNode({ version: 1, nodes: [], edges: [] }, reg, { type: 'x', title: 'X' })).toThrow(/Output/);
+    expect(() => compileNode({ version: 1, nodes: [], edges: [] }, reg, { type: 'x', name: 'X' })).toThrow(/Output/);
   });
 });
 
@@ -179,3 +179,67 @@ describe('Themes and flavors', () => {
     editor.destroy();
   });
 });
+
+describe('Naming and inspecting custom nodes', () => {
+  it('requires a name; the description is optional', () => {
+    const reg = functionGraph.createRegistry();
+    expect(() => compileNode(example('cylinder'), reg, { name: '' })).toThrow('A custom node needs a name');
+    expect(() => compileNode(example('cylinder'), reg, { name: '   ' })).toThrow('A custom node needs a name');
+    expect(() => new NodeLibrary().add({} as never, example('cylinder'), reg)).toThrow('A custom node needs a name');
+    const n = compileNode(example('cylinder'), reg, { name: ' Cylinder volume ' });
+    expect(n.title).toBe('Cylinder volume');
+    expect(n.type).toBe('lib/cylinder-volume');
+    expect(n.description).toBeUndefined();
+    expect(compileNode(example('cylinder'), reg, { name: 'Cyl', description: 'Volume' }).description).toBe('Volume');
+  });
+
+  it('a custom node shows its JavaScript and can open its source graph', async () => {
+    const builder = functionGraph.createRegistry();
+    const lib = new NodeLibrary();
+    lib.add({ name: 'Cylinder volume', description: 'πr²h' }, example('cylinder'), builder);
+    const edits: unknown[] = [];
+    lib.on('edit', (e) => edits.push(e));
+
+    const reg = mathGraph.createRegistry().use(lib.toPack());
+    const g = new Graph(reg);
+    g.addNode('lib/cylinder-volume', { id: 'c' });
+    const el = document.createElement('div');
+    document.body.append(el);
+    const editor = new NodeEditor(el, { graph: g, registry: reg });
+    editor.showDetails('c');
+    const card = el.querySelector('.nm-card')!;
+    expect(card.querySelector('strong')!.textContent).toBe('Cylinder volume');
+    expect(card.querySelector('header p')!.textContent).toBe('πr²h');
+    const code = card.querySelector('.nm-card-code')!.textContent!;
+    expect(code).toContain('async function cylinderVolume(inputs = {})');
+    // The JS shown really is the node: run it.
+    const fn = new Function(`${code.replace('export ', '')}; return cylinderVolume;`)();
+    expect(await fn({ radius: 1, height: 1 })).toBeCloseTo(Math.PI);
+
+    const editBtn = [...card.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Edit in graph')!;
+    editBtn.click();
+    expect(el.querySelector('.nm-card')).toBeNull();
+    expect(edits).toHaveLength(1);
+    expect((edits[0] as { graph: GraphJSON; name: string }).name).toBe('Cylinder volume');
+    expect((edits[0] as { graph: GraphJSON }).graph.nodes.some((n) => n.type === 'graph/output')).toBe(true);
+
+    editor.showDetails('c');
+    editor.select({});
+    expect(el.querySelector('.nm-card')).toBeNull();
+    editor.destroy();
+  });
+
+  it('updating an entry keeps its type so existing maps keep working', () => {
+    const builder = functionGraph.createRegistry();
+    const lib = new NodeLibrary();
+    lib.add({ name: 'Cylinder volume' }, example('cylinder'), builder);
+    lib.add({ name: 'Cylinder (renamed)', type: 'lib/cylinder-volume' }, example('cylinder'), builder);
+    expect(lib.list().map((e) => [e.type, e.name])).toEqual([['lib/cylinder-volume', 'Cylinder (renamed)']]);
+  });
+
+  it('loads libraries saved before names were required', () => {
+    const old = [{ type: 'lib/a', title: 'Old A', graph: example('bmi'), updatedAt: 1 }] as never;
+    expect(NodeLibrary.fromJSON(old).get('lib/a')!.name).toBe('Old A');
+  });
+});
+

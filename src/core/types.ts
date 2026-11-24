@@ -129,6 +129,11 @@ export interface NodeType {
    *   emit: ({ a, b }) => ({ out: `(${a}) + (${b})` })
    */
   emit?: (inputs: Record<string, string>, params: Record<string, unknown>) => Record<string, string>;
+  /**
+   * What the editor shows when someone taps this node: a title, text, code and actions.
+   * Custom nodes use it to show their JavaScript and an "Edit in graph" action.
+   */
+  details?: (node: NodeInstance) => NodeDetails;
   /** Set false for impure nodes (random, clock) so results are never reused from cache. */
   pure?: boolean;
   view?: NodeView;
@@ -142,6 +147,15 @@ export interface NodeType {
   migrate?: (params: Record<string, unknown>, fromVersion: number) => Record<string, unknown>;
   /** Free-form data for engines and tools (e.g. a network role). */
   meta?: Record<string, unknown>;
+}
+
+/** A card about a node: shown by the editor when the node is tapped. */
+export interface NodeDetails {
+  title: string;
+  subtitle?: string;
+  /** Source code to show (with a Copy button). */
+  code?: { lang: string; text: string };
+  actions?: { label: string; primary?: boolean; run(): void }[];
 }
 
 export interface NodeInstance {
