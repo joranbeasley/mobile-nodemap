@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from 'vitest';
-import { Graph, Evaluator, NodeEditor, dramaGraph, shotList, appearances, sceneInfo, getGraphType, seedanceScript, seedancePack, type DramaStatus } from '../src/index';
+import { Graph, Evaluator, NodeEditor, dramaGraph, shotList, appearances, sceneInfo, getGraphType, seedanceScript, seedanceShot, seedancePack, type DramaStatus } from '../src/index';
 
 const load = (id: string) => Graph.fromJSON(dramaGraph.examples!.find((e) => e.id === id)!.graph, dramaGraph.createRegistry());
 const run = (g: Graph) => new Evaluator(g, g.registry!).run();
@@ -91,58 +91,85 @@ describe('Drama graph type', () => {
   });
 });
 
+/** Read a stored (uncompressed) zip: name → bytes. */
+function unzip(bytes: Uint8Array): Map<string, Uint8Array> {
+  const out = new Map<string, Uint8Array>();
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let at = 0; dv.getUint32(at, true) === 0x04034b50; ) {
+    const size = dv.getUint32(at + 18, true);
+    const nameLen = dv.getUint16(at + 26, true);
+    const extra = dv.getUint16(at + 28, true);
+    const name = new TextDecoder().decode(bytes.subarray(at + 30, at + 30 + nameLen));
+    const start = at + 30 + nameLen + extra;
+    out.set(name, bytes.subarray(start, start + size));
+    at = start + size;
+  }
+  return out;
+}
+const text = (b?: Uint8Array) => new TextDecoder().decode(b);
+
 describe('Seedance export', () => {
-  it('writes one generation per clip of up to 15 s with numbered image references', () => {
+  it('makes one generation per shot with images numbered in upload order', () => {
     const g = load('term');
-    const s = seedanceScript(g, 'ep1');
-    expect(s.generations.map((x) => x.duration)).toEqual([12, 5, 13, 13]);
-    const first = s.generations[0];
-    expect(first.refs.length).toBeLessThanOrEqual(9);
-    expect(first.refs[0].path).toBe('assets/characters/maya-1.png');
-    expect(first.prompt).toContain('Maya is @Image1');
-    expect(first.prompt).toMatch(/Shot 1 \(0–8 s\): Wide shot, slow dolly-in\./);
-    expect(first.prompt).toContain('35mm film look'); // the season's style, even for one episode
-    expect(s.markdown).toMatch(/^# The Read-Through: Seedance script/);
-    expect(s.markdown).toContain('| @Image1 | ![Maya (character)](assets/characters/maya-1.png)');
-    expect(s.markdown).toContain('![School hall (location)](assets/locations/school-hall-2.png)');
-    // Every path the markdown uses is in the asset list, once.
-    const paths = new Set(s.assets.map((a) => a.path));
-    for (const m of s.markdown.matchAll(/\]\((assets\/[^)]+)\)/g)) expect(paths.has(m[1])).toBe(true);
-    expect(paths.size).toBe(s.assets.length);
+    const shot = seedanceShot(g, 's1a');
+    expect(shot.title).toBe('Ep 1 · Scene 1 · Shot 1');
+    expect(shot.duration).toBe(8);
+    expect(shot.refs.map((r) => r.path)).toEqual([
+      'images/01-maya.jpg',
+      'images/02-theo.jpg',
+      'images/03-jules.jpg',
+      'images/04-ms-okafor.jpg',
+      'images/05-school-hall.jpg',
+      'images/06-shot-1-frame.jpg',
+      'images/07-school-hall.jpg',
+    ]);
+    expect(shot.prompt).toContain('Maya is @Image1, stage manager');
+    expect(shot.prompt).toContain('Setting: School hall (@Image5, @Image7), interior, day.');
+    expect(shot.prompt).toContain('Shot (0–8 s): Wide shot, slow dolly-in.');
+    expect(shot.prompt).toContain('Match the composition of @Image6.');
+    expect(shot.prompt).toContain('35mm film look'); // the season's style
+    expect(shot.markdown).toMatch(/^# Ep 1 · Scene 1 · Shot 1: Seedance shot/);
+    expect(shot.markdown).toContain('| @Image1 | ![Maya (character)](images/01-maya.jpg)');
   });
 
-  it('caps reference images and splits long shots', () => {
+  it('writes a root script that points at each shot pack', () => {
+    const g = load('term');
+    const ep = seedanceScript(g, 'ep1');
+    expect(ep.kind).toBe('episode');
+    expect(ep.rootFile).toBe('script.md');
+    expect(ep.shots.map((s) => s.zipPath)).toEqual([
+      'shots/01-scene-1-shot-1.zip',
+      'shots/02-scene-1-shot-2.zip',
+      'shots/03-scene-1-shot-3.zip',
+      'shots/04-scene-2-shot-1.zip',
+      'shots/05-scene-2-shot-2.zip',
+      'shots/06-scene-3-shot-1.zip',
+      'shots/07-scene-3-shot-2.zip',
+    ]);
+    expect(ep.markdown).toContain('| 1 · Wide | `shots/01-scene-1-shot-1.zip` | 8 s | 7 | Maya, Theo, Jules, Ms Okafor |');
+    expect(ep.markdown).toContain('#### Shot 2 · 4 s · `shots/02-scene-1-shot-2.zip`');
+    const scene = seedanceScript(g, 'sc2');
+    expect(scene.rootFile).toBe('scene.md');
+    expect(scene.shots[0].zipPath).toBe('shots/01-shot-1.zip');
+    expect(seedanceScript(g, 'season').shots[0].zipPath).toBe('shots/01-ep-1-scene-1-shot-1.zip');
+    expect(seedanceScript(g, 's2b').rootFile).toBe('shot.md');
+  });
+
+  it('caps reference images and notes long shots', () => {
     const g = load('scene');
     for (let i = 0; i < 9; i++) {
       const c = g.addNode('drama/character', { id: `c${i}`, params: { images: [`data:image/png;base64,QUJD${i}`] } });
       g.connect({ node: c.id, port: 'appears' }, { node: 'k1', port: 'characters' });
     }
     g.setParam('k1', 'duration', 22);
-    const s = seedanceScript(g, 'ks');
-    expect(s.generations[0].refs).toHaveLength(9);
-    expect(s.generations[0].duration).toBe(15);
-    expect(s.markdown).toContain('Left out (this script allows 9 images per generation');
-    expect(s.markdown).toContain('so it is cut to 15 s');
+    const shot = seedanceShot(g, 'k1');
+    expect(shot.refs).toHaveLength(9);
+    expect(shot.dropped.length).toBeGreaterThan(0);
+    expect(shot.duration).toBe(15);
+    expect(shot.markdown).toContain('Left out (this script allows 9 images per clip');
+    expect(shot.markdown).toContain('so it is cut');
   });
 
-  it('packs script.md and the images into a zip', async () => {
-    const g = load('scene');
-    g.setParam('a', 'images', ['data:image/png;base64,iVBORw0KGgo=']);
-    const { filename, blob, script } = await seedancePack(g, 'ks');
-    expect(filename).toBe('scene-1-seedance.zip');
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    expect([...bytes.slice(0, 4)]).toEqual([0x50, 0x4b, 0x03, 0x04]);
-    const text = new TextDecoder('latin1').decode(bytes);
-    expect(text).toContain('script.md');
-    expect(text).toContain('assets/characters/ana-1.png');
-    // Without a canvas, SVG sketches go in as SVG and the script points at them.
-    expect(script.markdown).toContain('assets/characters/ben-1.svg');
-    const end = bytes.length - 22;
-    expect(new DataView(bytes.buffer).getUint16(end + 10, true)).toBe(script.assets.length + 1);
-  });
-});
-
-describe('Seedance settings', () => {
   it('takes the image cap and clip length from the episode, then the season', () => {
     const g = load('scene');
     for (let i = 0; i < 12; i++) {
@@ -150,20 +177,47 @@ describe('Seedance settings', () => {
       g.connect({ node: c.id, port: 'appears' }, { node: 'k1', port: 'characters' });
     }
     g.setParam('k1', 'duration', 25);
-    expect(seedanceScript(g, 'ks').generations[0].refs).toHaveLength(9);
-    // Put the scene in an episode in a season: the season's settings apply to the scene on its own too.
     g.addNode('drama/episode', { id: 'ep' });
     g.addNode('drama/season', { id: 'se', params: { maxImages: 20, maxClip: 30 } });
     g.connect({ node: 'ks', port: 'episode' }, { node: 'ep', port: 'scenes' });
     g.connect({ node: 'ep', port: 'season' }, { node: 'se', port: 'episodes' });
-    let s = seedanceScript(g, 'ks');
-    expect(s.generations[0].refs.length).toBeGreaterThan(12);
-    expect(s.generations[0].duration).toBe(28); // both shots (25 s + 3 s) fit one 30 s clip
-    expect(s.markdown).not.toContain('Left out');
-    // The episode beats the season.
+    let shot = seedanceShot(g, 'k1');
+    expect(shot.refs.length).toBeGreaterThan(12);
+    expect(shot.duration).toBe(25);
     g.setParam('ep', 'maxImages', 5);
-    s = seedanceScript(g, 'ep');
-    expect(s.generations[0].refs).toHaveLength(5);
-    expect(s.markdown).toContain('raise “reference images”');
+    shot = seedanceShot(g, 'k1');
+    expect(shot.refs).toHaveLength(5);
+  });
+
+  it('packs a shot as shot.md plus its images', async () => {
+    const g = load('scene');
+    g.setParam('a', 'images', ['data:image/png;base64,iVBORw0KGgo=']);
+    const { filename, blob } = await seedancePack(g, 'k1');
+    expect(filename).toBe('scene-1-shot-1-seedance.zip');
+    const files = unzip(new Uint8Array(await blob.arrayBuffer()));
+    expect([...files.keys()]).toEqual(['shot.md', 'images/01-ana.png', 'images/02-ben.svg', 'images/03-shot-1-frame.svg']);
+    // Without a canvas, SVG sketches go in as SVG and shot.md points at them.
+    expect(text(files.get('shot.md'))).toContain('images/02-ben.svg');
+    expect([...files.get('images/01-ana.png')!.slice(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]);
+  });
+
+  it('packs a scene as scene.md, a zip per shot and the storyboard', async () => {
+    const g = load('scene');
+    g.setParam('ks', 'storyboard', ['data:image/png;base64,iVBORw0KGgo=']);
+    const { filename, blob, script } = await seedancePack(g, 'ks');
+    expect(filename).toBe('scene-1-seedance.zip');
+    const files = unzip(new Uint8Array(await blob.arrayBuffer()));
+    expect([...files.keys()]).toEqual(['scene.md', 'shots/01-shot-1.zip', 'shots/02-shot-2.zip', 'storyboard/scene-1-01.png']);
+    expect(script.markdown).toContain('![Scene 1 storyboard 1](storyboard/scene-1-01.png)');
+    const inner = unzip(files.get('shots/02-shot-2.zip')!);
+    expect(inner.has('shot.md')).toBe(true);
+    expect(text(inner.get('shot.md'))).toContain('Shot (0–4 s): Close-up');
+  });
+
+  it('packs an episode as script.md and its shot zips', async () => {
+    const g = load('term');
+    const files = unzip(new Uint8Array(await (await seedancePack(g, 'ep2')).blob.arrayBuffer()));
+    expect([...files.keys()]).toEqual(['script.md', 'shots/01-scene-1-shot-1.zip', 'shots/02-scene-1-shot-2.zip', 'shots/03-scene-1-shot-3.zip']);
+    expect(text(files.get('script.md'))).toMatch(/^# Opening Night: Seedance script/);
   });
 });

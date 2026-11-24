@@ -560,25 +560,27 @@ function castText(graph: Graph, n: NodeInstance): string {
 
 const details = (node: NodeInstance, ctx: { graph: Graph }) => {
   const g = ctx.graph;
-  if (node.type === T.shot) {
-    const s = shotInfo(g, node);
-    return {
-      title: `Shot ${s.number}`,
-      subtitle: [s.framing, s.movement, `${s.duration}s`].join(' · '),
-      code: { lang: 'text', text: `${s.framing}, ${s.movement.toLowerCase()}, ${s.duration}s\nLocation: ${s.location ? dramaName(s.location) : 'none'}\nCharacters: ${names(s.characters) || 'none'}${s.props.length ? `\nProps: ${names(s.props)}` : ''}${s.description ? `\n\n${s.description}` : ''}\n` },
-    };
-  }
-  if (node.type === T.scene || node.type === T.episode || node.type === T.season) {
-    const title = node.type === T.scene ? `Scene ${Number(node.params.number ?? 1)}` : dramaName(node);
+  if (node.type === T.shot || node.type === T.scene || node.type === T.episode || node.type === T.season) {
     const script = seedanceScript(g, node.id);
-    const n = script.generations.length;
+    const n = script.shots.length;
+    const images = script.shots.reduce((t, s) => t + s.refs.length, 0);
+    const title = node.type === T.shot ? script.title : node.type === T.scene ? `Scene ${Number(node.params.number ?? 1)}` : dramaName(node);
+    const subtitle =
+      script.kind === 'shot'
+        ? `Seedance shot · ${script.shots[0].duration} s · ${images} reference image${images === 1 ? '' : 's'}`
+        : `Seedance script · ${n} shot pack${n === 1 ? '' : 's'}${script.storyboard.length ? ` · storyboard` : ''}`;
+    const save = (filename: string, data: Blob | string) => void Promise.resolve(saveDramaFile({ filename, data })).catch(() => undefined);
     return {
       title,
-      subtitle: `Seedance script · ${n} generation${n === 1 ? '' : 's'} · ${script.assets.length} image${script.assets.length === 1 ? '' : 's'}`,
+      subtitle,
       code: { lang: 'md', text: script.markdown },
       actions: [
-        { label: 'Download pack (.zip)', primary: true, run: () => void seedancePack(g, node.id).then((p) => saveDramaFile({ filename: p.filename, data: p.blob })).catch(() => undefined) },
-        { label: 'script.md', run: () => void Promise.resolve(saveDramaFile({ filename: `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-seedance.md`, data: script.markdown })).catch(() => undefined) },
+        {
+          label: script.kind === 'shot' ? 'Download shot (.zip)' : 'Download pack (.zip)',
+          primary: true,
+          run: () => void seedancePack(g, node.id).then((p) => save(p.filename, p.blob)).catch((e) => console.error('Seedance export failed', e)),
+        },
+        { label: script.rootFile, run: () => save(`${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-${script.rootFile}`, script.markdown) },
       ],
     };
   }
