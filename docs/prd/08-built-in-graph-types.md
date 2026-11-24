@@ -14,6 +14,7 @@ The library needs proof that the extension model handles very different domains:
 ## Network (`networkGraph`, id `network`)
 
 - Devices: internet, router, firewall, switch, Wi-Fi access point, server, laptop and phone. All are derived from one base device with `extendNode`.
+- Data stores: disk / volume, database, cache, object storage and message queue. They attach to servers through a `data` port and show whether they're reachable (through which and how many servers), how full they are, and warnings: nearly full, low cache hit rate, growing queue backlog, or not attached to any server.
 - Every device is editable: name, power, IP address, latency and bandwidth. Servers also have a type, CPU cores, RAM, storage and OS (summarised on the node, e.g. "Database · 32 cores · 256 GB RAM · 4 TB · Linux"); laptops and phones have an OS. Double-tap a device for the full-size Edit sheet. Bad or duplicate IPv4 addresses are flagged on the device and by `graph.validate()`.
 - Wires are cables, and loops are allowed.
 - A rule stops endpoints from connecting straight to the internet.

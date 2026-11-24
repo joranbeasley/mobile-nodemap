@@ -88,11 +88,19 @@ Install it with `registry.use(pack)`, or list it in a graph type's `packs`.
 | Export | id | |
 | --- | --- | --- |
 | `mathGraph` | `math` | Dataflow; `mathPack` (`nodemap/math`): values, math, logic, text, lists, async, display, graph I/O, constants, remap, sum all, plot function. Conversions number→string and boolean→number. |
-| `networkGraph` | `network` | `networkPack` (`nodemap/network`): internet, router, firewall, switch, Wi-Fi access point, server, laptop, phone; port type `link`; `networkEngine`; `allowCycles`; endpoints can't connect straight to the internet. Every device has editable `up`, `ip`, `latency` and `bandwidth`, and a name (`label`). Servers add `kind` (Application, Web, Database, File / NAS, Mail, DNS, Media, Game, Backup, Other: `SERVER_TYPES`), `cores`, `memory` (GB), `storage` (GB) and `os`; laptops and phones add `os`. `deviceSpecs(node)` gives the one-line summary shown on the node. `validate` warns about bad or duplicate IPv4 addresses (`ipIssues(nodes)`). |
+| `networkGraph` | `network` | `networkPack` (`nodemap/network`): internet, router, firewall, switch, Wi-Fi access point, server, laptop, phone; port type `link`; `networkEngine`; `allowCycles`; endpoints can't connect straight to the internet. Every device has editable `up`, `ip`, `latency` and `bandwidth`, and a name (`label`). Servers add `kind` (Application, Web, Database, File / NAS, Mail, DNS, Media, Game, Backup, Other: `SERVER_TYPES`), `cores`, `memory` (GB), `storage` (GB) and `os`; laptops and phones add `os`. `deviceSpecs(node)` gives the one-line summary shown on the node. **Data stores** (`net/disk`, `net/database`, `net/cache`, `net/bucket`, `net/queue`; `meta.role: 'data'`; derived from `networkDataStore`) attach to a server's `data` output (port type `data`). They have `up`, `size` / `used` (GB; size 0 = unlimited) and `latency`, plus their own settings: disk type and RAID; database engine and role; cache engine and hit rate; bucket provider and versioning; queue engine, backlog and retention. `validate` warns about bad or duplicate IPv4 addresses (`ipIssues(nodes)`) and data stores not attached to a server. |
 | `functionGraph` | `function` | Extends math. Input leaves are arguments and exactly one Output is required (`canAddNode` and `validate` via `functionIssues`). See [library](library.md). |
 | `stdlib` | | The math node types as a plain array (kept for compatibility). |
 | `networkDevice` | | The base device node, for `extendNode`. |
 | `networkStatusView` | | The device status view, for reuse. |
 | `builtinGraphTypes` | | `[mathGraph, networkGraph, functionGraph]`. |
 
-`networkEngine` publishes `outputs.status` for each device: `{ state: 'source' | 'online' | 'offline' | 'down' | 'blocking', latency?, hops?, bandwidth?, redundant?, ip?, ipIssue? }`. Its summary outputs are `{ online, offline, worstLatency }`.
+`networkEngine` publishes `outputs.status` for each device: `{ state: 'source' | 'online' | 'offline' | 'down' | 'blocking', latency?, hops?, bandwidth?, redundant?, ip?, ipIssue? }`.
+
+Data stores get `{ state: 'available' | 'unavailable' | 'down', hosts, latency, redundant, usage, usedGb, sizeGb, warning? }`:
+
+- **Available** while any attached server is online, reached at that server's latency plus their own. `redundant` means 2+ online servers.
+- **Warnings**: 85%+ full, a cache hit rate under 80%, or a queue backlog over 10,000.
+- Data attachments don't count as cables for device reachability.
+
+Its summary outputs are `{ online, offline, worstLatency, dataAvailable, dataUnavailable }`.
