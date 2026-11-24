@@ -911,7 +911,9 @@ export class NodeEditor extends Emitter<EditorEvents> {
     const W = r.width;
     const H = r.height - bottomUi;
     const placed: { x: number; y: number }[] = [];
-    for (const [id] of [...targets].slice(0, 8)) {
+    // With nothing selected, a few hints are enough: busy maps would bury the screen in chips.
+    const limit = sel ? 8 : W < 600 ? 3 : 5;
+    for (const [id] of [...targets].slice(0, limit)) {
       const b = box(id);
       // Nearest point on the screen edge to the node's centre.
       const cx = (b.x + b.w / 2) * k + this.vp.x;
@@ -926,7 +928,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       placed.push({ x, y });
       const n = this.graph.nodes.get(id)!;
       const def = this.registry.get(n.type);
-      const title = n.label ?? def?.title ?? n.type;
+      const title = this.titleOf(n);
       const dx = cx - x;
       const dy = cy - y;
       const arrow = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? '→' : '←') : dy > 0 ? '↓' : '↑';
@@ -969,7 +971,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
     this.hideDetails();
     this.sheetGuard = this.pointers.size ? Infinity : performance.now() + 350;
     const typeTitle = def?.title ?? node.type;
-    const titleEl = h('strong', {}, `Edit ${node.label ?? typeTitle}`);
+    const titleEl = h('strong', {}, `Edit ${this.titleOf(node)}`);
     const done = h('button', { type: 'button', class: 'nm-card-btn nm-card-primary' }, 'Done');
     done.addEventListener('click', () => this.closePalette());
     const head = h(
@@ -1025,7 +1027,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
     });
     // Duplicate and Delete stay pinned under the scrolling form, so they're always on screen.
     const footer = h('div', { class: 'nm-card-actions nm-edit-actions' }, dup, del);
-    const sheet = h('div', { class: 'nm-sheet nm-edit', role: 'dialog', 'aria-label': `Edit ${node.label ?? typeTitle}` }, h('div', { class: 'nm-sheet-grip' }), head, form, footer);
+    const sheet = h('div', { class: 'nm-sheet nm-edit', role: 'dialog', 'aria-label': `Edit ${this.titleOf(node)}` }, h('div', { class: 'nm-sheet-grip' }), head, form, footer);
     sheet.addEventListener('pointerdown', (e) => e.stopPropagation());
     // The finger that double-tapped lifts onto the sheet: swallow that click so it can't toggle a control.
     sheet.addEventListener(
@@ -1071,7 +1073,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
     if (d.code) {
       const pre = h('pre', { class: 'nm-card-code', tabindex: '0', 'data-lang': d.code.lang }, d.code.text);
       const status = h('span', { class: 'nm-card-status', role: 'status' });
-      const copy = h('button', { type: 'button', class: 'nm-card-btn' }, `Copy ${d.code.lang.toUpperCase()}`);
+      const copy = h('button', { type: 'button', class: 'nm-card-btn' }, d.code.lang === 'text' ? 'Copy' : `Copy ${d.code.lang.toUpperCase()}`);
       copy.addEventListener('click', () => {
         const done = () => (status.textContent = 'Copied');
         const fail = () => {
@@ -1221,11 +1223,13 @@ export class NodeEditor extends Emitter<EditorEvents> {
         break;
       case 'node:label': {
         const title = this.records.get(c.node.id)?.el.querySelector('.nm-title');
-        if (title) title.textContent = c.node.label ?? this.registry.get(c.node.type)?.title ?? c.node.type;
+        if (title) title.textContent = this.titleOf(c.node);
         break;
       }
       case 'node:params': {
         const rec = this.records.get(c.node.id);
+        const titleEl = rec?.el.querySelector('.nm-title');
+        if (titleEl && !c.node.label) titleEl.textContent = this.titleOf(c.node);
         if (rec && rec.portsKey !== this.portsKey(c.node)) {
           this.buildNode(c.node);
           this.measure(c.node.id);
@@ -1278,7 +1282,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
         { class: 'nm-head' },
         h('span', { class: 'nm-status' }),
         ...(def?.icon ? [iconEl(def.icon)] : []),
-        h('span', { class: 'nm-title' }, node.label ?? def?.title ?? node.type),
+        h('span', { class: 'nm-title' }, this.titleOf(node)),
         h('span', { class: 'nm-cat' }, def?.category ?? ''),
       ),
     );
@@ -1353,6 +1357,17 @@ export class NodeEditor extends Emitter<EditorEvents> {
     }
     const result = this.evaluator?.results.get(node.id);
     if (result) this.showResult(node.id, result);
+  }
+
+  /** What a node's header says: its name, its type's caption, or the type's title. */
+  private titleOf(n: NodeInstance): string {
+    if (n.label) return n.label;
+    const def = this.registry.get(n.type);
+    try {
+      return def?.caption?.(n) || def?.title || n.type;
+    } catch {
+      return def?.title ?? n.type;
+    }
   }
 
   private paramControl(node: NodeInstance, param: ParamDef): HTMLElement {

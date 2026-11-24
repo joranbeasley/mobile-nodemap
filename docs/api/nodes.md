@@ -33,6 +33,7 @@ const router = extendNode(device, { type: 'net/router', title: 'Router', outputs
 | `type` | `string` | Required, unique, namespaced id. |
 | `title`, `category`, `description`, `tags`, `docs` | | Add menu and search. |
 | `color` | CSS colour | Header colour (themes may override, see `nodeColors`). |
+| `caption(node)` | `→ string` | Header title for nodes without a name, from their params (e.g. `Shot 2 · Close-up`). Updates as params change. |
 | `icon` | text, emoji or `<svg…>` | Header and add menu. |
 | `flavor` | `'source' \| 'transform' \| 'sink' \| 'view' \| 'control' \| string` | Role, for themes. Inferred when left out. |
 | `width` | `number` | Fixed width in px. |

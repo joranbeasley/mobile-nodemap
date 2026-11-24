@@ -13,6 +13,7 @@ import {
   mathGraph,
   networkGraph,
   umlGraph,
+  dramaGraph,
   functionGraph,
   NodeLibrary,
   localStorageStore,
@@ -145,7 +146,7 @@ const demoFunction = registerGraphType(
   }),
 );
 
-const graphTypes: GraphType[] = [demoMath, demoFunction, networkGraph, umlGraph, paletteGraph];
+const graphTypes: GraphType[] = [demoMath, demoFunction, networkGraph, umlGraph, dramaGraph, paletteGraph];
 type Example = GraphExample;
 
 // ------------------------------------------------------------------ app
@@ -237,6 +238,9 @@ function startSession(type: GraphType) {
     if (registry.engine && 'online' in r.outputs) {
       const o = r.outputs as { online: number; offline: number; worstLatency: number };
       statusEl.textContent = `${o.online} online · ${o.offline} offline · worst ${o.worstLatency} ms`;
+    } else if (registry.engine && typeof r.outputs.summary === 'string') {
+      statusEl.setAttribute('data-state', r.errors.length ? 'error' : 'ok');
+      statusEl.textContent = r.outputs.summary;
     } else if (registry.engine && 'classes' in r.outputs) {
       const o = r.outputs as { classes: number; interfaces: number; enums: number; warnings: number };
       statusEl.setAttribute('data-state', o.warnings ? 'error' : 'ok');
@@ -652,7 +656,7 @@ function renderHelp() {
   panelTitle.textContent = 'How to use it';
   panelBody.innerHTML = `
   <ul class="help">
-    <li><b>Graph type</b> the picker next to the logo switches what you are building: maths, a network, a UML class diagram, or colour palettes from a third-party pack</li>
+    <li><b>Graph type</b> the picker next to the logo switches what you are building: maths, a network, a UML class diagram, a drama production, or colour palettes from a third-party pack</li>
     <li><b>Pan</b> drag the background · <b>Zoom</b> pinch, or scroll with a trackpad</li>
     <li><b>Move</b> drag any node · <b>Select</b> tap it, then use the toolbar</li>
     <li><b>Go to a neighbour</b> zoomed in, connected nodes off screen show as chips on the screen edge: tap one to go there</li>

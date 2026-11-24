@@ -1,4 +1,4 @@
-# 08. Built-in graph types: math, network and UML
+# 08. Built-in graph types: math, network, UML and drama
 
 ## Problem
 
@@ -30,6 +30,17 @@ The library needs proof that the extension model handles very different domains:
 - Tapping a classifier shows its TypeScript; `umlToTypeScript` exports the whole diagram.
 - Examples: "Shapes" (interface, abstract class, inheritance chain, composition, enum, note) and "Shop" (associations, composition, a payment interface, and one implementation missing `refund()` to show the warning).
 
+## Drama (`dramaGraph`, id `drama`)
+
+- For drama clubs, student films and web series: plan a production as a map.
+- Characters (name, description, pictures, played by), locations (name, INT/EXT, description, pictures) and props feed shots.
+- A shot has exactly one location and any number of characters and props, plus a number, framing, camera movement, length, description and storyboard frames. Its header reads "Shot 2 · Close-up".
+- Numbered scenes are made of shots and have a time of day, a description and an optional storyboard. With no storyboard, the scene shows a filmstrip of its shots' first frames.
+- Episodes (title, number, optional description) are made of scenes, and seasons of episodes. Each piece belongs to one parent; characters and locations are reused freely.
+- Pictures: tap + on a selected node to add photos from the camera or library (shrunk before they are stored), tap a picture to view it full screen, × to remove it.
+- The engine shows on each node where it is used ("3 scenes · 5 shots"), scene sluglines ("INT. SCHOOL HALL — DAY"), cast lists and running times, and flags shots with no location or scene, empty scenes and duplicate scene numbers.
+- Tapping a scene, episode or season shows a copyable shot list; tapping a character, location or prop lists every shot they are in.
+
 ## Function builder (`functionGraph`, id `function`)
 
 See [04](04-function-builder-and-library.md).
@@ -37,5 +48,6 @@ See [04](04-function-builder-and-library.md).
 ## Open questions
 
 - Network: VLANs, link capacity on wires (edge params), packet loss.
+- Drama: call sheets per shooting day, script pages linked to scenes, costume continuity.
 - UML: sequence and state diagrams; multiplicities and role names on wires (edge params); import from TypeScript.
 - Math: units on port types (metres vs feet) with automatic conversion.

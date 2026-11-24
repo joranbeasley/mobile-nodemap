@@ -12,7 +12,7 @@ Give `container` a size. The editor adds `.nm-root`, makes it focusable and inje
 
 **Fields need a selected node.** A node's inputs, selects and toggles respond only while the node is selected. On any other node a tap, even one right on a field, selects the node, and the next tap edits. Connection dots work either way. Their touch areas are generous (18 px dots), and reach outward, away from the node.
 
-**Ghosts.** When zoomed in, connected nodes that are off screen appear as small chips on the screen edge nearest to them, with an arrow and the node's name. With a node selected, the chips are its connections; otherwise they're the far ends of wires that start on screen (up to 8). Tapping one pans there (`goToNode`). They live in `.nm-ghosts` and are styled by `.nm-ghost[data-side]`.
+**Ghosts.** When zoomed in, connected nodes that are off screen appear as small chips on the screen edge nearest to them, with an arrow and the node's name. With a node selected, the chips are its connections; otherwise they're the far ends of wires that start on screen (up to 5, or 3 on phones; a selected node shows up to 8). Tapping one pans there (`goToNode`). They live in `.nm-ghosts` and are styled by `.nm-ghost[data-side]`.
 
 Bottom sheets (the add menu and the Edit sheet) open in an overlay layer over the whole page, `.nm-root.nm-overlay` on `<body>` (or inside the shadow root), so on phones they can rise to near the top of the screen. The overlay copies the editor's resolved colours and fonts, and is removed when the sheet closes.
 

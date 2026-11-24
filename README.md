@@ -4,7 +4,7 @@ A small, dependency-free TypeScript library for building **node maps** (node gra
 
 - **`mobile-nodemap/core`**: the data model and the extension API. `Graph`, `History`, plus `defineGraphType`, `definePack`, `defineNode`, `extendNode` and `Registry`. No DOM.
 - **`mobile-nodemap/runtime`**: the evaluator. Memoised, async, cancellable execution; `compile()` turns a map into a plain async function; `graphNode()` turns a map into a reusable node. No DOM.
-- **Built-in graph types and packs**: `mathGraph` / `mathPack` (about 35 nodes), `networkGraph` / `networkPack` (devices plus a reachability engine) `umlGraph` / `umlPack` (class diagrams with UML arrows, checks and TypeScript export) and `functionGraph` (build your own nodes).
+- **Built-in graph types and packs**: `mathGraph` / `mathPack` (about 35 nodes), `networkGraph` / `networkPack` (devices plus a reachability engine) `umlGraph` / `umlPack` (class diagrams with UML arrows, checks and TypeScript export) `dramaGraph` / `dramaPack` (plan a production: characters, locations, shots, scenes, episodes, with pictures and shot lists) and `functionGraph` (build your own nodes).
 - **Themes**: six built-in themes (three light, three dark) and node flavors. See [Themes and flavors](#themes-and-flavors).
 - **Ports and adapters**: standard interfaces (`GraphPort`, `NodeDefinition`, `EnginePort`, `StoragePort`, `RenderPort`, `NodeRunner`, …) with swappable adapters. See [Architecture](#architecture).
 
@@ -70,6 +70,7 @@ Built in:
 - **`mathGraph`** (`'math'`): dataflow over numbers, lists, logic, text and async nodes, plus graph inputs and outputs. Maps can be called as functions.
 - **`networkGraph`** (`'network'`): devices and cables with loops allowed. Instead of dataflow, its engine works out each device's fastest path to the internet: latency, hops, bottleneck bandwidth, and whether a second path exists. Powered-off devices and closed firewalls cut traffic, and a rule stops laptops plugging straight into the internet.
 - **`umlGraph`** (`'uml'`): class diagrams: classes, interfaces, enums and notes joined by inheritance, implementation, association, composition, aggregation and dependency, each drawn with its UML arrow. It flows top to bottom, checks that classes implement their interfaces, and exports TypeScript.
+- **`dramaGraph`** (`'drama'`): productions for a drama club or film: characters, locations and props feed shots (one location, many characters each), numbered shots make scenes, scenes make episodes and seasons. Nodes hold pictures, and the engine works out appearances, sluglines, running times and shot lists.
 
 `registryFor(json)` builds the right registry for a saved map from its `type`.
 

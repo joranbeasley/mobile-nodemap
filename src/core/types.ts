@@ -126,6 +126,11 @@ export interface NodeType {
    * or a pack's own. Inferred from the ports when left out.
    */
   flavor?: string;
+  /**
+   * Header title for nodes without a name, worked out from their params:
+   *   caption: (n) => `Shot ${n.params.number}`
+   */
+  caption?: (node: NodeInstance) => string;
   /** Short text, an emoji or an inline `<svg>` shown in the header and the add menu. */
   icon?: string;
   /** Extra search words for the add menu. */

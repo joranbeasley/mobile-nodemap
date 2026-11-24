@@ -35,7 +35,7 @@ export const css = /* css */ `
   --nm-head: var(--nm-type-color, var(--nm-flavor, var(--_muted))); cursor: grab; }
 .nm-overview .nm-node { cursor: zoom-in; }
 /* A node's fields respond only once the node is selected; until then a tap selects the node. */
-.nm-node:not(.nm-selected) :is(input, select, textarea, summary, label) { pointer-events: none; }
+.nm-node:not(.nm-selected) :is(input, select, textarea, summary, label, button) { pointer-events: none; }
 .nm-node:not(.nm-selected) .nm-body { cursor: pointer; }
 /* Ghosts: connected nodes that are off screen, pinned to the nearest screen edge. */
 .nm-ghosts { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
