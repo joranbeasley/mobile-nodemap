@@ -143,6 +143,11 @@ export const css = /* css */ `
 .nm-root[data-flow="TB"] .nm-port[data-dir="in"]::after { bottom: calc(50% + 1px); }
 .nm-root[data-flow="TB"] .nm-port[data-dir="out"]::after { top: calc(50% + 1px); }
 .nm-root[data-flow="TB"] .nm-node { margin-block: 0; }
+.nm-root[data-flow="TB"] .nm-node.nm-dense:not(.nm-selected) .nm-port:not(.nm-linked)::after { content: none; }
+.nm-root[data-flow="TB"].nm-connecting .nm-node.nm-dense .nm-port.nm-ok::after { content: attr(data-label); }
+/* A port with no editor and no value needs no row top to bottom: its label is beside the dot. */
+.nm-root[data-flow="TB"] .nm-row.nm-bare:has(> .nm-val:empty) { display: contents; }
+.nm-root[data-flow="TB"] .nm-row.nm-bare:has(> .nm-val:empty) > :not(.nm-port) { display: none; }
 .nm-connecting .nm-port { opacity: .25; }
 .nm-connecting .nm-port.nm-ok, .nm-connecting .nm-port.nm-anchor { opacity: 1; }
 .nm-port.nm-ok { animation: nm-ok 1s ease-in-out infinite alternate; }

@@ -13,6 +13,8 @@ export interface GraphTypeEditorDefaults {
   wires?: 'smart' | 'curved';
   /** Tidy the map when it is first opened. */
   autoLayout?: boolean;
+  /** Which way maps of this type flow (see the editor's `direction`). UML uses 'TB': parents on top. */
+  direction?: 'auto' | 'LR' | 'TB';
 }
 
 export interface GraphTypeDef {

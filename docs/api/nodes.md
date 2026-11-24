@@ -43,7 +43,7 @@ const router = extendNode(device, { type: 'net/router', title: 'Router', outputs
 | `pure` | `boolean` | `false` = never cache. |
 | `view` | `{ render(el, result, node) }` | Custom preview inside the node. See `reactView` for React. |
 | `emit(inputs, params)` | `→ Record<port, jsExpression>` | Inline this node in `emitSource` output. |
-| `details(node)` | `→ NodeDetails` | What the editor shows when the node is tapped. |
+| `details(node, ctx)` | `→ NodeDetails` | What the editor shows when the node is tapped. `ctx` has the `graph` and the node's latest `result`. |
 | `onCreate(node)` | `→ params \| void` | New nodes only (not on load). |
 | `version`, `migrate(params, from)` | | Upgrade saved params. |
 | `meta` | `Record<string, unknown>` | For engines and tools (the network engine reads `meta.role`). |
@@ -100,6 +100,9 @@ registry.definePortType({
   coerce: (v) => normalise(v),     // convert values arriving from accepted types
   inline: 'color',                 // inline editor: 'number' | 'text' | 'boolean' | a param kind | false
   default: '#888888',
+  // How wires of this type look: dashed, with markers at the output end (start) or input end (end).
+  // Markers: 'arrow' | 'triangle' | 'triangle-filled' | 'diamond' | 'diamond-filled' | 'circle'.
+  wire: { dash: true, start: 'triangle' },
 });
 ```
 

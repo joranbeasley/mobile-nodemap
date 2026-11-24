@@ -182,7 +182,7 @@ export class NodeMapElement extends Base {
       evaluator: this._evaluator,
       toolbar: !this.hasAttribute('no-toolbar'),
       wires: this.getAttribute('wires') === 'curved' ? 'curved' : 'smart',
-      direction: dirAttr(this.getAttribute('direction')),
+      direction: this.hasAttribute('direction') || !this._registry?.id ? dirAttr(this.getAttribute('direction')) : (getGraphType(this._registry.id)?.editor?.direction ?? 'auto'),
       layout: this._layout,
     }));
     this.applyTheme(this.getAttribute('theme'));

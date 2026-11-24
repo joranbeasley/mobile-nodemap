@@ -29,7 +29,7 @@ Bottom sheets (the add menu and the Edit sheet) open in an overlay layer over th
 | `longPressMs` | `450` | Long-press time before the add sheet opens. |
 | `overviewZoom` | `0.6` | Below this zoom the map is an overview: tapping a node (even on a field or port) zooms in on it instead of editing. `0` turns it off. |
 | `wires` | `'smart'` | `'smart'` (routed around nodes) or `'curved'`. |
-| `direction` | `'auto'` | `'LR'` (left to right), `'TB'` (top to bottom: inputs on the top edge, outputs on the bottom, wires run down) or `'auto'` (top to bottom on narrow portrait screens, else left to right; follows rotation). |
+| `direction` | `'auto'` | `'LR'` (left to right), `'TB'` (top to bottom: inputs on the top edge, outputs on the bottom, wires run down) or `'auto'` (top to bottom on narrow portrait screens, else left to right; follows rotation). A graph type can set it with `editor.direction`. Top to bottom, ports with no editor or value lose their row (their label sits beside the dot), and nodes with four or more ports on an edge label only linked ports until selected. |
 | `layout` | `layered()` | Engine used by `autoLayout()`. |
 | `placement` | `true` | Place new and dropped nodes in free space; push nodes aside. |
 | `theme` | page colours | A theme id or object, or `{ light, dark }`. See [themes](themes.md). |

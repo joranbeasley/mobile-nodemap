@@ -12,6 +12,7 @@ import {
   elkLayout,
   mathGraph,
   networkGraph,
+  umlGraph,
   functionGraph,
   NodeLibrary,
   localStorageStore,
@@ -144,7 +145,7 @@ const demoFunction = registerGraphType(
   }),
 );
 
-const graphTypes: GraphType[] = [demoMath, demoFunction, networkGraph, paletteGraph];
+const graphTypes: GraphType[] = [demoMath, demoFunction, networkGraph, umlGraph, paletteGraph];
 type Example = GraphExample;
 
 // ------------------------------------------------------------------ app
@@ -217,7 +218,7 @@ function startSession(type: GraphType) {
   registry = type.createRegistry();
   graph = new Graph(registry);
   evaluator = new Evaluator(graph, registry);
-  editor = new NodeEditor($('#canvas'), { graph, registry, evaluator, wires: wiresSel.value as 'smart' | 'curved', layout: layoutEngine });
+  editor = new NodeEditor($('#canvas'), { graph, registry, evaluator, wires: wiresSel.value as 'smart' | 'curved', layout: layoutEngine, direction: type.editor?.direction });
   applyTheme();
   const building = type === demoFunction;
   ($('[data-panel="build"]') as HTMLElement).hidden = !building;
@@ -236,6 +237,10 @@ function startSession(type: GraphType) {
     if (registry.engine && 'online' in r.outputs) {
       const o = r.outputs as { online: number; offline: number; worstLatency: number };
       statusEl.textContent = `${o.online} online · ${o.offline} offline · worst ${o.worstLatency} ms`;
+    } else if (registry.engine && 'classes' in r.outputs) {
+      const o = r.outputs as { classes: number; interfaces: number; enums: number; warnings: number };
+      statusEl.setAttribute('data-state', o.warnings ? 'error' : 'ok');
+      statusEl.textContent = `${o.classes} classes · ${o.interfaces} interfaces · ${o.enums} enums` + (o.warnings ? ` · ${o.warnings} warning${o.warnings > 1 ? 's' : ''}` : '');
     } else {
       statusEl.textContent = r.errors.length
         ? `${r.errors.length} error${r.errors.length > 1 ? 's' : ''}`
@@ -647,7 +652,7 @@ function renderHelp() {
   panelTitle.textContent = 'How to use it';
   panelBody.innerHTML = `
   <ul class="help">
-    <li><b>Graph type</b> the picker next to the logo switches what you are building: maths, a network, or colour palettes from a third-party pack</li>
+    <li><b>Graph type</b> the picker next to the logo switches what you are building: maths, a network, a UML class diagram, or colour palettes from a third-party pack</li>
     <li><b>Pan</b> drag the background · <b>Zoom</b> pinch, or scroll with a trackpad</li>
     <li><b>Move</b> drag any node · <b>Select</b> tap it, then use the toolbar</li>
     <li><b>Go to a neighbour</b> zoomed in, connected nodes off screen show as chips on the screen edge: tap one to go there</li>

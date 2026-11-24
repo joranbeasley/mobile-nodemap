@@ -155,6 +155,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
   private sheetGuard = 0;
   private opts: Required<Pick<EditorOptions, 'minZoom' | 'maxZoom' | 'longPressMs' | 'placement' | 'overviewZoom'>>;
   private zoomAnim = 0;
+  /** Unique per editor, for ids that must not clash with other editors on the page. */
+  private uid = Math.random().toString(36).slice(2, 8);
   private ghostLayer!: HTMLElement;
   private ghostFrame = 0;
   private fieldGuard?: { id: string; until: number };
@@ -1056,7 +1058,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
    */
   showDetails(id: string): void {
     const node = this.graph.nodes.get(id);
-    const d = node && this.registry.get(node.type)?.details?.(node);
+    const d = node && this.registry.get(node.type)?.details?.(node, { graph: this.graph, result: this.evaluator?.results.get(id) });
     this.hideDetails();
     if (!node || !d) return;
     const close = h('button', { type: 'button', class: 'nm-card-close', 'aria-label': 'Close details' }, '×');
@@ -1298,7 +1300,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       body.append(
         h(
           'div',
-          { class: 'nm-row nm-out', 'data-port': p.name },
+          { class: 'nm-row nm-out nm-bare', 'data-port': p.name },
           h('span', { class: 'nm-val' }),
           h('span', { class: 'nm-label' }, p.label ?? p.name),
           this.portEl(node.id, p, 'out', outPorts.indexOf(p), outPorts.length),
@@ -1316,10 +1318,13 @@ export class NodeEditor extends Emitter<EditorEvents> {
       const pt = this.registry.portType(p.type);
       const inline = p.inline ?? (!p.multiple && (pt ? pt.inline !== false && !!pt.inline : Registry.isPrimitive(p.type) || p.type === 'any'));
       if (p.multiple) row.classList.add('nm-multi');
+      if (!inline) row.classList.add('nm-bare');
       if (inline) row.append(h('span', { class: 'nm-inline' }, this.inlineControl(node, p)));
       body.append(row);
     }
     el.append(body, h('div', { class: 'nm-view' }), h('div', { class: 'nm-error' }));
+    // Many ports on one edge (top to bottom) would crowd their labels: show only the linked ones until selected.
+    if (Math.max(outPorts.length, inPorts.length) >= 4) el.classList.add('nm-dense');
     // A listener on each port makes browsers with touch adjustment snap taps to ports, not nearby inputs.
     el.querySelectorAll('.nm-port').forEach((p) => p.addEventListener('click', noop));
     // …and one on the node and its header, so a tap that lands on the header stays there.
@@ -1665,8 +1670,15 @@ export class NodeEditor extends Emitter<EditorEvents> {
     line.classList.add('nm-edge');
     const type = this.registry.outputsOf(this.graph.nodes.get(e.from.node)!).find((p) => p.name === e.from.port)?.type;
     if (type) line.setAttribute('data-type', type);
-    const color = this.registry.portType(type)?.color;
+    const pt = this.registry.portType(type);
+    const color = pt?.color;
     if (color) line.style.setProperty('--nm-port-color', color);
+    if (pt?.wire) {
+      const w = pt.wire;
+      if (w.dash) line.style.strokeDasharray = w.dash === true ? '7 5' : w.dash;
+      if (w.start) line.setAttribute('marker-start', `url(#${this.marker(w.start, color ?? 'currentColor')})`);
+      if (w.end) line.setAttribute('marker-end', `url(#${this.marker(w.end, color ?? 'currentColor')})`);
+    }
     const hit = document.createElementNS(SVGNS, 'path');
     hit.classList.add('nm-edge-hit');
     hit.dataset.edge = e.id;
@@ -1674,6 +1686,48 @@ export class NodeEditor extends Emitter<EditorEvents> {
     this.wires.insertBefore(g, this.tempWire);
     this.edgeEls.set(e.id, g);
     this.drawEdge(e);
+  }
+
+  /** An SVG marker for a wire end (created once per shape and colour). Returns its id. */
+  private marker(shape: string, color: string): string {
+    const id = `nm-mk-${this.uid}-${shape}-${color.replace(/[^\w]/g, '')}`;
+    if (this.wires.querySelector(`#${id}`)) return id;
+    let defs = this.wires.querySelector('defs');
+    if (!defs) {
+      defs = document.createElementNS(SVGNS, 'defs');
+      this.wires.prepend(defs);
+    }
+    const m = document.createElementNS(SVGNS, 'marker');
+    m.id = id;
+    m.setAttribute('viewBox', '0 0 16 16');
+    m.setAttribute('markerUnits', 'userSpaceOnUse');
+    m.setAttribute('markerWidth', '16');
+    m.setAttribute('markerHeight', '16');
+    // The tip stops 10px short of the port's centre so the 18px port dot doesn't cover it.
+    m.setAttribute('refX', '25');
+    m.setAttribute('refY', '8');
+    m.setAttribute('overflow', 'visible');
+    // Drawn pointing at the wire's end; auto-start-reverse points start markers back at the start.
+    m.setAttribute('orient', 'auto-start-reverse');
+    const shapePath: Record<string, string> = {
+      arrow: 'M3,2 L15,8 L3,14',
+      triangle: 'M2,1.5 L15,8 L2,14.5 Z',
+      'triangle-filled': 'M2,1.5 L15,8 L2,14.5 Z',
+      diamond: 'M1,8 L8,3 L15,8 L8,13 Z',
+      'diamond-filled': 'M1,8 L8,3 L15,8 L8,13 Z',
+      circle: 'M8,3 a5,5 0 1,0 0.01,0 Z',
+    };
+    const p = document.createElementNS(SVGNS, 'path');
+    p.setAttribute('d', shapePath[shape] ?? shapePath.arrow);
+    p.setAttribute('stroke', color);
+    p.setAttribute('stroke-width', '1.8');
+    p.setAttribute('stroke-linejoin', 'round');
+    const filled = shape.endsWith('-filled');
+    p.setAttribute('fill', shape === 'arrow' ? 'none' : filled ? color : 'var(--_node)');
+    p.style.fill = shape === 'arrow' ? 'none' : filled ? color : 'var(--_node)';
+    m.append(p);
+    defs.append(m);
+    return id;
   }
 
   private drawEdge(e: Edge): void {

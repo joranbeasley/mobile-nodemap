@@ -83,7 +83,7 @@ body { background: var(--surface); color: var(--ink); font-family: var(--f-ui); 
 h3.sub-h { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 6px 0 0; }
 .pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 @media (max-width: 700px) { #blurb { flex-basis: 100%; } .controls { width: 100%; } #status { margin-right: auto; } }
-@media (max-width: 700px) { .controls .pick { flex: 1 1 0; min-width: 0; } }
+@media (max-width: 700px) { .controls { flex-wrap: wrap; } .controls .pick { flex: 1 1 0; min-width: 0; } #status { flex-basis: 100%; white-space: normal; } }
 @media (max-width: 400px) { #status { display: none; } }
 .app[data-mode="integration"] .controls { display: none; }
 .tab-divider { width: 1px; background: var(--line); margin: 10px 6px; flex: none; }

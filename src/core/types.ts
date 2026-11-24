@@ -35,6 +35,22 @@ export interface PortTypeDef {
   inline?: string | false;
   /** Value used when nothing is connected and no default is given. */
   default?: unknown;
+  /**
+   * How wires of this type look: dashed, and markers at the output end (`start`) or the input
+   * end (`end`). UML uses it for hollow triangles, diamonds and open arrows.
+   */
+  wire?: WireStyle;
+}
+
+export type WireMarker = 'arrow' | 'triangle' | 'triangle-filled' | 'diamond' | 'diamond-filled' | 'circle';
+
+export interface WireStyle {
+  /** true for a standard dash, or an SVG dash array such as '2 4'. */
+  dash?: boolean | string;
+  /** Marker at the output end of the wire. */
+  start?: WireMarker;
+  /** Marker at the input end of the wire. */
+  end?: WireMarker;
 }
 
 interface ParamBase {
@@ -133,7 +149,7 @@ export interface NodeType {
    * What the editor shows when someone taps this node: a title, text, code and actions.
    * Custom nodes use it to show their JavaScript and an "Edit in graph" action.
    */
-  details?: (node: NodeInstance) => NodeDetails;
+  details?: (node: NodeInstance, ctx: NodeDetailsContext) => NodeDetails;
   /** Set false for impure nodes (random, clock) so results are never reused from cache. */
   pure?: boolean;
   view?: NodeView;
@@ -147,6 +163,12 @@ export interface NodeType {
   migrate?: (params: Record<string, unknown>, fromVersion: number) => Record<string, unknown>;
   /** Free-form data for engines and tools (e.g. a network role). */
   meta?: Record<string, unknown>;
+}
+
+/** What `details()` can look at: the map around the node and its latest result. */
+export interface NodeDetailsContext {
+  graph: import('./graph.js').Graph;
+  result?: NodeResult;
 }
 
 /** A card about a node: shown by the editor when the node is tapped. */

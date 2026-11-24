@@ -14,7 +14,7 @@ const lab = defineGraphType({
   exclude: ['async/*', 'text/case'],
   rules: { ... },                      // below
   engine: myEngine,                    // replaces dataflow
-  editor: { wires: 'smart', autoLayout: true },
+  editor: { wires: 'smart', autoLayout: true, direction: 'TB' }, // direction: 'auto' | 'LR' | 'TB'
   examples: [{ id, name, description?, graph }],
   setup(registry) { ... },             // last word
 });
@@ -89,11 +89,14 @@ Install it with `registry.use(pack)`, or list it in a graph type's `packs`.
 | --- | --- | --- |
 | `mathGraph` | `math` | Dataflow; `mathPack` (`nodemap/math`): values, math, logic, text, lists, async, display, graph I/O, constants, remap, sum all, plot function. Conversions number→string and boolean→number. |
 | `networkGraph` | `network` | `networkPack` (`nodemap/network`): internet, router, firewall, switch, Wi-Fi access point, server, laptop, phone; port type `link`; `networkEngine`; `allowCycles`; endpoints can't connect straight to the internet. Every device has editable `up`, `ip`, `latency` and `bandwidth`, and a name (`label`). Servers add `kind` (Application, Web, Database, File / NAS, Mail, DNS, Media, Game, Backup, Other: `SERVER_TYPES`), `cores`, `memory` (GB), `storage` (GB) and `os`; laptops and phones add `os`. `deviceSpecs(node)` gives the one-line summary shown on the node. **Data stores** (`net/disk`, `net/database`, `net/cache`, `net/bucket`, `net/queue`; `meta.role: 'data'`; derived from `networkDataStore`) attach to a server's `data` output (port type `data`). They have `up`, `size` / `used` (GB; size 0 = unlimited) and `latency`, plus their own settings: disk type and RAID; database engine and role; cache engine and hit rate; bucket provider and versioning; queue engine, backlog and retention. `validate` warns about bad or duplicate IPv4 addresses (`ipIssues(nodes)`) and data stores not attached to a server. |
+| `umlGraph` | `uml` | `umlPack` (`nodemap/uml`): `uml/class` (name = `label`; `abstract`, `attributes`, `methods`), `uml/interface` (`methods`), `uml/enum` (`values`) and `uml/note` (`text`). Relationships are port types with UML wire styles: `uml-generalization` (hollow triangle), `uml-realization` (dashed, hollow triangle), `uml-association` (open arrow), `uml-composition` (filled diamond), `uml-aggregation` (hollow diamond), `uml-dependency` (dashed, open arrow), `uml-note` (dotted); the `referenced` input (`uml-ref`) accepts the reference kinds. Wires run parent → child and owner → part, and the type defaults to `direction: 'TB'`. Rules: a class extends one class, kinds must match, no inheritance cycles (associations may loop); `validate` flags invalid or duplicate type names. `umlEngine` checks that concrete classes implement their interfaces' methods and the abstract methods of their superclasses (counting inherited ones), and flags unused interfaces. `umlToTypeScript(graph, registry, ids?)` exports TypeScript (parents first); each classifier's details card shows its own. `parseUmlMembers(text)` parses lines like `- total(): number`, `{abstract} area(): number`, `static of(n: number): Sq`. |
 | `functionGraph` | `function` | Extends math. Input leaves are arguments and exactly one Output is required (`canAddNode` and `validate` via `functionIssues`). See [library](library.md). |
 | `stdlib` | | The math node types as a plain array (kept for compatibility). |
 | `networkDevice` | | The base device node, for `extendNode`. |
 | `networkStatusView` | | The device status view, for reuse. |
-| `builtinGraphTypes` | | `[mathGraph, networkGraph, functionGraph]`. |
+| `builtinGraphTypes` | | `[mathGraph, networkGraph, functionGraph, umlGraph]`. |
+
+`umlEngine` publishes `outputs.uml` for each classifier: `{ kind, name, abstract?, attributes, methods, values?, parents, warnings }`, and a summary `{ classes, interfaces, enums, relationships, warnings }`.
 
 `networkEngine` publishes `outputs.status` for each device: `{ state: 'source' | 'online' | 'offline' | 'down' | 'blocking', latency?, hops?, bandwidth?, redundant?, ip?, ipIssue? }`.
 
