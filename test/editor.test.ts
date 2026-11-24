@@ -32,13 +32,15 @@ describe('NodeEditor', () => {
     editor.destroy();
   });
 
-  it('opens the add-node sheet and adds a node', () => {
+  it('opens the add-node sheet and adds a node', async () => {
     const reg = new Registry(stdlib);
     const g = new Graph(reg);
     const el = document.createElement('div');
     document.body.append(el);
     const editor = new NodeEditor(el, { graph: g, registry: reg });
     editor.openPalette({ x: 0, y: 0 });
+    // Taps are ignored briefly after opening so a lifting finger cannot pick an item.
+    await new Promise((r) => setTimeout(r, 380));
     const item = [...el.querySelectorAll<HTMLButtonElement>('.nm-sheet-item')].find((b) => b.textContent!.startsWith('Add'))!;
     item.click();
     expect(g.nodes.size).toBe(1);
