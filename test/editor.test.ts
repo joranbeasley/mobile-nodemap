@@ -219,12 +219,15 @@ describe('Overview zoom', () => {
     editor.destroy();
   });
 
-  it('at a readable zoom, taps on fields are left to the field', () => {
+  it('at a readable zoom, taps on a selected node’s fields are left to the field', () => {
     const { el, editor } = setup();
     editor.setViewport({ k: 1 });
     expect(editor.isOverview).toBe(false);
+    editor.select({ node: 'n' });
+    const changes: unknown[] = [];
+    editor.on('select', (s) => changes.push(s));
     tap(el.querySelector('[data-id="n"] input[type="number"]')!);
-    expect(editor.selection.node).toBeUndefined();
+    expect(changes).toEqual([]); // the editor didn't handle it; the field did
     expect(editor.viewport.k).toBe(1);
     editor.destroy();
   });
@@ -257,6 +260,74 @@ describe('Flow direction in the editor', () => {
     editor.setDirection('LR');
     expect(editor.flow).toBe('LR');
     expect(el.dataset.flow).toBe('LR');
+    editor.destroy();
+  });
+});
+
+describe('Focus before fields, and ghosts for off-screen neighbours', () => {
+  const tap = (target: Element) => {
+    const o = { bubbles: true, cancelable: true, pointerId: 9, pointerType: 'touch', clientX: 10, clientY: 10, button: 0 };
+    target.dispatchEvent(new PointerEvent('pointerdown', o));
+    target.dispatchEvent(new PointerEvent('pointerup', o));
+  };
+  const setup = () => {
+    const reg = new Registry(stdlib);
+    const g = new Graph(reg);
+    g.addNode('value/number', { id: 'a', x: 40, y: 40, params: { value: 2 } });
+    g.addNode('view/display', { id: 'far', x: 3000, y: 60 });
+    g.connect({ node: 'a', port: 'value' }, { node: 'far', port: 'value' });
+    const el = document.createElement('div');
+    document.body.append(el);
+    // happy-dom has no layout: give the canvas a phone-sized box.
+    el.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: 400, bottom: 700, width: 400, height: 700, toJSON: () => ({}) }) as DOMRect;
+    const editor = new NodeEditor(el, { graph: g, registry: reg, direction: 'LR' });
+    editor.setViewport({ x: 0, y: 0, k: 1 });
+    return { g, el, editor };
+  };
+
+  it('a tap on an unselected node’s field selects the node instead', () => {
+    const { el, editor } = setup();
+    const field = el.querySelector('[data-id="a"] input[type="number"]')!;
+    tap(field);
+    expect(editor.selection.node).toBe('a');
+    // Now that it is selected, the field gets the tap (the editor leaves it alone).
+    editor.select({});
+    editor.select({ node: 'a' });
+    tap(field);
+    expect(editor.selection.node).toBe('a');
+    editor.destroy();
+  });
+
+  it('shows a ghost for an off-screen neighbour and pans to it', async () => {
+    const { el, editor } = setup();
+    editor.select({ node: 'a' });
+    editor.renderGhosts();
+    const ghost = el.querySelector<HTMLButtonElement>('.nm-ghost')!;
+    expect(ghost).not.toBeNull();
+    expect(ghost.dataset.node).toBe('far');
+    expect(ghost.dataset.side).toBe('right');
+    expect(ghost.textContent).toContain('Display');
+    ghost.click();
+    expect(editor.selection.node).toBe('far');
+    await new Promise((r) => setTimeout(r, 400));
+    // The far node is now in view, at the same zoom.
+    const v = editor.viewport;
+    expect(v.k).toBeCloseTo(1);
+    expect(-v.x).toBeGreaterThan(2500);
+    editor.renderGhosts();
+    expect(el.querySelector('.nm-ghost')!.getAttribute('data-node')).toBe('a'); // and a ghost points back
+    editor.destroy();
+  });
+
+  it('no ghosts when everything connected is on screen, or in the overview', () => {
+    const { g, el, editor } = setup();
+    g.moveNode('far', 250, 60);
+    editor.renderGhosts();
+    expect(el.querySelector('.nm-ghost')).toBeNull();
+    g.moveNode('far', 3000, 60);
+    editor.setViewport({ k: 0.3 });
+    editor.renderGhosts();
+    expect(el.querySelector('.nm-ghost')).toBeNull();
     editor.destroy();
   });
 });

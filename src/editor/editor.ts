@@ -155,6 +155,9 @@ export class NodeEditor extends Emitter<EditorEvents> {
   private sheetGuard = 0;
   private opts: Required<Pick<EditorOptions, 'minZoom' | 'maxZoom' | 'longPressMs' | 'placement' | 'overviewZoom'>>;
   private zoomAnim = 0;
+  private ghostLayer!: HTMLElement;
+  private ghostFrame = 0;
+  private fieldGuard?: { id: string; until: number };
   private direction: 'auto' | 'LR' | 'TB';
   private flowNow: 'LR' | 'TB' = 'LR';
   private wireStyle: 'smart' | 'curved';
@@ -196,7 +199,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
     this.viewportEl.append(this.wires);
     this.hud = h('div', { class: 'nm-hud', hidden: '' });
     this.toast = h('div', { class: 'nm-toast', hidden: '', role: 'status' });
-    container.append(this.viewportEl, this.hud, this.toast);
+    this.ghostLayer = h('div', { class: 'nm-ghosts', 'aria-label': 'Connected nodes off screen' });
+    container.append(this.viewportEl, this.ghostLayer, this.hud, this.toast);
     if (options.toolbar !== false) this.buildToolbar();
 
     if (typeof ResizeObserver !== 'undefined') {
@@ -296,6 +300,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
     this.root.style.backgroundSize = `${s}px ${s}px`;
     this.root.style.backgroundPosition = `${this.vp.x}px ${this.vp.y}px`;
     this.root.classList.toggle('nm-overview', this.isOverview);
+    this.scheduleGhosts();
     this.emit('viewport', this.viewport);
   }
 
@@ -384,6 +389,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
     if (sel.node) this.records.get(sel.node)?.el.classList.add('nm-selected');
     if (sel.edge) this.edgeEls.get(sel.edge)?.classList.add('nm-selected');
     this.updateToolbar();
+    this.scheduleGhosts();
     this.emit('select', { ...sel });
   }
 
@@ -859,6 +865,94 @@ export class NodeEditor extends Emitter<EditorEvents> {
     this.emit('error', message);
   }
 
+  // ---------------------------------------------------------------- edge ghosts
+
+  private scheduleGhosts(): void {
+    if (this.ghostFrame || typeof requestAnimationFrame === 'undefined') return;
+    this.ghostFrame = requestAnimationFrame(() => {
+      this.ghostFrame = 0;
+      this.renderGhosts();
+    });
+  }
+
+  /**
+   * Connected nodes that are off screen show as small "ghosts" on the screen edge nearest to
+   * them: for the selected node's connections, or (with nothing selected) the far ends of
+   * wires that start on screen. Tapping one pans there and selects it.
+   */
+  renderGhosts(): void {
+    const layer = this.ghostLayer;
+    layer.textContent = '';
+    const r = this.root.getBoundingClientRect();
+    if (!r.width || this.isOverview || !this.graph.edges.size) return;
+    const k = this.vp.k;
+    const bottomUi = this.toolbar ? 72 : 0;
+    const view = { x: -this.vp.x / k, y: -this.vp.y / k, w: r.width / k, h: (r.height - bottomUi) / k };
+    const box = (id: string) => {
+      const n = this.graph.nodes.get(id)!;
+      const rec = this.records.get(id);
+      return { x: n.x, y: n.y, w: rec?.w ?? 180, h: rec?.h ?? 80 };
+    };
+    const visible = (id: string) => overlaps(box(id), view, -8);
+    const targets = new Map<string, string>(); // off-screen node -> a visible neighbour
+    const consider = (a: string, b: string) => {
+      if (!targets.has(b) && visible(a) && !visible(b)) targets.set(b, a);
+    };
+    const sel = this.selected.node && this.graph.nodes.has(this.selected.node) ? this.selected.node : undefined;
+    for (const e of this.graph.edges.values()) {
+      if (sel && e.from.node !== sel && e.to.node !== sel) continue;
+      consider(e.from.node, e.to.node);
+      consider(e.to.node, e.from.node);
+    }
+    if (!targets.size) return;
+    const pad = 10;
+    const W = r.width;
+    const H = r.height - bottomUi;
+    const placed: { x: number; y: number }[] = [];
+    for (const [id] of [...targets].slice(0, 8)) {
+      const b = box(id);
+      // Nearest point on the screen edge to the node's centre.
+      const cx = (b.x + b.w / 2) * k + this.vp.x;
+      const cy = (b.y + b.h / 2) * k + this.vp.y;
+      let x = Math.min(W - pad, Math.max(pad, cx));
+      let y = Math.min(H - pad, Math.max(pad, cy));
+      // Keep chips from stacking on top of each other.
+      for (let tries = 0; tries < 8 && placed.some((p) => Math.abs(p.x - x) < 110 && Math.abs(p.y - y) < 34); tries++) {
+        if (x <= pad || x >= W - pad) y = Math.min(H - pad, y + 36);
+        else x = Math.min(W - pad, x + 112);
+      }
+      placed.push({ x, y });
+      const n = this.graph.nodes.get(id)!;
+      const def = this.registry.get(n.type);
+      const title = n.label ?? def?.title ?? n.type;
+      const dx = cx - x;
+      const dy = cy - y;
+      const arrow = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? '→' : '←') : dy > 0 ? '↓' : '↑';
+      const side = x <= pad ? 'left' : x >= W - pad ? 'right' : y <= pad ? 'top' : 'bottom';
+      const flavor = this.records.get(id)?.el.dataset.flavor ?? '';
+      const chip = h(
+        'button',
+        { type: 'button', class: 'nm-ghost', 'data-side': side, 'data-node': id, 'data-flavor': flavor, 'aria-label': `Go to ${title}`, title: `Go to ${title}` },
+        ...(side === 'left' || side === 'top' ? [h('b', {}, arrow)] : []),
+        h('span', {}, title),
+        ...(side === 'right' || side === 'bottom' ? [h('b', {}, arrow)] : []),
+      );
+      if (def?.color) chip.style.setProperty('--nm-type-color', def.color);
+      chip.style.left = `${x}px`;
+      chip.style.top = `${y}px`;
+      chip.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+      chip.addEventListener('click', () => this.goToNode(id));
+      layer.append(chip);
+    }
+  }
+
+  /** Pan (keeping the zoom) so a node is centred, and select it. */
+  goToNode(id: string): void {
+    if (!this.graph.nodes.has(id)) return;
+    this.select({ node: id });
+    this.zoomToNode(id, { zoom: this.vp.k });
+  }
+
   /**
    * A full-size editing sheet for one node: its name, every param (advanced ones too) and
    * the values of unconnected inputs, with Duplicate and Delete. On phones this is far easier
@@ -1067,6 +1161,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
 
   destroy(): void {
     cancelAnimationFrame(this.zoomAnim);
+    cancelAnimationFrame(this.ghostFrame);
     this.closePalette();
     this.themeOff?.();
     cancelAnimationFrame(this.routeFrame);
@@ -1150,6 +1245,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
         break;
     }
     this.updateToolbar();
+    this.scheduleGhosts();
   }
 
   private portsKey(node: NodeInstance): string {
@@ -1226,6 +1322,9 @@ export class NodeEditor extends Emitter<EditorEvents> {
     el.append(body, h('div', { class: 'nm-view' }), h('div', { class: 'nm-error' }));
     // A listener on each port makes browsers with touch adjustment snap taps to ports, not nearby inputs.
     el.querySelectorAll('.nm-port').forEach((p) => p.addEventListener('click', noop));
+    // …and one on the node and its header, so a tap that lands on the header stays there.
+    el.addEventListener('click', noop);
+    el.querySelector('.nm-head')?.addEventListener('click', noop);
 
     if (old) {
       this.resizeObs?.unobserve(old.el);
@@ -1681,6 +1780,21 @@ export class NodeEditor extends Emitter<EditorEvents> {
       this.disposers.push(() => root.removeEventListener(t, fn as EventListener, o));
     };
     on('pointerdown', (e) => this.onDown(e));
+    // Swallow the mouse-down / click / focus that follow the tap which selected a node.
+    const guard = (e: Event) => {
+      const fg = this.fieldGuard;
+      if (!fg || performance.now() > fg.until) return;
+      const t = e.target as Element;
+      if (!t.closest?.(`.nm-node[data-id="${CSS.escape(fg.id)}"]`) || !t.closest('input, select, textarea, summary, label')) return;
+      if (e.type === 'focusin') (t as HTMLElement).blur();
+      else {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    for (const type of ['mousedown', 'click', 'focusin'] as const) on(type, guard, { capture: true });
+    // A new touch means the selecting tap's events are over: the next tap reaches the field.
+    on('pointerdown', () => (this.fieldGuard = undefined), { capture: true });
     on('pointermove', (e) => this.onMove(e));
     on('pointerup', (e) => this.onUp(e));
     on('pointercancel', (e) => this.onUp(e, true));
@@ -1718,9 +1832,15 @@ export class NodeEditor extends Emitter<EditorEvents> {
   private onDown(e: PointerEvent): void {
     let t = e.target as Element;
     // In the overview a node is one big target: its fields and ports don't respond.
-    if (this.isOverview && t.closest('.nm-node') && !t.closest('.nm-sheet, .nm-toolbar, .nm-hud, .nm-card')) {
-      if (t.closest('input, select, textarea, button, summary')) e.preventDefault();
-      t = t.closest('.nm-node')!;
+    const nodeOf = t.closest<HTMLElement>('.nm-node');
+    // A node's fields only respond once it is selected (and never in the overview): until
+    // then the whole node is one target, so a tap selects it however small its fields are.
+    const inert = nodeOf && (this.isOverview || !nodeOf.classList.contains('nm-selected')) && !t.closest('.nm-port');
+    if (inert && !t.closest('.nm-sheet, .nm-toolbar, .nm-hud, .nm-card')) {
+      if (t.closest('input, select, textarea, button, summary, label')) e.preventDefault();
+      t = nodeOf!;
+    } else if (this.isOverview && nodeOf) {
+      t = nodeOf;
     } else if (t.closest('input, select, textarea, button, .nm-sheet, .nm-toolbar, .nm-hud')) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -1863,6 +1983,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
           } else {
             // A second tap on the same node opens its Edit sheet; a first tap selects it.
             const now = performance.now();
+            // The tap that selects a node must not also reach its (now live) fields.
+            if (this.selected.node !== g.id) this.fieldGuard = { id: g.id, until: now + 350 };
             const again = this.lastTap?.id === g.id && now - this.lastTap.t < 350;
             this.lastTap = { id: g.id, t: now };
             this.select({ node: g.id });

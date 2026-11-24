@@ -10,6 +10,10 @@ const editor = new NodeEditor(container: HTMLElement, options: EditorOptions);
 
 Give `container` a size. The editor adds `.nm-root`, makes it focusable and injects its stylesheet once per document or shadow root.
 
+**Fields need a selected node.** A node's inputs, selects and toggles respond only while the node is selected. On any other node a tap, even one right on a field, selects the node, and the next tap edits. Connection dots work either way. Their touch areas are generous (18 px dots), and reach outward, away from the node.
+
+**Ghosts.** When zoomed in, connected nodes that are off screen appear as small chips on the screen edge nearest to them, with an arrow and the node's name. With a node selected, the chips are its connections; otherwise they're the far ends of wires that start on screen (up to 8). Tapping one pans there (`goToNode`). They live in `.nm-ghosts` and are styled by `.nm-ghost[data-side]`.
+
 Bottom sheets (the add menu and the Edit sheet) open in an overlay layer over the whole page, `.nm-root.nm-overlay` on `<body>` (or inside the shadow root), so on phones they can rise to near the top of the screen. The overlay copies the editor's resolved colours and fonts, and is removed when the sheet closes.
 
 ## `EditorOptions`
@@ -49,6 +53,8 @@ Bottom sheets (the add menu and the Edit sheet) open in an overlay layer over th
 | `autoLayout({ animate?, fit?, maxWidth? })` | Tidy in the current flow, as one roomy flow (never wrapped unless you pass `maxWidth`). Records the flow in `graph.meta.flow`; a map arranged for the other flow is tidied automatically when it opens. |
 | `setLayout(engine)` / `setWires(style)` / `setTheme(theme \| null)` | |
 | `fit({ padding?, minScale? })` | `minScale` (default 0.6) keeps text readable; pass `0` to show everything. |
+| `goToNode(id)` | Pan (keeping the zoom) so a node is centred, and select it. What tapping a ghost does. |
+| `renderGhosts()` | Redraw the edge ghosts now (they redraw by themselves on pan, zoom, edits and selection). |
 | `zoomToNode(id, { animate?, zoom? })` | Centre a node at a comfortable zoom (100%, or smaller if it wouldn't fit). |
 | `zoomAt(factor, cx?, cy?)` / `setViewport({ x?, y?, k? })` / `screenToWorld(cx, cy)` / `ensureVisible(id)` | |
 | `layoutInput()` | What layout engines receive. |
@@ -75,6 +81,8 @@ Bottom sheets (the add menu and the Edit sheet) open in an overlay layer over th
 | Add | long-press, **+** | **+**, A, Space |
 | Add connected | select a node, port or wire, then **+** | same |
 | Zoom in on a node | tap it while zoomed out (below `overviewZoom`) | click it while zoomed out |
+| Go to a connected node off screen | tap its ghost on the screen edge | click the ghost |
+| Edit a node's fields | tap the node to select it, then tap the field | same |
 | Edit a node | double-tap it, or select it and tap the pencil | double-click, or select and press E / Enter |
 | Details | tap a node that has `details` | click |
 | Undo, redo | toolbar | ⌘Z, ⌘⇧Z or ⌘Y |

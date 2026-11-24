@@ -34,6 +34,23 @@ export const css = /* css */ `
   border: 1px solid var(--_border); border-radius: var(--_radius); box-shadow: var(--_shadow); font-size: 13px; line-height: 1.3;
   --nm-head: var(--nm-type-color, var(--nm-flavor, var(--_muted))); cursor: grab; }
 .nm-overview .nm-node { cursor: zoom-in; }
+/* A node's fields respond only once the node is selected; until then a tap selects the node. */
+.nm-node:not(.nm-selected) :is(input, select, textarea, summary, label) { pointer-events: none; }
+.nm-node:not(.nm-selected) .nm-body { cursor: pointer; }
+/* Ghosts: connected nodes that are off screen, pinned to the nearest screen edge. */
+.nm-ghosts { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+.nm-ghost { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; display: inline-flex; align-items: center; gap: 6px;
+  max-width: 150px; min-height: 32px; padding: 0 10px; border-radius: 999px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+  color: var(--_text); background: color-mix(in srgb, var(--_node) 88%, transparent); border: 1.5px dashed var(--nm-type-color, var(--_accent));
+  box-shadow: var(--_shadow); opacity: .92; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+.nm-ghost[data-side="left"] { transform: translate(0, -50%); }
+.nm-ghost[data-side="right"] { transform: translate(-100%, -50%); }
+.nm-ghost[data-side="top"] { transform: translate(-50%, 0); }
+.nm-ghost[data-side="bottom"] { transform: translate(-50%, -100%); }
+.nm-ghost span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.nm-ghost b { color: var(--nm-type-color, var(--_accent)); font-size: 14px; }
+.nm-ghost:active { transform-origin: center; opacity: 1; }
+.nm-ghost:focus-visible { outline: 2px solid var(--_accent); outline-offset: 2px; }
 .nm-overview .nm-node * { pointer-events: none; }
 .nm-node.nm-selected { outline: 2.5px solid var(--_accent); outline-offset: 2px; }
 .nm-node.nm-dragging { cursor: grabbing; box-shadow: var(--_shadow), 0 12px 28px rgb(0 0 0 / .18); z-index: 2; }
@@ -99,11 +116,16 @@ export const css = /* css */ `
 .nm-in.nm-connected .nm-inline { display: none; }
 .nm-in:not(.nm-connected) .nm-val { display: none; }
 
-.nm-port { position: absolute; top: 50%; width: 14px; height: 14px; margin-top: -7px; border-radius: 50%;
+.nm-port { position: absolute; top: 50%; width: 18px; height: 18px; margin-top: -9px; border-radius: 50%;
   background: var(--_node); border: 2.5px solid var(--nm-port-color, var(--_t-any)); box-sizing: border-box; cursor: crosshair; z-index: 1; }
-.nm-port::before { content: ""; position: absolute; inset: -15px; border-radius: 50%; }
-.nm-port[data-dir="in"] { left: -7px; }
-.nm-port[data-dir="out"] { right: -7px; }
+.nm-port::before { content: ""; position: absolute; inset: -16px; border-radius: 50%; }
+/* Touch areas reach mostly outward, so taps on the node's own header or rows don't grab a port. */
+.nm-port[data-dir="in"]::before { inset: -16px -4px -16px -22px; border-radius: 12px; }
+.nm-port[data-dir="out"]::before { inset: -16px -22px -16px -4px; border-radius: 12px; }
+.nm-root[data-flow="TB"] .nm-port[data-dir="in"]::before { inset: -22px -16px -4px -16px; }
+.nm-root[data-flow="TB"] .nm-port[data-dir="out"]::before { inset: -4px -16px -22px -16px; }
+.nm-port[data-dir="in"] { left: -9px; }
+.nm-port[data-dir="out"] { right: -9px; }
 .nm-port.nm-linked { background: var(--nm-port-color, var(--_t-any)); }
 [data-type="number"] { --nm-port-color: var(--_t-number); }
 [data-type="string"] { --nm-port-color: var(--_t-string); }
@@ -112,9 +134,9 @@ export const css = /* css */ `
 /* Top-to-bottom flow: inputs sit on the top edge, outputs on the bottom edge, spread evenly,
    each with a small label outside the node. Rows still show names and values. */
 .nm-root[data-flow="TB"] .nm-row { position: static; }
-.nm-root[data-flow="TB"] .nm-port { top: auto; right: auto; margin-top: 0; left: calc((var(--pi, 0) + 1) / (var(--pn, 1) + 1) * 100% - 7px); }
-.nm-root[data-flow="TB"] .nm-port[data-dir="in"] { top: -7px; }
-.nm-root[data-flow="TB"] .nm-port[data-dir="out"] { bottom: -7px; }
+.nm-root[data-flow="TB"] .nm-port { top: auto; right: auto; margin-top: 0; left: calc((var(--pi, 0) + 1) / (var(--pn, 1) + 1) * 100% - 9px); }
+.nm-root[data-flow="TB"] .nm-port[data-dir="in"] { top: -9px; }
+.nm-root[data-flow="TB"] .nm-port[data-dir="out"] { bottom: -9px; }
 .nm-root[data-flow="TB"] .nm-port::after { content: attr(data-label); position: absolute; left: calc(100% + 3px); font-size: 10px; line-height: 1;
   color: var(--_muted); white-space: nowrap; pointer-events: none; }
 /* Labels sit beside the dot, outside the node, clear of the wire that arrives or leaves. */

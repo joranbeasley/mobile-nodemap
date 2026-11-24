@@ -301,6 +301,8 @@ It renders in a shadow root. `--nm-*` CSS variables set on the element or any an
 | Connect | drag port → port, or tap a port then another port (or a node) | same |
 | Rewire | drag a wire's end off an input | same |
 | Add connected node | drop a wire on empty canvas | same |
+| Go to a connected node off screen | tap its ghost chip on the screen edge | click the ghost |
+| Edit a node's fields | tap the node to select it, then tap the field | same |
 | Zoom in on a node | tap it while zoomed out: fields and ports ignore taps until you're zoomed in | click it while zoomed out |
 | Edit a node (name, all settings) | double-tap it, or select it and tap the pencil | double-click, or select and press <kbd>E</kbd> |
 | Add node | long-press the background, or **+** | **+**, <kbd>A</kbd> or <kbd>Space</kbd> |
