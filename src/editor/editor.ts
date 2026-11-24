@@ -5,7 +5,7 @@ import { Registry } from '../core/registry.js';
 import type { BuiltinParamDef, Edge, NodeInstance, NodeResult, NodeType, ParamDef, ParamKind, PortDef, PortRef } from '../core/types.js';
 import type { Evaluator } from '../runtime/evaluator.js';
 import { formatValue } from '../runtime/stdlib.js';
-import { injectPackStyles, injectStyles } from './styles.js';
+import { css, injectPackStyles, injectStyles } from './styles.js';
 import { flavorOf, getTheme, themeCss, type Theme } from '../themes/index.js';
 import { Router } from '../layout/router.js';
 import { layered } from '../layout/layered.js';
@@ -124,6 +124,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
   private sheet?: HTMLElement;
   private records = new Map<string, NodeRecord>();
   private themeOff?: () => void;
+  private overlayEl?: HTMLElement;
   private lastTap?: { id: string; t: number };
   private card?: HTMLElement;
   private detailsFor?: string;
@@ -686,7 +687,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
     });
     sheet.addEventListener('pointerdown', (e) => e.stopPropagation());
     render();
-    this.root.append(backdrop, sheet);
+    this.overlay().append(backdrop, sheet);
     this.sheet = sheet;
     (sheet as any)._backdrop = backdrop;
     // Only auto-focus search on devices with a keyboard; on phones it would pop the keyboard over the list.
@@ -699,7 +700,31 @@ export class NodeEditor extends Emitter<EditorEvents> {
     (this.sheet as any)._off?.();
     this.sheet.remove();
     this.sheet = undefined;
+    this.overlayEl?.remove();
+    this.overlayEl = undefined;
     this.root.focus({ preventScroll: true });
+  }
+
+  /**
+   * A layer over the whole page (not just the canvas) for bottom sheets, so they can rise
+   * to near the top of the screen. It copies the editor's resolved colours and fonts, so
+   * themes and page variables still apply.
+   */
+  private overlay(): HTMLElement {
+    if (this.overlayEl) return this.overlayEl;
+    const el = h('div', { class: 'nm-root nm-overlay' });
+    const cs = getComputedStyle(this.root);
+    for (const v of PRIVATE_VARS) {
+      const value = cs.getPropertyValue(v);
+      if (value) el.style.setProperty(v, value.trim());
+    }
+    el.style.colorScheme = cs.colorScheme;
+    for (const a of ['theme', 'nmTheme', 'nmHeader'] as const) if (this.root.dataset[a]) el.dataset[a] = this.root.dataset[a];
+    const host = this.root.getRootNode();
+    // In a shadow root the layer stays inside it (styles live there); otherwise it goes on <body>.
+    (host instanceof ShadowRoot ? host : this.root.ownerDocument.body).append(el);
+    this.overlayEl = el;
+    return el;
   }
 
   /** Show a short message over the canvas (used for invalid connections). */
@@ -801,7 +826,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       if ((c.kind === 'node:remove' && c.node.id === id) || c.kind === 'load') this.closePalette();
     });
     (sheet as any)._off = off;
-    this.root.append(backdrop, sheet);
+    this.overlay().append(backdrop, sheet);
     this.sheet = sheet;
     (sheet as any)._backdrop = backdrop;
     if (matchMedia?.('(pointer: fine)').matches) name.focus();
@@ -917,6 +942,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
   }
 
   destroy(): void {
+    this.closePalette();
     this.themeOff?.();
     cancelAnimationFrame(this.routeFrame);
     this.disposers.forEach((d) => d());
@@ -1809,6 +1835,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
 }
 
 const noop = () => {};
+/** The editor's private colour/font variables, copied onto overlays. */
+const PRIVATE_VARS = [...new Set(css.match(/--_[\w-]+(?=:)/g) ?? [])];
 
 /** A node icon: inline SVG markup from the node type, or a short text / emoji. */
 function iconEl(icon: string): HTMLElement {

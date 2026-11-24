@@ -178,8 +178,11 @@ export const css = /* css */ `
 .nm-form input[type="range"] { height: 36px; }
 .nm-edit-actions { padding-top: 12px; margin-top: 6px; border-top: 1px solid var(--_border); }
 .nm-card-danger { color: var(--_danger); }
+.nm-root.nm-overlay { position: fixed; inset: 0; z-index: 2147483000; contain: none; overflow: hidden; background: none; pointer-events: none; touch-action: auto; }
+.nm-overlay > * { pointer-events: auto; }
+.nm-overlay .nm-sheet { max-height: calc(100% - env(safe-area-inset-top, 0px) - 20px); }
 .nm-sheet-backdrop { position: absolute; inset: 0; background: rgb(0 0 0 / .25); z-index: 8; }
-.nm-sheet { position: absolute; left: 0; right: 0; bottom: 0; max-height: 72%; display: flex; flex-direction: column; z-index: 9;
+.nm-sheet { position: absolute; left: 0; right: 0; bottom: 0; max-height: calc(100% - 16px); display: flex; flex-direction: column; z-index: 9;
   background: var(--_node); border-radius: 18px 18px 0 0; box-shadow: 0 -8px 30px rgb(0 0 0 / .2); padding-bottom: env(safe-area-inset-bottom, 0px);
   animation: nm-up .18s ease-out; user-select: none; }
 @media (min-width: 720px) { .nm-sheet { left: 50%; right: auto; width: 440px; transform: translateX(-50%); bottom: 16px; border-radius: 16px; animation: none; } }

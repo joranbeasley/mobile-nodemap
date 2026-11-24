@@ -241,7 +241,7 @@ describe('Editing network devices', () => {
     document.body.append(el);
     const editor = new NodeEditor(el, { graph: g, registry: reg });
     editor.openNodeEditor('router');
-    const sheet = el.querySelector('.nm-edit')!;
+    const sheet = document.querySelector('.nm-edit')!;
     expect(sheet.querySelector('strong')!.textContent).toBe('Edit Home router');
     // Advanced params (IP, latency, bandwidth) are all there, not folded away.
     const labels = [...sheet.querySelectorAll('.nm-edit-field > span')].map((s) => s.textContent);
@@ -258,7 +258,7 @@ describe('Editing network devices', () => {
     // The copy on the canvas follows.
     expect(el.querySelector<HTMLInputElement>('[data-id="router"] [data-key="p:ip"]')!.value).toBe('10.0.0.1');
     g.removeNode('router');
-    expect(el.querySelector('.nm-edit')).toBeNull();
+    expect(document.querySelector('.nm-edit')).toBeNull();
     editor.destroy();
   });
 });

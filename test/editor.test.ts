@@ -42,11 +42,11 @@ describe('NodeEditor', () => {
     editor.openPalette({ x: 0, y: 0 });
     // Taps are ignored briefly after opening so a lifting finger cannot pick an item.
     await new Promise((r) => setTimeout(r, 380));
-    const item = [...el.querySelectorAll<HTMLButtonElement>('.nm-sheet-item')].find((b) => b.textContent!.startsWith('Add'))!;
+    const item = [...document.querySelectorAll<HTMLButtonElement>('.nm-sheet-item')].find((b) => b.textContent!.startsWith('Add'))!;
     item.click();
     expect(g.nodes.size).toBe(1);
     expect([...g.nodes.values()][0].type).toBe('math/add');
-    expect(el.querySelector('.nm-sheet')).toBeNull();
+    expect(document.querySelector('.nm-sheet')).toBeNull();
     editor.destroy();
   });
 });
@@ -62,7 +62,7 @@ describe('Add with a node selected', () => {
   };
   const pick = async (el: HTMLElement, title: string) => {
     await new Promise((r) => setTimeout(r, 380));
-    [...el.querySelectorAll<HTMLButtonElement>('.nm-sheet-item')].find((b) => b.textContent!.startsWith(title))!.click();
+    [...document.querySelectorAll<HTMLButtonElement>('.nm-sheet-item')].find((b) => b.textContent!.startsWith(title))!.click();
   };
 
   it('adds downstream of a node whose output is unused', async () => {
@@ -70,7 +70,7 @@ describe('Add with a node selected', () => {
     const n = g.addNode('value/number', { id: 'n' });
     editor.select({ node: n.id });
     editor.openAddSheet();
-    expect(el.querySelector('.nm-sheet-head strong')!.textContent).toBe('Add after Number');
+    expect(document.querySelector('.nm-sheet-head strong')!.textContent).toBe('Add after Number');
     await pick(el, 'Multiply');
     const e = [...g.edges.values()][0];
     expect(e.from).toEqual({ node: 'n', port: 'value' });
@@ -85,8 +85,8 @@ describe('Add with a node selected', () => {
     g.addNode('view/display', { id: 'd' });
     editor.select({ node: 'd' });
     editor.openAddSheet();
-    expect(el.querySelector('.nm-sheet-head strong')!.textContent).toBe('Add before Display');
-    const seg = el.querySelectorAll<HTMLButtonElement>('.nm-seg button');
+    expect(document.querySelector('.nm-sheet-head strong')!.textContent).toBe('Add before Display');
+    const seg = document.querySelectorAll<HTMLButtonElement>('.nm-seg button');
     expect(seg[1].disabled).toBe(true); // Display has no outputs
     await pick(el, 'Text');
     const e = [...g.edges.values()][0];
@@ -95,9 +95,9 @@ describe('Add with a node selected', () => {
     g.addNode('math/add', { id: 's' });
     editor.select({ node: 's' });
     editor.openAddSheet();
-    el.querySelectorAll<HTMLButtonElement>('.nm-seg button')[0].click(); // before
-    [...el.querySelectorAll<HTMLButtonElement>('.nm-chips button')].find((b) => b.textContent === 'b')!.click();
-    expect(el.querySelector('.nm-sheet-head small')!.textContent).toContain('“b”');
+    document.querySelectorAll<HTMLButtonElement>('.nm-seg button')[0].click(); // before
+    [...document.querySelectorAll<HTMLButtonElement>('.nm-chips button')].find((b) => b.textContent === 'b')!.click();
+    expect(document.querySelector('.nm-sheet-head small')!.textContent).toContain('“b”');
     await pick(el, 'Number');
     expect(g.incoming('s').map((x) => x.to.port)).toEqual(['b']);
     editor.destroy();
@@ -108,7 +108,7 @@ describe('Add with a node selected', () => {
     g.addNode('value/number', { id: 'n' });
     editor.select({ node: 'n' });
     editor.openAddSheet();
-    el.querySelectorAll<HTMLButtonElement>('.nm-seg button')[2].click();
+    document.querySelectorAll<HTMLButtonElement>('.nm-seg button')[2].click();
     await pick(el, 'Text');
     expect(g.edges.size).toBe(0);
     expect(g.nodes.size).toBe(2);
@@ -127,7 +127,7 @@ describe('Making room for new nodes', () => {
   };
   const pick = async (el: HTMLElement, title: string) => {
     await new Promise((r) => setTimeout(r, 380));
-    [...el.querySelectorAll<HTMLButtonElement>('.nm-sheet-item')].find((b) => b.textContent!.startsWith(title))!.click();
+    [...document.querySelectorAll<HTMLButtonElement>('.nm-sheet-item')].find((b) => b.textContent!.startsWith(title))!.click();
     await new Promise((r) => setTimeout(r, 400)); // let neighbours finish animating
   };
   const box = (g: Graph, id: string) => ({ x: g.nodes.get(id)!.x, y: g.nodes.get(id)!.y, w: 180, h: 80 });
@@ -142,7 +142,7 @@ describe('Making room for new nodes', () => {
     const port = el.querySelector<HTMLElement>('.nm-port[data-node="a"][data-dir="out"]')!;
     (editor as any).tapPort({ node: 'a', port: port.dataset.port, dir: 'out' });
     editor.openAddSheet();
-    expect(el.querySelector('.nm-sheet-head strong')!.textContent).toBe('Add after Add');
+    expect(document.querySelector('.nm-sheet-head strong')!.textContent).toBe('Add after Add');
     await pick(el, 'Display');
     expect([...g.edges.values()].map((e) => e.from)).toEqual([{ node: 'a', port: 'out' }]);
     editor.destroy();
@@ -156,7 +156,7 @@ describe('Making room for new nodes', () => {
     g.connect({ node: 'src', port: 'value' }, { node: 'b', port: 'value' });
     editor.select({ node: 'src' });
     editor.openAddSheet();
-    el.querySelectorAll<HTMLButtonElement>('.nm-seg button')[1].click(); // after
+    document.querySelectorAll<HTMLButtonElement>('.nm-seg button')[1].click(); // after
     await pick(el, 'Display');
     const added = [...g.nodes.keys()].find((k) => !['src', 'b', 'c'].includes(k))!;
     expect(g.nodes.get(added)!.x).toBe(250);
@@ -174,7 +174,7 @@ describe('Making room for new nodes', () => {
     g.connect({ node: 'm', port: 'out' }, { node: 'd', port: 'value' });
     editor.select({ edge: e.id });
     editor.openAddSheet();
-    expect(el.querySelector('.nm-sheet-head strong')!.textContent).toBe('Insert into wire');
+    expect(document.querySelector('.nm-sheet-head strong')!.textContent).toBe('Insert into wire');
     await pick(el, 'Power');
     const p = [...g.nodes.values()].find((n) => n.type === 'math/power')!;
     expect(g.incoming(p.id)[0].from.node).toBe('a');

@@ -10,6 +10,8 @@ const editor = new NodeEditor(container: HTMLElement, options: EditorOptions);
 
 Give `container` a size. The editor adds `.nm-root`, makes it focusable and injects its stylesheet once per document or shadow root.
 
+Bottom sheets (the add menu and the Edit sheet) open in an overlay layer over the whole page, `.nm-root.nm-overlay` on `<body>` (or inside the shadow root), so on phones they can rise to near the top of the screen. The overlay copies the editor's resolved colours and fonts, and is removed when the sheet closes.
+
 ## `EditorOptions`
 
 | Option | Default | |
