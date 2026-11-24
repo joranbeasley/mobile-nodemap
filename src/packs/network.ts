@@ -17,6 +17,19 @@ const icons = {
 
 const link = (multiple = true) => ({ type: 'link', multiple });
 
+export const SERVER_TYPES = ['Application', 'Web', 'Database', 'File / NAS', 'Mail', 'DNS', 'Media', 'Game', 'Backup', 'Other'];
+
+const storageText = (gb: number) => (gb >= 1024 ? `${Math.round((gb / 1024) * 10) / 10} TB` : `${gb} GB`);
+
+/** A one-line summary of a device's hardware, e.g. "Database · 8 cores · 32 GB RAM · 2 TB · Linux". */
+export function deviceSpecs(node: Pick<NodeInstance, 'type' | 'params'>): string {
+  const p = node.params;
+  if (node.type === 'net/server') {
+    return [p.kind ?? 'Application', `${p.cores ?? 4} cores`, `${p.memory ?? 16} GB RAM`, storageText(Number(p.storage ?? 512)), p.os ?? 'Linux'].join(' · ');
+  }
+  return p.os ? String(p.os) : '';
+}
+
 /**
  * The base every device extends. Third parties can add their own devices the same way:
  *   extendNode(device, { type: 'acme/nas', title: 'NAS', meta: { role: 'server' }, … })
@@ -43,7 +56,7 @@ const fmtBw = (mbps: number) => (!Number.isFinite(mbps) ? '∞' : mbps >= 1000 ?
 
 /** Shows the engine's verdict on each device. Exported so third-party devices can reuse it. */
 export const statusView = {
-  render(el: HTMLElement, r: NodeResult | undefined) {
+  render(el: HTMLElement, r: NodeResult | undefined, node?: NodeInstance) {
     const s = r?.outputs?.status as NetworkStatus | undefined;
     if (!s) {
       el.textContent = '';
@@ -59,7 +72,9 @@ export const statusView = {
     const path = s.state === 'online' ? `<span class="nm-net-path" data-ok="${s.redundant}">${s.redundant ? '2+ paths' : 'single path'}</span>` : '';
     const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
     const ip = s.ip ? `<span class="nm-net-ip" data-bad="${!!s.ipIssue}" title="${esc(s.ipIssue ?? '')}">${esc(s.ip)}${s.ipIssue ? ' ⚠' : ''}</span>` : '';
-    el.innerHTML = `<div class="nm-net" data-state="${s.state}"><b>${label}</b>${facts}${ip}${path}</div>`;
+    const specs = node ? deviceSpecs(node) : '';
+    const spec = specs ? `<span class="nm-net-spec">${esc(specs)}</span>` : '';
+    el.innerHTML = `<div class="nm-net" data-state="${s.state}"><b>${label}</b>${facts}${ip}${spec}${path}</div>`;
   },
 };
 
@@ -128,6 +143,14 @@ const nodes: NodeType[] = [
     color: '#7048e8',
     icon: icons.server,
     inputs: { uplink: { type: 'link', multiple: true, label: 'nic' } },
+    params: [
+      { name: 'kind', label: 'type', kind: 'select', default: 'Application', options: SERVER_TYPES },
+      { name: 'cores', label: 'CPU cores', kind: 'number', default: 4, min: 1, max: 128, step: 1, advanced: true },
+      { name: 'memory', label: 'RAM (GB)', kind: 'select', default: '16', options: ['2', '4', '8', '16', '32', '64', '128', '256', '512', '1024'], advanced: true },
+      { name: 'storage', label: 'storage (GB)', kind: 'number', default: 512, step: 64, advanced: true },
+      { name: 'os', label: 'OS', kind: 'select', default: 'Linux', options: ['Linux', 'Windows Server', 'FreeBSD', 'macOS'], advanced: true },
+    ],
+    tags: ['host', 'database', 'web', 'nas', 'vm'],
     meta: { role: 'endpoint' },
   }),
   extendNode(device, {
@@ -136,7 +159,10 @@ const nodes: NodeType[] = [
     category: 'Endpoints',
     color: '#7048e8',
     icon: icons.laptop,
-    params: [{ name: 'bandwidth', label: 'Mbps', kind: 'select', default: '1000', options: ['100', '300', '1000'], advanced: true }],
+    params: [
+      { name: 'bandwidth', label: 'Mbps', kind: 'select', default: '1000', options: ['100', '300', '1000'], advanced: true },
+      { name: 'os', label: 'OS', kind: 'select', default: 'macOS', options: ['macOS', 'Windows', 'Linux', 'ChromeOS'], advanced: true },
+    ],
     meta: { role: 'endpoint' },
   }),
   extendNode(device, {
@@ -145,10 +171,21 @@ const nodes: NodeType[] = [
     category: 'Endpoints',
     color: '#7048e8',
     icon: icons.phone,
-    params: [{ name: 'bandwidth', label: 'Mbps', kind: 'select', default: '300', options: ['54', '300', '1200'], advanced: true }],
+    params: [
+      { name: 'bandwidth', label: 'Mbps', kind: 'select', default: '300', options: ['54', '300', '1200'], advanced: true },
+      { name: 'os', label: 'OS', kind: 'select', default: 'iOS', options: ['iOS', 'Android'], advanced: true },
+    ],
     meta: { role: 'endpoint' },
   }),
-].map((n) => ({ ...n, view: statusView }));
+].map((n) => ({ ...n, view: statusView, params: ordered(n.params) }));
+
+/** Show what makes a device itself first (power, then its own specs), generic network settings last. */
+function ordered(params: NodeType['params']): NodeType['params'] {
+  if (!params) return params;
+  const generic = ['ip', 'latency', 'bandwidth'];
+  const rank = (name: string) => (name === 'up' ? 0 : generic.includes(name) ? 2 : 1);
+  return [...params].sort((a, b) => rank(a.name) - rank(b.name));
+}
 
 // ------------------------------------------------------------------ addressing
 
@@ -296,6 +333,7 @@ const css = `
 .nm-net[data-state="source"] b { background: #1971c2; }
 .nm-net span { font-variant-numeric: tabular-nums; }
 .nm-net-path { width: 100%; }
+.nm-net-spec { width: 100%; color: var(--_text); }
 .nm-net-ip { width: 100%; font-family: var(--_mono); color: var(--_text); }
 .nm-net-ip[data-bad="true"] { color: var(--_danger); }
 .nm-net-path[data-ok="false"] { color: #e8590c; }

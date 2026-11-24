@@ -19,7 +19,7 @@ Bottom sheets (the add menu and the Edit sheet) open in an overlay layer over th
 | `graph` | required | `Graph` |
 | `registry` | required | `Registry` |
 | `evaluator` | none | When given, results show live and the evaluator re-runs on edits. |
-| `toolbar` | `true` | Delete, edit, duplicate, undo, redo, tidy, fit and add. |
+| `toolbar` | `true` | Delete, edit, duplicate, undo, redo, tidy, fit and add. On screens narrower than 520 px it spans the width and its buttons share it. |
 | `history` | `true` | Undo and redo. |
 | `minZoom`, `maxZoom` | `0.2`, `2.5` | |
 | `longPressMs` | `450` | Long-press time before the add sheet opens. |

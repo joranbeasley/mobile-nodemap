@@ -142,6 +142,13 @@ export const css = /* css */ `
 .nm-btn svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .nm-btn.nm-primary { background: var(--_accent); color: var(--_bg); }
 .nm-btn.nm-danger { color: var(--_danger); }
+.nm-toolbar { max-width: calc(100% - 24px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)); box-sizing: border-box; }
+/* Phones: the toolbar spans the width and its buttons share it, so none are pushed off screen. */
+@media (max-width: 520px) {
+  .nm-toolbar { left: max(12px, env(safe-area-inset-left, 0px)); gap: 2px; }
+  .nm-toolbar .nm-btn { flex: 1 1 0; min-width: 0; padding: 0 4px; }
+  .nm-toolbar .nm-sep { margin: 6px 0; }
+}
 .nm-sep { width: 1px; background: var(--_border); margin: 6px 2px; }
 
 .nm-card { position: absolute; z-index: 7; left: max(12px, env(safe-area-inset-left, 0px)); right: max(12px, env(safe-area-inset-right, 0px));
@@ -176,7 +183,9 @@ export const css = /* css */ `
 .nm-form input[type="checkbox"] { width: 28px; height: 28px; }
 .nm-form .nm-range { gap: 12px; }
 .nm-form input[type="range"] { height: 36px; }
-.nm-edit-actions { padding-top: 12px; margin-top: 6px; border-top: 1px solid var(--_border); }
+.nm-edit-actions { flex: none; padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--_border); background: var(--_node); }
+.nm-edit .nm-form { flex: 1 1 auto; min-height: 0; }
+.nm-sheet.nm-edit { padding-bottom: 0; }
 .nm-card-danger { color: var(--_danger); }
 .nm-root.nm-overlay { position: fixed; inset: 0; z-index: 2147483000; contain: none; overflow: hidden; background: none; pointer-events: none; touch-action: auto; }
 .nm-overlay > * { pointer-events: auto; }

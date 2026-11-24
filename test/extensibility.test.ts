@@ -14,6 +14,7 @@ import {
   registryFor,
   mathGraph,
   networkGraph,
+  deviceSpecs,
   defineNodeMapElement,
   type NodeMapElement,
 } from '../src/index';
@@ -259,6 +260,28 @@ describe('Editing network devices', () => {
     expect(el.querySelector<HTMLInputElement>('[data-id="router"] [data-key="p:ip"]')!.value).toBe('10.0.0.1');
     g.removeNode('router');
     expect(document.querySelector('.nm-edit')).toBeNull();
+    editor.destroy();
+  });
+});
+
+describe('Server specs', () => {
+  it('servers have a type, cores, RAM, storage and OS, summarised on the node', async () => {
+    const reg = networkGraph.createRegistry();
+    const names = reg.get('net/server')!.params!.map((p) => p.name);
+    expect(names).toEqual(expect.arrayContaining(['kind', 'cores', 'memory', 'storage', 'os', 'ip', 'up']));
+    const g = Graph.fromJSON(networkGraph.examples![1].graph, reg);
+    expect(deviceSpecs(g.nodes.get('db')!)).toBe('Database · 32 cores · 256 GB RAM · 4 TB · Linux');
+    const el = document.createElement('div');
+    document.body.append(el);
+    const editor = new NodeEditor(el, { graph: g, registry: reg, evaluator: new Evaluator(g, reg) });
+    await new Promise((r) => setTimeout(r, 80));
+    expect(el.querySelector('[data-id="db"] .nm-net-spec')!.textContent).toBe('Database · 32 cores · 256 GB RAM · 4 TB · Linux');
+    editor.openNodeEditor('db');
+    // Delete is in the pinned footer, outside the scrolling form.
+    const sheet = document.querySelector('.nm-edit')!;
+    const footer = sheet.querySelector(':scope > .nm-edit-actions')!;
+    expect([...footer.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Duplicate', 'Delete']);
+    expect(sheet.querySelector('.nm-form .nm-edit-actions')).toBeNull();
     editor.destroy();
   });
 });

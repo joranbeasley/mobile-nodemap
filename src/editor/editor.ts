@@ -797,7 +797,6 @@ export class NodeEditor extends Emitter<EditorEvents> {
       this.select({ node: id });
       this.deleteSelection();
     });
-    form.append(h('div', { class: 'nm-card-actions nm-edit-actions' }, dup, del));
 
     const backdrop = h('div', { class: 'nm-sheet-backdrop' });
     backdrop.addEventListener('pointerdown', (e) => {
@@ -805,7 +804,9 @@ export class NodeEditor extends Emitter<EditorEvents> {
       if (performance.now() < this.sheetGuard) return;
       this.closePalette();
     });
-    const sheet = h('div', { class: 'nm-sheet nm-edit', role: 'dialog', 'aria-label': `Edit ${node.label ?? typeTitle}` }, h('div', { class: 'nm-sheet-grip' }), head, form);
+    // Duplicate and Delete stay pinned under the scrolling form, so they're always on screen.
+    const footer = h('div', { class: 'nm-card-actions nm-edit-actions' }, dup, del);
+    const sheet = h('div', { class: 'nm-sheet nm-edit', role: 'dialog', 'aria-label': `Edit ${node.label ?? typeTitle}` }, h('div', { class: 'nm-sheet-grip' }), head, form, footer);
     sheet.addEventListener('pointerdown', (e) => e.stopPropagation());
     // The finger that double-tapped lifts onto the sheet: swallow that click so it can't toggle a control.
     sheet.addEventListener(

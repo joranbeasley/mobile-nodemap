@@ -14,7 +14,7 @@ The library needs proof that the extension model handles very different domains:
 ## Network (`networkGraph`, id `network`)
 
 - Devices: internet, router, firewall, switch, Wi-Fi access point, server, laptop and phone. All are derived from one base device with `extendNode`.
-- Every device is editable: name, power, IP address, latency and bandwidth. Double-tap a device for the full-size Edit sheet. Bad or duplicate IPv4 addresses are flagged on the device and by `graph.validate()`.
+- Every device is editable: name, power, IP address, latency and bandwidth. Servers also have a type, CPU cores, RAM, storage and OS (summarised on the node, e.g. "Database · 32 cores · 256 GB RAM · 4 TB · Linux"); laptops and phones have an OS. Double-tap a device for the full-size Edit sheet. Bad or duplicate IPv4 addresses are flagged on the device and by `graph.validate()`.
 - Wires are cables, and loops are allowed.
 - A rule stops endpoints from connecting straight to the internet.
 - The engine finds each device's fastest path to the internet: latency, hops, bottleneck bandwidth, and whether a backup path exists. Powered-off devices and closed firewalls cut traffic. The summary reports online and offline counts and the worst latency.
