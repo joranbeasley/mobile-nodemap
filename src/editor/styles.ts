@@ -219,6 +219,14 @@ export const css = /* css */ `
 .nm-sheet-item i { width: 10px; height: 10px; border-radius: 3px; background: var(--c, var(--_muted)); flex: none; }
 .nm-sheet-item small { color: var(--_muted); font-size: 12px; margin-left: auto; text-align: right; max-width: 55%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (prefers-reduced-motion: reduce) { .nm-root *, .nm-root *::before { animation: none !important; transition: none !important; } }
+
+/* Sheets scroll as one container, with the header pinned to the top and the actions to the
+   bottom. A single scroller with its own max-height works in every browser, including iOS
+   Safari, where a flex child squeezed by a max-height parent may not scroll. */
+.nm-sheet { display: block; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
+.nm-sheet > .nm-sheet-head { position: sticky; top: 0; z-index: 2; background: var(--_node); }
+.nm-sheet .nm-sheet-list, .nm-edit .nm-form { overflow: visible; flex: none; min-height: auto; }
+.nm-sheet > .nm-edit-actions { position: sticky; bottom: 0; z-index: 2; }
 `;
 
 /** Add the stylesheet once per document or shadow root. */

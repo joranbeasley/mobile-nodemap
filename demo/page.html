@@ -66,6 +66,11 @@ body { background: var(--surface); color: var(--ink); font-family: var(--f-ui); 
 .sig { font-family: var(--f-mono); font-size: 13px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); overflow-wrap: anywhere; }
 .field { display: flex; flex-direction: column; gap: 4px; font-weight: 600; }
 #panel-body > *, .call > * { flex: none; }
+/* The panel itself scrolls (with its header pinned): one scroller, reliable on iOS Safari. */
+#panel { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+#panel > .panel-head { position: sticky; top: 0; z-index: 1; background: var(--surface); }
+#panel > #panel-body { overflow: visible; }
+@media (max-width: 899px) { #panel { display: block; } }
 .field .req, .field .opt { font-weight: 400; font-size: 12px; color: var(--muted); margin-left: 6px; }
 .field textarea { font: inherit; font-weight: 400; font-size: 16px; color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; resize: vertical; }
 .field input { font: inherit; font-weight: 400; font-size: 16px; color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; }
