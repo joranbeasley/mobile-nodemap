@@ -28,6 +28,7 @@ Wiring nodes on a phone with desktop editors means mis-taps, accidental zooms an
 | E12 | Live results, errors and running state on each node; custom previews via `view` | Shipped |
 | E13 | Every node can be edited in a full-size sheet (double-tap, toolbar pencil, or E / Enter): name, all params including advanced ones, unconnected input values, Duplicate and Delete | Shipped |
 | E14 | Any node can be renamed; the name is saved in the map and undoable | Shipped |
+| E15 | When zoomed out (below the readable zoom, 60% by default), tapping a node never edits its fields or starts a wire: it zooms in on that node and selects it | Shipped |
 
 ## UX notes
 

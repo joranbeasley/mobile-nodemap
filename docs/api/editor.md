@@ -23,6 +23,7 @@ Bottom sheets (the add menu and the Edit sheet) open in an overlay layer over th
 | `history` | `true` | Undo and redo. |
 | `minZoom`, `maxZoom` | `0.2`, `2.5` | |
 | `longPressMs` | `450` | Long-press time before the add sheet opens. |
+| `overviewZoom` | `0.6` | Below this zoom the map is an overview: tapping a node (even on a field or port) zooms in on it instead of editing. `0` turns it off. |
 | `wires` | `'smart'` | `'smart'` (routed around nodes) or `'curved'`. |
 | `layout` | `layered()` | Engine used by `autoLayout()`. |
 | `placement` | `true` | Place new and dropped nodes in free space; push nodes aside. |
@@ -30,7 +31,7 @@ Bottom sheets (the add menu and the Edit sheet) open in an overlay layer over th
 
 ## Properties
 
-`root`, `graph`, `registry`, `evaluator`, `history`, `viewport` (`{ x, y, k }`), `selection` (`{ node?, edge? }`), `wireMode`, `theme`.
+`root`, `graph`, `registry`, `evaluator`, `history`, `viewport` (`{ x, y, k }`), `selection` (`{ node?, edge? }`), `wireMode`, `theme`, `isOverview` (zoomed out below `overviewZoom`; the root also gets the `nm-overview` class).
 
 ## Methods
 
@@ -47,6 +48,7 @@ Bottom sheets (the add menu and the Edit sheet) open in an overlay layer over th
 | `autoLayout({ animate?, fit?, maxWidth? })` | Tidy. On narrow portrait screens `maxWidth` defaults to fit at a readable zoom. |
 | `setLayout(engine)` / `setWires(style)` / `setTheme(theme \| null)` | |
 | `fit({ padding?, minScale? })` | `minScale` (default 0.6) keeps text readable; pass `0` to show everything. |
+| `zoomToNode(id, { animate?, zoom? })` | Centre a node at a comfortable zoom (100%, or smaller if it wouldn't fit). |
 | `zoomAt(factor, cx?, cy?)` / `setViewport({ x?, y?, k? })` / `screenToWorld(cx, cy)` / `ensureVisible(id)` | |
 | `layoutInput()` / `suggestedMaxWidth()` | What layout engines receive. |
 | `notify(message)` | A short toast. |
@@ -70,6 +72,7 @@ Bottom sheets (the add menu and the Edit sheet) open in an overlay layer over th
 | Connect | drag port → port, or tap port then port or node | same |
 | Add | long-press, **+** | **+**, A, Space |
 | Add connected | select a node, port or wire, then **+** | same |
+| Zoom in on a node | tap it while zoomed out (below `overviewZoom`) | click it while zoomed out |
 | Edit a node | double-tap it, or select it and tap the pencil | double-click, or select and press E / Enter |
 | Details | tap a node that has `details` | click |
 | Undo, redo | toolbar | ⌘Z, ⌘⇧Z or ⌘Y |
