@@ -32,9 +32,11 @@ export interface LayoutEdge {
 export interface LayoutInput {
   nodes: LayoutNode[];
   edges: LayoutEdge[];
+  /** Which way the map flows: left to right (default) or top to bottom. */
+  direction?: 'LR' | 'TB';
   /**
-   * Wrap the layered drawing into rows no wider than this (world units).
-   * The editor sets it on narrow, portrait screens so a long pipeline reads top to bottom.
+   * Opt-in: wrap a left-to-right flow into bands no wider than this (world units).
+   * The editor does not use it; it prefers one uncrowded flow.
    */
   maxWidth?: number;
 }

@@ -109,6 +109,18 @@ export const css = /* css */ `
 [data-type="string"] { --nm-port-color: var(--_t-string); }
 [data-type="boolean"] { --nm-port-color: var(--_t-boolean); }
 [data-type="list"] { --nm-port-color: var(--_t-list); }
+/* Top-to-bottom flow: inputs sit on the top edge, outputs on the bottom edge, spread evenly,
+   each with a small label outside the node. Rows still show names and values. */
+.nm-root[data-flow="TB"] .nm-row { position: static; }
+.nm-root[data-flow="TB"] .nm-port { top: auto; right: auto; margin-top: 0; left: calc((var(--pi, 0) + 1) / (var(--pn, 1) + 1) * 100% - 7px); }
+.nm-root[data-flow="TB"] .nm-port[data-dir="in"] { top: -7px; }
+.nm-root[data-flow="TB"] .nm-port[data-dir="out"] { bottom: -7px; }
+.nm-root[data-flow="TB"] .nm-port::after { content: attr(data-label); position: absolute; left: calc(100% + 3px); font-size: 10px; line-height: 1;
+  color: var(--_muted); white-space: nowrap; pointer-events: none; }
+/* Labels sit beside the dot, outside the node, clear of the wire that arrives or leaves. */
+.nm-root[data-flow="TB"] .nm-port[data-dir="in"]::after { bottom: calc(50% + 1px); }
+.nm-root[data-flow="TB"] .nm-port[data-dir="out"]::after { top: calc(50% + 1px); }
+.nm-root[data-flow="TB"] .nm-node { margin-block: 0; }
 .nm-connecting .nm-port { opacity: .25; }
 .nm-connecting .nm-port.nm-ok, .nm-connecting .nm-port.nm-anchor { opacity: 1; }
 .nm-port.nm-ok { animation: nm-ok 1s ease-in-out infinite alternate; }

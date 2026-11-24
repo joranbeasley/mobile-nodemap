@@ -37,6 +37,12 @@ export interface EditorOptions {
   /** Long-press duration that opens the add-node sheet, in ms. Default 450. */
   longPressMs?: number;
   /**
+   * Which way maps flow: 'LR' (left to right), 'TB' (top to bottom: inputs on the top edge of
+   * nodes, outputs on the bottom, wires run downwards) or 'auto' (default): top to bottom on
+   * narrow portrait screens, left to right otherwise. Tidy, placement and wires follow it.
+   */
+  direction?: 'auto' | 'LR' | 'TB';
+  /**
    * Below this zoom the map is an overview: tapping a node zooms in on it instead of
    * touching its fields or ports. Default 0.6 (the readable zoom phones open at). 0 turns it off.
    */
@@ -149,6 +155,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
   private sheetGuard = 0;
   private opts: Required<Pick<EditorOptions, 'minZoom' | 'maxZoom' | 'longPressMs' | 'placement' | 'overviewZoom'>>;
   private zoomAnim = 0;
+  private direction: 'auto' | 'LR' | 'TB';
+  private flowNow: 'LR' | 'TB' = 'LR';
   private wireStyle: 'smart' | 'curved';
   private layoutEngine: LayoutEngine;
   private routingPaused = false;
@@ -169,6 +177,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       overviewZoom: options.overviewZoom ?? 0.6,
       placement: options.placement ?? true,
     };
+    this.direction = options.direction ?? 'auto';
     this.wireStyle = options.wires ?? 'smart';
     this.layoutEngine = options.layout ?? layered();
     if (options.history !== false) this.history = new History(this.graph);
@@ -197,7 +206,10 @@ export class NodeEditor extends Emitter<EditorEvents> {
           if (id && this.records.has(id)) {
             const before = this.records.get(id)!.h;
             this.measure(id);
-            if (this.opts.placement && this.records.get(id)!.h > before + 1) this.pushAway(id);
+            if (this.opts.placement && this.records.get(id)!.h > before + 1) {
+              if (this.flowNow === 'TB') this.reflowBelow(id, before);
+              else this.pushAway(id);
+            }
             this.scheduleRoute();
           }
         }
@@ -212,8 +224,56 @@ export class NodeEditor extends Emitter<EditorEvents> {
       this.disposers.push(ev.live());
     }
     if (options.theme) this.setTheme(options.theme);
+    this.flowNow = this.resolveFlow();
+    this.root.dataset.flow = this.flowNow;
     this.renderAll();
-    requestAnimationFrame(() => this.fit());
+    requestAnimationFrame(() => {
+      if (!this.relayoutForFlow()) this.fit();
+    });
+    // Turning the phone (auto direction) switches the flow.
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => {
+        if (this.direction === 'auto' && this.resolveFlow() !== this.flowNow) this.setDirection('auto');
+      });
+      ro.observe(this.root);
+      this.disposers.push(() => ro.disconnect());
+    }
+  }
+
+  // ---------------------------------------------------------------- flow
+
+  /** The flow in use: 'LR' (left to right) or 'TB' (top to bottom). */
+  get flow(): 'LR' | 'TB' {
+    return this.flowNow;
+  }
+
+  private resolveFlow(): 'LR' | 'TB' {
+    if (this.direction !== 'auto') return this.direction;
+    const r = this.root.getBoundingClientRect();
+    return r.width && r.width < 720 && r.height > r.width * 1.05 ? 'TB' : 'LR';
+  }
+
+  /**
+   * Change which way maps flow. Ports move to the matching edges, wires re-route, and the
+   * map is tidied for the new flow.
+   */
+  setDirection(direction: 'auto' | 'LR' | 'TB'): void {
+    this.direction = direction;
+    const next = this.resolveFlow();
+    if (next === this.flowNow) return;
+    this.flowNow = next;
+    this.root.dataset.flow = next;
+    for (const id of this.records.keys()) this.measure(id);
+    this.scheduleRoute();
+    void this.autoLayout({ animate: true });
+  }
+
+  /** Tidy a map that was last arranged for the other flow (e.g. made on a desktop, opened on a phone). */
+  private relayoutForFlow(): boolean {
+    const laidOut = (this.graph.meta.flow as string | undefined) ?? 'LR';
+    if (!this.graph.nodes.size || laidOut === this.flowNow) return false;
+    void this.autoLayout({ animate: false });
+    return true;
   }
 
   // ---------------------------------------------------------------- public API
@@ -364,10 +424,17 @@ export class NodeEditor extends Emitter<EditorEvents> {
         const src = this.graph.nodes.get(connectFrom.node)!;
         const srcRec = this.records.get(src.id)!;
         const rec = this.records.get(node.id)!;
-        const anchorY = this.portPos(connectFrom, connectFrom.dir).y;
+        const anchor = this.portPos(connectFrom, connectFrom.dir);
         const own = connectFrom.dir === 'out' ? rec.offsets.get(`in:${edge.to.port}`) : rec.offsets.get(`out:${edge.from.port}`);
-        const x = connectFrom.dir === 'out' ? src.x + srcRec.w + 70 : src.x - 70 - rec.w;
-        this.graph.moveNode(node.id, Math.round(x), Math.round(anchorY - (own?.y ?? 40)));
+        const after = connectFrom.dir === 'out';
+        if (this.flowNow === 'TB') {
+          // One row down (or up), with its port under the port it's wired to.
+          const y = after ? src.y + srcRec.h + FLOW_GAP : src.y - FLOW_GAP - rec.h;
+          this.graph.moveNode(node.id, Math.round(anchor.x - (own?.x ?? rec.w / 2)), Math.round(y));
+        } else {
+          const x = after ? src.x + srcRec.w + FLOW_GAP : src.x - FLOW_GAP - rec.w;
+          this.graph.moveNode(node.id, Math.round(x), Math.round(anchor.y - (own?.y ?? 40)));
+        }
         this.makeRoom(node.id, connectFrom);
       } else this.place_(node.id, { axis: 'both' });
     }
@@ -387,26 +454,22 @@ export class NodeEditor extends Emitter<EditorEvents> {
     return this.wireStyle;
   }
 
-  /** On a narrow portrait canvas, the world width that fits at a readable zoom; otherwise undefined. */
-  suggestedMaxWidth(): number | undefined {
-    const r = this.root.getBoundingClientRect();
-    if (!r.width || r.width >= 720 || r.height < r.width) return undefined;
-    return Math.max(420, (r.width - 48) / 0.62);
-  }
-
   setLayout(engine: LayoutEngine): void {
     this.layoutEngine = engine;
   }
 
   /**
-   * Tidy the whole map with the layout engine, animating nodes to their new places.
-   * On narrow portrait screens the layout wraps into rows that fit the width at a readable zoom.
+   * Tidy the whole map with the layout engine, animating nodes to their new places. The map
+   * flows one way (see `direction`): one uncrowded flow, never wrapped into rows unless you
+   * pass `maxWidth`. Afterwards the view fits at a readable zoom; pan to see the rest.
    */
   async autoLayout(opts: { animate?: boolean; fit?: boolean; maxWidth?: number } = {}): Promise<void> {
     if (!this.graph.nodes.size) return;
     const input = this.layoutInput();
-    input.maxWidth = opts.maxWidth ?? this.suggestedMaxWidth();
+    input.direction = this.flowNow;
+    if (opts.maxWidth) input.maxWidth = opts.maxWidth;
     const pos = await this.layoutEngine(input);
+    this.graph.meta.flow = this.flowNow;
     await this.animateTo(pos, opts.animate === false ? 0 : 360);
     if (opts.fit !== false) this.fit();
   }
@@ -485,7 +548,9 @@ export class NodeEditor extends Emitter<EditorEvents> {
       const edge = this.graph.incoming(node.id).find((x) => x.from.node === from.node);
       const own = edge ? rec.offsets.get(`in:${edge.to.port}`) : undefined;
       const srcRec = this.records.get(src.id)!;
-      this.graph.moveNode(node.id, Math.round(src.x + srcRec.w + 70), Math.round(this.portPos(from, 'out').y - (own?.y ?? 40)));
+      const anchor = this.portPos(from, 'out');
+      if (this.flowNow === 'TB') this.graph.moveNode(node.id, Math.round(anchor.x - (own?.x ?? rec.w / 2)), Math.round(src.y + srcRec.h + FLOW_GAP));
+      else this.graph.moveNode(node.id, Math.round(src.x + srcRec.w + FLOW_GAP), Math.round(anchor.y - (own?.y ?? 40)));
       this.makeRoom(node.id, from);
     }
     this.select({ node: node.id });
@@ -503,13 +568,20 @@ export class NodeEditor extends Emitter<EditorEvents> {
     const n = this.graph.nodes.get(id);
     const rec = this.records.get(id);
     if (!n || !rec) return;
-    const gap = 28;
-    const colGap = 70;
+    const gap = NODE_GAP;
+    const tb = this.flowNow === 'TB';
+    // "main" runs along the flow, "cross" across it.
+    const M = tb ? 'y' : 'x';
+    const C = tb ? 'x' : 'y';
+    const mainSize = (r: { w: number; h: number }) => (tb ? r.h : r.w);
+    const crossSize = (r: { w: number; h: number }) => (tb ? r.w : r.h);
     const before = new Map([...this.graph.nodes.values()].map((o) => [o.id, { x: o.x, y: o.y }]));
     const size = (oid: string) => this.records.get(oid) ?? { w: 180, h: 80 };
     const others = () => [...this.graph.nodes.values()].filter((o) => o.id !== id);
     const hitsOf = (g: number) =>
       others().filter((o) => overlaps({ x: n.x, y: n.y, w: rec.w, h: rec.h }, { x: o.x, y: o.y, ...size(o.id) }, g));
+    const move = (nid: string, main: number, cross: number) =>
+      this.graph.moveNode(nid, Math.round(tb ? cross : main), Math.round(tb ? main : cross));
 
     const hits = hitsOf(gap - 1);
     if (hits.length) {
@@ -518,26 +590,28 @@ export class NodeEditor extends Emitter<EditorEvents> {
           (x) => x !== id,
         ),
       );
-      // Nodes the new one feeds (or is fed by) belong further along the flow, never in its column.
+      // Nodes the new one feeds (or is fed by) belong further along the flow, never in its layer.
       const along = (oid: string) => (from.dir === 'out' ? this.graph.reaches(id, oid) : this.graph.reaches(oid, id));
-      const column = hits.filter((o) => !along(o.id) && (siblings.has(o.id) || Math.abs(o.x - n.x) < rec.w / 2));
-      if (column.length) {
-        // Join the column under the nodes it collides with, then cascade the rest down.
-        const bottom = Math.max(...column.map((o) => o.y + size(o.id).h));
-        this.graph.moveNode(id, n.x, Math.round(bottom + gap));
-        this.pushAway(id);
+      const sameLayer = hits.filter((o) => !along(o.id) && (siblings.has(o.id) || Math.abs(o[M] - n[M]) < mainSize(rec) / 2));
+      if (sameLayer.length) {
+        // Join the layer beside the nodes it collides with (below them left to right, to their
+        // right top to bottom), then push the rest of that layer along.
+        const end = Math.max(...sameLayer.map((o) => o[C] + crossSize(size(o.id))));
+        // Line up with the layer it joins.
+        move(id, Math.min(...sameLayer.map((o) => o[M])), end + gap);
+        this.pushAlong(id, C, 0);
       } else if (from.dir === 'out') {
-        // Open a column: everything from the first collision rightwards moves right.
-        const edge = Math.min(...hits.map((o) => o.x));
-        const dx = n.x + rec.w + colGap - edge;
-        for (const o of others()) if (o.x >= edge - 1) this.graph.moveNode(o.id, Math.round(o.x + dx), o.y);
+        // Open a layer: everything from the first collision onwards moves along the flow.
+        const edge = Math.min(...hits.map((o) => o[M]));
+        const d = n[M] + mainSize(rec) + FLOW_GAP - edge;
+        for (const o of others()) if (o[M] >= edge - 1) move(o.id, o[M] + d, o[C]);
       } else {
-        const edge = Math.max(...hits.map((o) => o.x + size(o.id).w));
-        const dx = edge + colGap - n.x;
-        for (const o of others()) if (o.x + size(o.id).w <= edge + 1) this.graph.moveNode(o.id, Math.round(o.x - dx), o.y);
+        const edge = Math.max(...hits.map((o) => o[M] + mainSize(size(o.id))));
+        const d = edge + FLOW_GAP - n[M];
+        for (const o of others()) if (o[M] + mainSize(size(o.id)) <= edge + 1) move(o.id, o[M] - d, o[C]);
       }
       // Anything still in the way (an unrelated node elsewhere): fall back to the nearest free spot.
-      if (hitsOf(8).length) this.place_(id, { axis: 'y' });
+      if (hitsOf(8).length) this.place_(id, { axis: tb ? 'x' : 'y' });
     }
 
     // Animate the neighbours from where they were to where they now belong.
@@ -1026,6 +1100,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
     switch (c.kind) {
       case 'load':
         this.renderAll();
+        requestAnimationFrame(() => this.relayoutForFlow());
         break;
       case 'node:add':
         this.buildNode(c.node);
@@ -1121,22 +1196,24 @@ export class NodeEditor extends Emitter<EditorEvents> {
       more.addEventListener('toggle', () => (more.open ? this.expanded.add(node.id) : this.expanded.delete(node.id)));
       body.append(more);
     }
-    for (const p of this.registry.outputsOf(node)) {
+    const outPorts = this.registry.outputsOf(node);
+    const inPorts = this.registry.inputsOf(node);
+    for (const p of outPorts) {
       body.append(
         h(
           'div',
           { class: 'nm-row nm-out', 'data-port': p.name },
           h('span', { class: 'nm-val' }),
           h('span', { class: 'nm-label' }, p.label ?? p.name),
-          this.portEl(node.id, p, 'out'),
+          this.portEl(node.id, p, 'out', outPorts.indexOf(p), outPorts.length),
         ),
       );
     }
-    for (const p of this.registry.inputsOf(node)) {
+    for (const p of inPorts) {
       const row = h(
         'div',
         { class: 'nm-row nm-in', 'data-port': p.name },
-        this.portEl(node.id, p, 'in'),
+        this.portEl(node.id, p, 'in', inPorts.indexOf(p), inPorts.length),
         h('span', { class: 'nm-label' }, p.label ?? p.name),
         h('span', { class: 'nm-val' }),
       );
@@ -1232,7 +1309,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
     return el;
   }
 
-  private portEl(nodeId: string, p: PortDef, dir: Dir): HTMLElement {
+  private portEl(nodeId: string, p: PortDef, dir: Dir, index = 0, count = 1): HTMLElement {
     const type = p.type ?? 'any';
     const pt = this.registry.portType(type);
     const el = h('span', {
@@ -1244,6 +1321,10 @@ export class NodeEditor extends Emitter<EditorEvents> {
       title: `${p.label ?? p.name}: ${pt?.label ?? type}${p.multiple ? ' (many)' : ''}${p.description ? ` · ${p.description}` : ''}`,
     });
     if (pt?.color) el.style.setProperty('--nm-port-color', pt.color);
+    // Top-to-bottom flow spreads ports along the top (inputs) or bottom (outputs) edge.
+    el.style.setProperty('--pi', String(index));
+    el.style.setProperty('--pn', String(count));
+    el.dataset.label = p.label ?? p.name;
     return el;
   }
 
@@ -1318,6 +1399,10 @@ export class NodeEditor extends Emitter<EditorEvents> {
   }
 
   private curve(a: { x: number; y: number }, b: { x: number; y: number }): string {
+    if (this.flowNow === 'TB') {
+      const dy = Math.max(40, Math.abs(b.y - a.y) * 0.5);
+      return `M${a.x},${a.y} C${a.x},${a.y + dy} ${b.x},${b.y - dy} ${b.x},${b.y}`;
+    }
     return bezierPath(a, b);
   }
 
@@ -1353,7 +1438,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
     // Short wires first: they get the direct channels, long ones detour around them.
     ends.sort((p, q) => Math.abs(p.b.x - p.a.x) + Math.abs(p.b.y - p.a.y) - (Math.abs(q.b.x - q.a.x) + Math.abs(q.b.y - q.a.y)));
     for (const { e, a, b } of ends) {
-      const pts = router.route(a, b, `${e.from.node}:${e.from.port}`);
+      const pts = router.route(a, b, `${e.from.node}:${e.from.port}`, this.flowNow);
       this.setEdgePath(e, pts ? roundedPath(pts, 12) : this.curve(a, b));
     }
   }
@@ -1363,12 +1448,52 @@ export class NodeEditor extends Emitter<EditorEvents> {
   }
 
   /** Move a node to the nearest spot where it does not overlap others. */
-  private place_(id: string, opts: { axis: 'y' | 'both' }): void {
+  private place_(id: string, opts: { axis: 'x' | 'y' | 'both' }): void {
     const n = this.graph.nodes.get(id);
     const rec = this.records.get(id);
     if (!n || !rec) return;
-    const spot = findFreeSpot(this.rectsExcept(id), { x: n.x, y: n.y, w: rec.w, h: rec.h }, { axis: opts.axis, gap: 28 });
+    const spot = findFreeSpot(this.rectsExcept(id), { x: n.x, y: n.y, w: rec.w, h: rec.h }, { axis: opts.axis, gap: NODE_GAP });
     if (spot.x !== n.x || spot.y !== n.y) this.graph.moveNode(id, Math.round(spot.x), Math.round(spot.y));
+  }
+
+  /**
+   * Top to bottom, a node that grew (a preview or status appeared) pushes the rows below it
+   * down, just enough to keep a full layer gap: like text reflowing in a document.
+   */
+  private reflowBelow(id: string, oldH: number): void {
+    const n = this.graph.nodes.get(id);
+    const rec = this.records.get(id);
+    if (!n || !rec || this.gesture?.kind === 'node') return;
+    const oldBottom = n.y + oldH;
+    const below = [...this.graph.nodes.values()].filter((o) => o.id !== id && o.y >= oldBottom - 1);
+    const relevant = below.filter((o) => {
+      const r = this.records.get(o.id) ?? { w: 180 };
+      return (o.x < n.x + rec.w && o.x + r.w > n.x) || this.graph.reaches(id, o.id);
+    });
+    if (!relevant.length) return;
+    const need = n.y + rec.h + FLOW_GAP - Math.min(...relevant.map((o) => o.y));
+    if (need <= 0) return;
+    for (const o of below) this.graph.moveNode(o.id, o.x, Math.round(o.y + need));
+  }
+
+  /** Slide the nodes a node now covers further along `axis`, keeping their order (cascading). */
+  private pushAlong(id: string, axis: 'x' | 'y', depth: number): void {
+    if (axis === 'y') return this.pushAway(id, depth);
+    const n = this.graph.nodes.get(id);
+    const rec = this.records.get(id);
+    if (!n || !rec || depth > 50) return;
+    const box = { x: n.x, y: n.y, w: rec.w, h: rec.h };
+    const hit = [...this.graph.nodes.values()]
+      .filter((o) => o.id !== id && o.x >= n.x)
+      .filter((o) => {
+        const r = this.records.get(o.id);
+        return r && overlaps(box, { x: o.x, y: o.y, w: r.w, h: r.h }, 8);
+      })
+      .sort((a, b) => a.x - b.x);
+    for (const o of hit) {
+      this.graph.moveNode(o.id, Math.round(n.x + rec.w + NODE_GAP), o.y);
+      this.pushAlong(o.id, 'x', depth + 1);
+    }
   }
 
   /** A node grew (a preview or error appeared): slide the nodes it now covers out of the way. */
@@ -1386,7 +1511,9 @@ export class NodeEditor extends Emitter<EditorEvents> {
       .sort((a, b) => a.y - b.y);
     // Push straight down, keeping the column's order, and cascade to whatever those land on.
     for (const o of hit) {
-      this.graph.moveNode(o.id, o.x, Math.round(n.y + rec.h + 28));
+      // Top to bottom, a node pushed down along a wire is the next step in the flow: keep the layer gap.
+      const linked = this.flowNow === 'TB' && (this.graph.reaches(id, o.id) || this.graph.reaches(o.id, id));
+      this.graph.moveNode(o.id, o.x, Math.round(n.y + rec.h + (linked ? FLOW_GAP : NODE_GAP)));
       this.pushAway(o.id, depth + 1);
     }
   }
@@ -1896,6 +2023,9 @@ export class NodeEditor extends Emitter<EditorEvents> {
 }
 
 const noop = () => {};
+/** Space between layers when placing nodes along the flow, and between nodes in a layer. */
+const FLOW_GAP = 110;
+const NODE_GAP = 44;
 /** The editor's private colour/font variables, copied onto overlays. */
 const PRIVATE_VARS = [...new Set(css.match(/--_[\w-]+(?=:)/g) ?? [])];
 

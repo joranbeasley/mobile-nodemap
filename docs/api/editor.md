@@ -25,6 +25,7 @@ Bottom sheets (the add menu and the Edit sheet) open in an overlay layer over th
 | `longPressMs` | `450` | Long-press time before the add sheet opens. |
 | `overviewZoom` | `0.6` | Below this zoom the map is an overview: tapping a node (even on a field or port) zooms in on it instead of editing. `0` turns it off. |
 | `wires` | `'smart'` | `'smart'` (routed around nodes) or `'curved'`. |
+| `direction` | `'auto'` | `'LR'` (left to right), `'TB'` (top to bottom: inputs on the top edge, outputs on the bottom, wires run down) or `'auto'` (top to bottom on narrow portrait screens, else left to right; follows rotation). |
 | `layout` | `layered()` | Engine used by `autoLayout()`. |
 | `placement` | `true` | Place new and dropped nodes in free space; push nodes aside. |
 | `theme` | page colours | A theme id or object, or `{ light, dark }`. See [themes](themes.md). |
@@ -45,12 +46,13 @@ Bottom sheets (the add menu and the Edit sheet) open in an overlay layer over th
 | `select({ node?, edge? })` / `deleteSelection()` / `duplicateSelection()` | |
 | `openNodeEditor(nodeId)` | A full-size Edit sheet: name, every param (advanced ones too), values of unconnected inputs, Duplicate and Delete. Opened by double-tapping a node, the toolbar pencil, or E / Enter. |
 | `showDetails(nodeId)` / `hideDetails()` | A node type's `details()` card (code, actions). Tapping such a node calls it. |
-| `autoLayout({ animate?, fit?, maxWidth? })` | Tidy. On narrow portrait screens `maxWidth` defaults to fit at a readable zoom. |
+| `autoLayout({ animate?, fit?, maxWidth? })` | Tidy in the current flow, as one roomy flow (never wrapped unless you pass `maxWidth`). Records the flow in `graph.meta.flow`; a map arranged for the other flow is tidied automatically when it opens. |
 | `setLayout(engine)` / `setWires(style)` / `setTheme(theme \| null)` | |
 | `fit({ padding?, minScale? })` | `minScale` (default 0.6) keeps text readable; pass `0` to show everything. |
 | `zoomToNode(id, { animate?, zoom? })` | Centre a node at a comfortable zoom (100%, or smaller if it wouldn't fit). |
 | `zoomAt(factor, cx?, cy?)` / `setViewport({ x?, y?, k? })` / `screenToWorld(cx, cy)` / `ensureVisible(id)` | |
-| `layoutInput()` / `suggestedMaxWidth()` | What layout engines receive. |
+| `layoutInput()` | What layout engines receive. |
+| `setDirection('auto' \| 'LR' \| 'TB')` / `flow` | Change, or read, which way the map flows. Ports move to the matching edges, wires re-route and the map is tidied. |
 | `notify(message)` | A short toast. |
 | `destroy()` | Removes everything and unsubscribes. |
 

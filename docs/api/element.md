@@ -17,6 +17,7 @@ The editor renders in a shadow root. `--nm-*` variables set on the element or it
 | `graph-type` | A registered graph type id. Defaults to the inline JSON's `type`, else `math`. |
 | `theme` | `light` or `dark` (the default palette), or a theme id. |
 | `wires` | `smart` or `curved`. |
+| `direction` | `auto` (default), `LR` or `TB`. |
 | `auto-layout` | Tidy on load (also on when the graph type asks for it). |
 | `no-toolbar` | Hide the toolbar. |
 | `no-eval` | Edit only; don't run nodes. |

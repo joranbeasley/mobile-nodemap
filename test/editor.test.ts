@@ -236,3 +236,27 @@ describe('Overview zoom', () => {
     expect(editor.viewport.k).toBe(1);
   });
 });
+
+describe('Flow direction in the editor', () => {
+  it('top to bottom: tidies into a column and places new nodes below', async () => {
+    const reg = new Registry(stdlib);
+    const g = new Graph(reg);
+    g.addNode('value/number', { id: 'a', x: 0, y: 0 });
+    g.addNode('math/multiply', { id: 'm', x: 10, y: 10 });
+    g.connect({ node: 'a', port: 'value' }, { node: 'm', port: 'a' });
+    const el = document.createElement('div');
+    document.body.append(el);
+    const editor = new NodeEditor(el, { graph: g, registry: reg, direction: 'TB' });
+    expect(editor.flow).toBe('TB');
+    expect(el.dataset.flow).toBe('TB');
+    await editor.autoLayout({ animate: false });
+    expect(g.meta.flow).toBe('TB');
+    expect(g.nodes.get('m')!.y).toBeGreaterThan(g.nodes.get('a')!.y + 80);
+    const added = editor.addNode('view/display', undefined, { node: 'm', port: 'out', dir: 'out' });
+    expect(g.nodes.get(added.id)!.y).toBeGreaterThan(g.nodes.get('m')!.y);
+    editor.setDirection('LR');
+    expect(editor.flow).toBe('LR');
+    expect(el.dataset.flow).toBe('LR');
+    editor.destroy();
+  });
+});

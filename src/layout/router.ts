@@ -57,16 +57,20 @@ export class Router implements RouterPort {
   }
 
   /**
-   * Route from an output port at `from` (leaving rightwards) to an input port at `to`
-   * (entering from the left). Returns the corner points, or null if no route exists.
+   * Route from an output port at `from` to an input port at `to`. With `flow` 'LR' (default)
+   * wires leave rightwards and enter from the left; with 'TB' they leave downwards and enter
+   * from above. Returns the corner points, or null if no route exists.
    * Pass `owner` (e.g. the source port id) to let wires from the same output share a trunk.
    */
-  route(from: Point, to: Point, owner = ''): Point[] | null {
+  route(from: Point, to: Point, owner = '', flow: 'LR' | 'TB' = 'LR'): Point[] | null {
     // Snap to the grid's precision so the end points can be found in it.
     from = { x: snap(from.x), y: snap(from.y) };
     to = { x: snap(to.x), y: snap(to.y) };
-    const s = { x: snap(from.x + this.stub), y: from.y };
-    const t = { x: snap(to.x - this.stub), y: to.y };
+    // Left-to-right: leave outputs rightwards, enter inputs from the left.
+    // Top-to-bottom: leave outputs downwards (bottom edge), enter inputs from above (top edge).
+    const dir = flow === 'TB' ? 1 : 0;
+    const s = { x: snap(from.x + DX[dir] * this.stub), y: snap(from.y + DY[dir] * this.stub) };
+    const t = { x: snap(to.x - DX[dir] * this.stub), y: snap(to.y - DY[dir] * this.stub) };
     // A port pressed against a neighbour can put its stub inside that neighbour's clearance; ignore such rects.
     const rects = this.rects.filter((r) => !inside(s, r) && !inside(t, r));
     const xs = sortedUnique([...this.baseX, s.x, t.x]);
@@ -94,7 +98,7 @@ export class Router implements RouterPort {
     const prev = new Int32Array(W * H * 4).fill(-1);
     const heap = new MinHeap();
     const hcost = (i: number, j: number) => Math.abs(xs[i] - t.x) + Math.abs(ys[j] - t.y);
-    const start = key(si, sj, 0);
+    const start = key(si, sj, dir);
     g[start] = 0;
     heap.push(start, hcost(si, sj));
     let goal = -1;
@@ -109,8 +113,8 @@ export class Router implements RouterPort {
       const j = (cell - i) / W;
       if (f > g[k] + hcost(i, j) + 1e-6) continue; // stale heap entry
       if (i === ti && j === tj) {
-        // Arriving heading right enters the port cleanly; anything else needs one more turn.
-        const total = g[k] + (d === 0 ? 0 : this.bendCost * (d === 2 ? 2 : 1));
+        // Arriving in the flow direction enters the port cleanly; anything else needs more turns.
+        const total = g[k] + (d === dir ? 0 : this.bendCost * (d === (dir + 2) % 4 ? 2 : 1));
         if (total < goalCost) {
           goalCost = total;
           goal = k;

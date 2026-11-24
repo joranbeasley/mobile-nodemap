@@ -108,3 +108,57 @@ describe('Router precision', () => {
     expect(crosses(pts!, { x: 230, y: -20, w: 178, h: 121 })).toBe(false);
   });
 });
+
+describe('Flow direction', () => {
+  const tbChain = (n: number): LayoutInput => ({
+    direction: 'TB',
+    nodes: Array.from({ length: n }, (_, i) => ({
+      id: `n${i}`, x: (i * 37) % 100, y: (i * 53) % 90, w: 180, h: 80,
+      // Top-to-bottom: input on the top edge, output on the bottom edge.
+      ports: [{ name: 'in', dir: 'in' as const, x: 90, y: 0 }, { name: 'out', dir: 'out' as const, x: 90, y: 80 }],
+    })),
+    edges: Array.from({ length: n - 1 }, (_, i) => ({ id: `e${i}`, from: { node: `n${i}`, port: 'out' }, to: { node: `n${i + 1}`, port: 'in' } })),
+  });
+
+  it('top to bottom: one straight column, roomy gaps', () => {
+    const input = tbChain(4);
+    const pos = layered()(input) as Record<string, Point>;
+    noOverlaps(input, pos);
+    expect(new Set(Object.values(pos).map((p) => p.x)).size).toBe(1);
+    expect(pos.n1.y - pos.n0.y).toBeGreaterThanOrEqual(80 + 100);
+  });
+
+  it('top to bottom: siblings sit side by side in one row', () => {
+    const input = tbChain(2);
+    input.nodes.push({ ...input.nodes[1], id: 'n2' });
+    input.edges.push({ id: 'x', from: { node: 'n0', port: 'out' }, to: { node: 'n2', port: 'in' } });
+    const pos = layered()(input) as Record<string, Point>;
+    noOverlaps(input, pos);
+    expect(pos.n1.y).toBe(pos.n2.y);
+    expect(Math.abs(pos.n1.x - pos.n2.x)).toBeGreaterThanOrEqual(180 + 40);
+  });
+
+  it('never wraps unless asked', () => {
+    const input = chain(8);
+    const pos = layered()(input) as Record<string, Point>;
+    expect(new Set(Object.values(pos).map((p) => p.y)).size).toBe(1);
+  });
+
+  it('routes downward wires around a node in the way', () => {
+    const top = { x: 0, y: 0, w: 180, h: 80 };
+    const wall = { x: -40, y: 150, w: 260, h: 80 };
+    const bottom = { x: 0, y: 320, w: 180, h: 80 };
+    const pts = new Router([top, wall, bottom]).route({ x: 90, y: 80 }, { x: 90, y: 320 }, '', 'TB')!;
+    expect(pts).not.toBeNull();
+    expect(crosses(pts, wall)).toBe(false);
+    expect(pts[1].y).toBeGreaterThan(pts[0].y);                   // leaves downward
+    expect(pts[pts.length - 2].y).toBeLessThan(pts[pts.length - 1].y); // arrives from above
+  });
+
+  it('elk lays out top to bottom', async () => {
+    const input = tbChain(3);
+    const pos = await elkLayout(new ELK())(input);
+    expect(pos.n0.y).toBeLessThan(pos.n1.y);
+    expect(pos.n1.y).toBeLessThan(pos.n2.y);
+  });
+});

@@ -34,10 +34,10 @@ export function elkLayout(elk: ElkLike, opts: ElkLayoutOptions = {}): LayoutEngi
       id: 'root',
       layoutOptions: {
         'elk.algorithm': 'layered',
-        'elk.direction': 'RIGHT',
+        'elk.direction': input.direction === 'TB' ? 'DOWN' : 'RIGHT',
         'elk.edgeRouting': 'ORTHOGONAL',
-        'elk.spacing.nodeNode': '36',
-        'elk.layered.spacing.nodeNodeBetweenLayers': '80',
+        'elk.spacing.nodeNode': '56',
+        'elk.layered.spacing.nodeNodeBetweenLayers': '120',
         'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
         'elk.layered.crossingMinimization.semiInteractive': 'true',
         ...wrap,
@@ -50,11 +50,13 @@ export function elkLayout(elk: ElkLike, opts: ElkLayoutOptions = {}): LayoutEngi
         layoutOptions: { 'elk.portConstraints': 'FIXED_POS', 'elk.position': `(${n.x},${n.y})` },
         ports: n.ports.map((p) => ({
           id: `${n.id}\u0000${p.dir}\u0000${p.name}`,
-          x: p.dir === 'in' ? -1 : n.w - 1,
+          x: p.x - 1,
           y: p.y - 1,
           width: 2,
           height: 2,
-          layoutOptions: { 'elk.port.side': p.dir === 'in' ? 'WEST' : 'EAST' },
+          layoutOptions: {
+            'elk.port.side': input.direction === 'TB' ? (p.dir === 'in' ? 'NORTH' : 'SOUTH') : p.dir === 'in' ? 'WEST' : 'EAST',
+          },
         })),
       })),
       edges: input.edges.map((e) => ({

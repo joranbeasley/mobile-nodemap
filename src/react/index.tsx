@@ -30,6 +30,8 @@ export interface NodeMapProps {
   /** An evaluator you own (see useEvaluator), or false to show the editor without running nodes. */
   evaluator?: Evaluator | false;
   wires?: 'smart' | 'curved';
+  /** 'auto' (default): top to bottom on narrow portrait screens, left to right otherwise. */
+  direction?: 'auto' | 'LR' | 'TB';
   layout?: LayoutEngine;
   toolbar?: boolean;
   placement?: boolean;
@@ -70,6 +72,7 @@ export const NodeMap = forwardRef<NodeEditor | null, NodeMapProps>(function Node
       toolbar,
       placement,
       wires: latest.current.wires ?? latest.current.graphType?.editor?.wires,
+      direction: latest.current.direction,
       layout: latest.current.layout,
     });
     const offs = [
@@ -94,6 +97,9 @@ export const NodeMap = forwardRef<NodeEditor | null, NodeMapProps>(function Node
   useEffect(() => {
     if (editor && props.layout) editor.setLayout(props.layout);
   }, [editor, props.layout]);
+  useEffect(() => {
+    if (editor && props.direction) editor.setDirection(props.direction);
+  }, [editor, props.direction]);
   const themeKey = typeof props.theme === 'object' ? JSON.stringify(props.theme) : props.theme;
   useEffect(() => {
     if (!editor) return;

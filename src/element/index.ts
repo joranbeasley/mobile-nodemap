@@ -24,14 +24,14 @@ const hostCss = `
  *     <script type="application/json">{ "version": 1, "nodes": [...], "edges": [...] }</script>
  *   </node-map>
  *
- * Attributes: `graph-type` (a registered graph type id), `wires` (smart | curved), `theme` (light | dark, or a theme id such as midnight, paper, synthwave), `no-toolbar`, `no-eval`, `auto-layout`.
+ * Attributes: `graph-type` (a registered graph type id), `direction` (auto | LR | TB), `wires` (smart | curved), `theme` (light | dark, or a theme id such as midnight, paper, synthwave), `no-toolbar`, `no-eval`, `auto-layout`.
  * Properties: `graphType`, `registry` (defaults to the graph type's), `value` (graph JSON), `graph`, `editor`, `evaluator`, `layout`.
  * Methods: `autoLayout()`, `fit()`, `run(inputs)`, `call(inputs)`.
  * Events: `change` ({ value, change }), `select` ({ node, edge }), `evaluate` (EvalReport).
  * Style it with CSS custom properties (--nm-bg, --nm-accent, …); they pass into the shadow root.
  */
 export class NodeMapElement extends Base {
-  static observedAttributes = ['wires', 'theme', 'graph-type'];
+  static observedAttributes = ['wires', 'theme', 'graph-type', 'direction'];
 
   private _registry?: Registry;
   private _layout?: LayoutEngine;
@@ -133,6 +133,7 @@ export class NodeMapElement extends Base {
       this._registry = undefined;
       this.mount();
     }
+    if (name === 'direction' && this._editor) this._editor.setDirection(dirAttr(value));
     if (name === 'wires' && this._editor) this._editor.setWires(value === 'curved' ? 'curved' : 'smart');
     if (name === 'theme' && this._canvas) this.applyTheme(value);
   }
@@ -181,6 +182,7 @@ export class NodeMapElement extends Base {
       evaluator: this._evaluator,
       toolbar: !this.hasAttribute('no-toolbar'),
       wires: this.getAttribute('wires') === 'curved' ? 'curved' : 'smart',
+      direction: dirAttr(this.getAttribute('direction')),
       layout: this._layout,
     }));
     this.applyTheme(this.getAttribute('theme'));
@@ -207,6 +209,11 @@ export class NodeMapElement extends Base {
     this._editor?.destroy();
     this._editor = undefined;
   }
+}
+
+function dirAttr(v: string | null): 'auto' | 'LR' | 'TB' {
+  const u = (v ?? '').toUpperCase();
+  return u === 'LR' || u === 'TB' ? u : 'auto';
 }
 
 /** Register the element (default tag `node-map`). Safe to call more than once. */

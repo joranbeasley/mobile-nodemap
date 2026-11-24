@@ -101,7 +101,7 @@ const demoMath = registerGraphType(
       {
         id: 'tidy',
         name: 'Tidy me',
-        description: 'These nodes are piled up. Press the tidy button (or L). On a phone the layout wraps into rows that fit the screen.',
+        description: 'These nodes are piled up. Press the tidy button (or L). The map flows left to right, or top to bottom on a portrait phone.',
         graph: {
           version: 1,
           nodes: [
@@ -653,7 +653,7 @@ function renderHelp() {
     <li><b>Edit</b> double-tap a node (or select it and tap the pencil) for big controls: rename it and change every setting</li>
     <li><b>Connect</b> drag from a port to a port, or tap one port and then another (or a node)</li>
     <li><b>Add</b> long-press the background, or press <kbd>+</kbd>. With a node, port or wire selected, <kbd>+</kbd> adds a node wired to it and nudges its neighbours aside</li>
-    <li><b>Tidy</b> the layout button (or <kbd>L</kbd>) arranges the map; wires route around nodes</li>
+    <li><b>Tidy</b> the layout button (or <kbd>L</kbd>) arranges the map in one roomy flow: left to right, or top to bottom on a portrait phone. Wires route around nodes</li>
     <li><b>Themes</b> pick one of three light and three dark themes. Node shapes and colours follow each node's flavor: sources, transforms, sinks, views and control</li>
     <li><b>Build your own node</b> in the λ Function builder: Inputs become arguments and the one Output is the result. <b>Build</b> adds it to your library and shows it as one TypeScript function</li>
   </ul>

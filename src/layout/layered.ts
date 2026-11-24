@@ -2,26 +2,34 @@ import { bounds } from './geometry.js';
 import type { LayoutEngine, LayoutInput, LayoutNode, Positions } from './types.js';
 
 export interface LayeredOptions {
-  /** Horizontal gap between layers. */
-  gapX?: number;
-  /** Vertical gap between nodes in a layer. */
-  gapY?: number;
-  /** Vertical gap between wrapped rows. */
-  rowGap?: number;
+  /** Space between layers, along the flow. Default 120. */
+  layerGap?: number;
+  /** Space between nodes in the same layer. Default 56. */
+  nodeGap?: number;
+  /** Space between wrapped bands (only with `maxWidth`). Default 100. */
+  bandGap?: number;
   /** Crossing-reduction passes. */
   sweeps?: number;
+  /** @deprecated Use layerGap. */
+  gapX?: number;
+  /** @deprecated Use nodeGap. */
+  gapY?: number;
+  /** @deprecated Use bandGap. */
+  rowGap?: number;
 }
 
 /**
  * A dependency-free layered (Sugiyama-style) layout:
  * longest-path layering, barycentre ordering that respects port order, and port-aligned
- * vertical placement so straight wires stay straight. With `maxWidth` it wraps layers into
- * rows, which suits portrait phone screens.
+ * placement so straight wires stay straight. It flows left to right (`direction: 'LR'`) or
+ * top to bottom (`'TB'`) as one uncrowded flow. Wrapping into bands is opt-in: pass `maxWidth`
+ * with left-to-right flow.
  */
 export function layered(opts: LayeredOptions = {}): LayoutEngine {
-  const gapX = opts.gapX ?? 80;
-  const gapY = opts.gapY ?? 36;
-  const rowGap = opts.rowGap ?? 90;
+  // Roomy by default: a readable map beats a compact one.
+  const layerGap = opts.layerGap ?? opts.gapX ?? 120;
+  const nodeGap = opts.nodeGap ?? opts.gapY ?? 56;
+  const bandGap = opts.bandGap ?? opts.rowGap ?? 100;
   const sweeps = opts.sweeps ?? 8;
 
   return (input: LayoutInput): Positions => {
@@ -96,67 +104,81 @@ export function layered(opts: LayeredOptions = {}): LayoutEngine {
       }
     }
 
-    // 3. Columns, wrapped into rows when a max width is given.
-    const colW = layers.map((l) => Math.max(...l.map((id) => nodes.get(id)!.w)));
-    const rows: number[][] = [[]];
+    // 3. Layers along the flow: columns (left to right) or rows (top to bottom).
+    //    "main" is the flow axis, "cross" the axis within a layer.
+    const tb = input.direction === 'TB';
+    const mainSize = (n: LayoutNode) => (tb ? n.h : n.w);
+    const crossSize = (n: LayoutNode) => (tb ? n.w : n.h);
+    const layerSize = layers.map((l) => Math.max(...l.map((id) => mainSize(nodes.get(id)!))));
+    // Wrapping is opt-in (left to right with maxWidth only); by default a map is one long flow.
+    const bands: number[][] = [[]];
     let cursor = 0;
-    const colX: number[] = [];
+    const layerAt: number[] = [];
     layers.forEach((_, L) => {
-      const row = rows[rows.length - 1];
-      if (input.maxWidth && row.length && cursor + colW[L] > input.maxWidth) {
-        rows.push([]);
+      const band = bands[bands.length - 1];
+      if (!tb && input.maxWidth && band.length && cursor + layerSize[L] > input.maxWidth) {
+        bands.push([]);
         cursor = 0;
       }
-      rows[rows.length - 1].push(L);
-      colX[L] = cursor;
-      cursor += colW[L] + gapX;
+      bands[bands.length - 1].push(L);
+      layerAt[L] = cursor;
+      cursor += layerSize[L] + layerGap;
     });
 
-    // 4. Vertical placement: line ports up with their neighbours, then resolve overlaps.
-    const pos: Positions = {};
-    const portY = (id: string, port: string, dir: 'in' | 'out') =>
-      nodes.get(id)!.ports.find((p) => p.name === port && p.dir === dir)?.y ?? nodes.get(id)!.h / 2;
-    const placeColumn = (L: number, target: (id: string) => number | undefined) => {
-      let bottom = -Infinity;
+    // 4. Placement within each layer: line ports up with their neighbours, then resolve overlaps.
+    const crossPos = new Map<string, number>();
+    const portCross = (id: string, port: string, dir: 'in' | 'out') => {
+      const n = nodes.get(id)!;
+      const p = n.ports.find((q) => q.name === port && q.dir === dir);
+      return p ? (tb ? p.x : p.y) : crossSize(n) / 2;
+    };
+    const placeLayer = (L: number, target: (id: string) => number | undefined) => {
+      let end = -Infinity;
       let shift = 0;
       let n = 0;
-      const ys = layers[L].map((id) => {
+      const cs = layers[L].map((id) => {
         const t = target(id);
-        const y = Math.max(t ?? (bottom === -Infinity ? 0 : bottom + gapY), bottom + gapY);
-        bottom = y + nodes.get(id)!.h;
-        if (t !== undefined) (shift += t - y), n++;
-        return y;
+        const c = Math.max(t ?? (end === -Infinity ? 0 : end + nodeGap), end + nodeGap);
+        end = c + crossSize(nodes.get(id)!);
+        if (t !== undefined) (shift += t - c), n++;
+        return c;
       });
       const s = n ? shift / n : 0;
-      layers[L].forEach((id, i) => (pos[id] = { x: colX[L], y: ys[i] + s }));
+      layers[L].forEach((id, i) => crossPos.set(id, cs[i] + s));
     };
     const mean = (v: number[]) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : undefined);
 
-    let top = 0;
-    for (const row of rows) {
-      const inRow = new Set(row);
+    const pos: Positions = {};
+    let bandTop = 0;
+    for (const band of bands) {
+      const inBand = new Set(band);
       const fromPreds = (id: string) =>
         mean(
           preds
             .get(id)!
-            .filter((e) => inRow.has(layer.get(e.from.node)!) && pos[e.from.node])
-            .map((e) => pos[e.from.node].y + portY(e.from.node, e.from.port, 'out') - portY(id, e.to.port, 'in')),
+            .filter((e) => inBand.has(layer.get(e.from.node)!) && crossPos.has(e.from.node))
+            .map((e) => crossPos.get(e.from.node)! + portCross(e.from.node, e.from.port, 'out') - portCross(id, e.to.port, 'in')),
         );
       const fromSuccs = (id: string) =>
         mean(
           succs
             .get(id)!
-            .filter((e) => inRow.has(layer.get(e.to.node)!) && pos[e.to.node])
-            .map((e) => pos[e.to.node].y + portY(e.to.node, e.to.port, 'in') - portY(id, e.from.port, 'out')),
+            .filter((e) => inBand.has(layer.get(e.to.node)!) && crossPos.has(e.to.node))
+            .map((e) => crossPos.get(e.to.node)! + portCross(e.to.node, e.to.port, 'in') - portCross(id, e.from.port, 'out')),
         );
-      for (const L of row) placeColumn(L, fromPreds);
-      for (const L of [...row].reverse().slice(1)) placeColumn(L, (id) => fromPreds(id) ?? fromSuccs(id) ?? pos[id].y);
-      for (const L of row.slice(1)) placeColumn(L, (id) => fromPreds(id) ?? pos[id].y);
-      // Stack this row below the previous one.
-      const ids = row.flatMap((L) => layers[L]);
-      const b = bounds(ids.map((id) => ({ ...pos[id], w: nodes.get(id)!.w, h: nodes.get(id)!.h })));
-      ids.forEach((id) => (pos[id].y += top - b.y));
-      top += b.h + rowGap;
+      for (const L of band) placeLayer(L, fromPreds);
+      for (const L of [...band].reverse().slice(1)) placeLayer(L, (id) => fromPreds(id) ?? fromSuccs(id) ?? crossPos.get(id));
+      for (const L of band.slice(1)) placeLayer(L, (id) => fromPreds(id) ?? crossPos.get(id));
+      // Wrapped bands (left to right only) stack below one another.
+      const ids = band.flatMap((L) => layers[L]);
+      const lo = Math.min(...ids.map((id) => crossPos.get(id)!));
+      const hi = Math.max(...ids.map((id) => crossPos.get(id)! + crossSize(nodes.get(id)!)));
+      for (const id of ids) {
+        const m = layerAt[layer.get(id)!];
+        const c = crossPos.get(id)! - lo + bandTop;
+        pos[id] = tb ? { x: c, y: m } : { x: m, y: c };
+      }
+      bandTop += hi - lo + bandGap;
     }
 
     // Keep the drawing where it was instead of jumping to the origin.

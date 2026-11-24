@@ -10,7 +10,7 @@ A small, dependency-free TypeScript library for building **node maps** (node gra
 
 **API reference: [docs/api](docs/api)**. Design records are in [docs/adr](docs/adr) and product requirements in [docs/prd](docs/prd).
 - **`mobile-nodemap/editor`**: `NodeEditor`, a touch-first DOM/SVG editor with pinch zoom, drag or tap-to-connect wiring, a long-press add menu, live results and undo.
-- **`mobile-nodemap/layout`**: auto-layout, wire routing and placement. A layered layout that wraps to fit portrait screens, an orthogonal router that steers wires around nodes, free-space placement, and an optional [ELK](https://eclipse.dev/elk/) adapter. No DOM.
+- **`mobile-nodemap/layout`**: auto-layout, wire routing and placement. A roomy layered layout that flows left to right or top to bottom, an orthogonal router that steers wires around nodes, free-space placement, and an optional [ELK](https://eclipse.dev/elk/) adapter. No DOM.
 - **`mobile-nodemap/react`**: `<NodeMap>`, hooks (`useGraph`, `useEvaluator`, `useEvaluation`, `useGraphValue`) and `reactView()` for React-rendered node previews.
 - **`mobile-nodemap/element`**: the `<node-map>` custom element. Importing it registers the tag.
 
@@ -226,23 +226,24 @@ library.source('lib/cylinder-volume', registry);           // one TypeScript fun
 
 The editor arranges things so you rarely have to drag on a small screen:
 
-- **Tidy** (toolbar button, <kbd>L</kbd>, or `editor.autoLayout()`) runs the layout engine and animates nodes into place. On a narrow portrait canvas the layout wraps into rows that fit the width at a readable zoom.
+- **One flow, never crammed.** Maps flow **left to right**, or **top to bottom** on narrow portrait screens (`direction: 'auto'`, the default; or force `'LR'` / `'TB'`). Top to bottom, inputs sit on the top edge of each node and outputs on the bottom, so wires run downwards. Layouts are never wrapped into rows. Gaps are generous, and the view opens at a readable zoom; pan to see the rest, or tap **Show whole map** for the overview.
+- **Tidy** (toolbar button, <kbd>L</kbd>, or `editor.autoLayout()`) runs the layout engine in the current flow and animates nodes into place. A map arranged for the other flow (made on a desktop, opened on a phone) is tidied automatically when it opens. The flow is remembered in `graph.meta.flow`.
 - **Routed wires** (`wires: 'smart'`, the default) are orthogonal and go around nodes. The router runs A* over a sparse grid built from node edges and the channels between them. Bends cost extra, and wires from different outputs avoid sharing a segment. While you drag a node, only its own wires re-route; everything re-routes when you drop it. Use `wires: 'curved'` for classic S-curves.
 - **Add next to the selection**: with a node selected, **+** opens the add sheet ready to wire the new node to it. It picks the side the node needs: after it if its output is unused, before it if it still has an open input, and before it for nodes with no outputs. A switch (`→ Node` / `Node →` / Unconnected) and port chips let you change that. The new node is selected afterwards, so pressing **+** again keeps extending the chain. `editor.openAddSheet()` and `editor.suggestConnection(id)` expose this.
 - **Tapped ports and wires**: tap an output port and press **+** to add a node after that output (an input port adds one before it). Tap a wire and press **+** to insert a node into it (`editor.spliceNode(type, edgeId)`). The menu only lists nodes that fit both ends.
-- **Making room**: a new node never just lands wherever there is space. If it joins nodes already wired to the same port, it goes into their column and the nodes below shift down. If it lands on anything further along the flow, a column opens up and the downstream nodes slide right (or the upstream nodes slide left). Neighbours animate into place.
-- **Placement**: a node added by dropping a wire lands one column over with its port lined up, in the nearest free space. A node dropped on top of another slides off it. When a node grows (a chart or an error appears), the nodes below it are pushed down.
+- **Making room**: a new node never just lands wherever there is space. If it joins nodes already wired to the same port, it goes into their layer and the rest of that layer shifts along. If it lands on anything further along the flow, a new layer opens and the downstream nodes move along the flow (right, or down top to bottom). Neighbours animate into place.
+- **Placement**: a node added by dropping a wire lands one layer over (right, or below top to bottom) with its port lined up. A node dropped on top of another slides off it. When a node grows (a chart, status or error appears), the nodes after it move just enough to keep a full gap.
 
 ```ts
 import { layered, elkLayout, Router, findFreeSpot } from 'mobile-nodemap/layout';
 import ELK from 'elkjs/lib/elk.bundled.js';           // optional peer dependency
 
-editor.setLayout(elkLayout(new ELK()));               // or layered({ gapX: 80, gapY: 36 })
-await editor.autoLayout({ maxWidth: 600 });           // force row wrapping
+editor.setLayout(elkLayout(new ELK()));               // or layered({ layerGap: 120, nodeGap: 56 })
+editor.setDirection('TB');                            // 'auto' | 'LR' | 'TB'
 
 // The pieces work without the editor too:
-const positions = layered()({ nodes, edges, maxWidth: 600 });
-const points = new Router(nodeRects).route(outputPoint, inputPoint);
+const positions = layered()({ nodes, edges, direction: 'TB' });
+const points = new Router(nodeRects).route(outputPoint, inputPoint, owner, 'TB');
 ```
 
 A layout engine is any function `(input) => positions` (sync or async), so you can plug in dagre, d3-dag and so on.

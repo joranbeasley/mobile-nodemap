@@ -9,7 +9,7 @@ On phones, dragging nodes into tidy positions and untangling wires is tedious. M
 | # | Requirement | Status |
 | --- | --- | --- |
 | L1 | Tidy (button or `L`): a layered layout, animated | Shipped |
-| L2 | On narrow portrait screens, the layout wraps into rows that fit at a readable zoom | Shipped |
+| L2 | Layouts flow one way and are never wrapped into rows: left to right, or top to bottom on narrow portrait screens (inputs on top edges, outputs on bottom edges, wires running down). Uncrowded spacing is preferred over fitting everything on screen | Shipped (replaces wrapped rows) |
 | L3 | Orthogonal wires route around nodes and spread into separate channels; curved wires optional | Shipped |
 | L4 | While dragging, only the dragged node's wires re-route; all re-route on drop | Shipped |
 | L5 | New connected nodes line up with their port; they join siblings' columns or open a column, and neighbours animate aside | Shipped |
