@@ -44,6 +44,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/build-bundle.mjs",
+    "prepare": "npm run build",
     "demo": "node scripts/build-demo.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
