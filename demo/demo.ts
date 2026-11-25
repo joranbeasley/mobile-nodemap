@@ -194,6 +194,17 @@ let layoutEngine: LayoutEngine = layered();
 
 const statusEl = $('#status');
 const blurbEl = $('#blurb');
+// The tip under the tabs can be hidden (and brought back with "i"); the choice is remembered.
+const tipEl = $('#tip');
+const tipShow = $<HTMLButtonElement>('#tip-show');
+const setTip = (hidden: boolean) => {
+  tipEl.hidden = hidden;
+  tipShow.hidden = !hidden;
+  safe(() => (hidden ? localStorage.setItem('nodemap-demo:tip-hidden', '1') : localStorage.removeItem('nodemap-demo:tip-hidden')), undefined);
+};
+setTip(safe(() => localStorage.getItem('nodemap-demo:tip-hidden') === '1', false));
+$('#tip-hide').addEventListener('click', () => setTip(true));
+tipShow.addEventListener('click', () => setTip(false));
 const wiresSel = $<HTMLSelectElement>('#wires');
 const engineSel = $<HTMLSelectElement>('#engine');
 const typeSel = $<HTMLSelectElement>('#gtype');
@@ -678,6 +689,7 @@ function renderHelp() {
   panelTitle.textContent = 'How to use it';
   panelBody.innerHTML = `
   <ul class="help">
+    <li><b>Tip</b> the line under the tabs explains each example; × hides it (remembered), and <b>i</b> brings it back</li>
     <li><b>Graph type</b> the picker next to the logo switches what you are building: maths, a network, a UML class diagram, a drama production (wired, or as Drama boards: tabs of cards), or colour palettes from a third-party pack</li>
     <li><b>Pan</b> drag the background · <b>Zoom</b> pinch, or scroll with a trackpad</li>
     <li><b>Move</b> drag any node · <b>Select</b> tap it, then use the toolbar</li>
