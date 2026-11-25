@@ -155,6 +155,24 @@ export const imagesParam: ParamKind = {
         rm.setAttribute('aria-label', `Remove image ${i + 1}`);
         rm.addEventListener('click', () => commit(list.filter((_, j) => j !== i)));
         t.append(view, rm);
+        // Order matters (the first frame or picture leads the video prompt): ‹ › move one along.
+        if (list.length > 1 && (ctx.param as { sortable?: boolean }).sortable !== false) {
+          const move = (d: number, glyph: string, label: string) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = `dr-mv ${d < 0 ? 'dr-mv-l' : 'dr-mv-r'}`;
+            b.textContent = glyph;
+            b.setAttribute('aria-label', `Move image ${i + 1} ${label}`);
+            b.disabled = i + d < 0 || i + d >= list.length;
+            b.addEventListener('click', () => {
+              const next = [...list];
+              [next[i], next[i + d]] = [next[i + d], next[i]];
+              commit(next);
+            });
+            return b;
+          };
+          t.append(move(-1, '‹', 'earlier'), move(1, '›', 'later'));
+        }
         wrap.append(t);
       });
       if (list.length < max) {
@@ -782,6 +800,14 @@ const css = `
 .dr-rm { all: unset; position: absolute; top: -7px; right: -7px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
   background: var(--_node); color: var(--_text); border: 1px solid var(--_border); font: 600 14px/1 var(--_font); cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
 .nm-node:not(.nm-selected) .dr-rm { display: none; }
+.dr-mv { all: unset; position: absolute; bottom: -8px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
+  background: var(--_node); color: var(--_text); border: 1px solid var(--_border); font: 700 14px/1 var(--_font); box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+.dr-mv-l { left: -6px; }
+.dr-mv-r { right: -6px; }
+.dr-mv:disabled { display: none; }
+.dr-mv:focus-visible { outline: 2px solid var(--_accent); }
+.nm-node:not(.nm-selected) .dr-mv { display: none; }
+.dr-images:has(.dr-mv) { gap: 14px 16px; }
 .dr-add { all: unset; box-sizing: border-box; min-width: 44px; height: 44px; padding: 0 12px; border-radius: 6px; border: 1.5px dashed var(--_border);
   color: var(--_muted); font: 500 12px/1 var(--_font); display: grid; place-items: center; cursor: pointer; }
 .dr-add:hover, .dr-add:focus-visible { border-color: var(--_accent); color: var(--_accent); }

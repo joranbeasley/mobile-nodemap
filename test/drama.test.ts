@@ -80,6 +80,13 @@ describe('Drama graph type', () => {
     expect(g.nodes.get('b')!.params.images).toEqual([]);
     expect(imgs().querySelector('.dr-add')!.textContent).toBe('+ Add images');
     g.setParam('b', 'images', ['data:image/png;base64,AAAA', 'data:image/png;base64,BBBB']);
+    expect(imgs().querySelectorAll('.dr-thumb')).toHaveLength(2);
+    // ‹ › reorder them: the first one leads the video prompt.
+    const later = imgs().querySelector<HTMLButtonElement>('.dr-thumb .dr-mv-r')!;
+    expect(later.disabled).toBe(false);
+    expect(imgs().querySelector<HTMLButtonElement>('.dr-thumb .dr-mv-l')!.disabled).toBe(true);
+    later.click();
+    expect(g.nodes.get('b')!.params.images).toEqual(['data:image/png;base64,BBBB', 'data:image/png;base64,AAAA']);
     // Shots and scenes without a name take their header from their params.
     const title = (id: string) => el.querySelector(`[data-id="${id}"] .nm-title`)!.textContent;
     expect(title('k2')).toBe('Shot 2 · Close-up');
