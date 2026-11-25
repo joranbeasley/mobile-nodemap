@@ -361,8 +361,21 @@ function loadExample(id: string, fresh = false) {
   buildName = gtype === demoFunction ? current.name : buildName;
   buildDesc = gtype === demoFunction ? current.description ?? '' : buildDesc;
   if (fresh) store.clear(gtype.id, current.id);
-  const saved = store.get(gtype.id, current.id);
-  graph.load(structuredClone(saved ?? current.graph));
+  let saved = store.get(gtype.id, current.id);
+  // A map saved by an older version may use node types that have since been retired.
+  if (saved && saved.nodes?.some((n) => !registry.get(n.type))) {
+    store.clear(gtype.id, current.id);
+    saved = null;
+  }
+  try {
+    graph.load(structuredClone(saved ?? current.graph));
+  } catch (err) {
+    // A map saved by an older version (a node type that has since changed): start fresh.
+    console.warn('Saved map could not be loaded; using the example', err);
+    store.clear(gtype.id, current.id);
+    saved = null;
+    graph.load(structuredClone(current.graph));
+  }
   editor.history?.reset();
   editor.select({});
   blurbEl.textContent = current.description ?? '';

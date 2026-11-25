@@ -7,11 +7,12 @@ const view = (id: string) => drama2Graph.editor!.views!.find((v) => v.id === id)
 const titles = (g: Graph, id: string, list: string) => drama2Lists(g, toDrama(g), id).find((l) => l.title === list)!.items.map((i) => i.title);
 
 describe('Drama boards (drama2)', () => {
-  it('is registered with four views and no ports', () => {
+  it('is registered with five views and no ports', () => {
     expect(getGraphType('drama2')).toBe(drama2Graph);
     expect(drama2Graph.editor!.views!.map((v) => [v.id, v.layout])).toEqual([
       ['cast', 'grid'],
       ['locations', 'grid'],
+      ['props', 'grid'],
       ['scenes', 'rows'],
       ['episodes', 'rows'],
     ]);
@@ -24,13 +25,21 @@ describe('Drama boards (drama2)', () => {
     expect(g.edges.size).toBe(0);
     expect(g.nodes.get('s1a')!.params).toMatchObject({ location: 'hall', characters: ['maya', 'theo', 'jules', 'okafor'] });
     expect(g.nodes.get('sc1')!.params.shots).toEqual(['s1a', 's1b', 's1c']);
-    expect(g.nodes.get('jules-lead')!.params).toMatchObject({ character: 'jules', scenes: ['sc4'] });
+    // Costumes become props of type Outfit, on the shots their wearer is in.
+    expect(g.nodes.get('jules-lead')!.type).toBe('drama2/prop');
+    expect(g.nodes.get('jules-lead')!.params).toMatchObject({ kind: 'Outfit', wornBy: 'jules' });
+    expect(g.nodes.get('script')!.params).toMatchObject({ kind: 'Object' });
+    expect(g.nodes.get('s4c')!.params.props).toEqual(['jules-lead']);
+    expect(g.nodes.get('s4a')!.params.props).toEqual(['maya-blacks']);
+    expect(g.nodes.get('s1b')!.params.props).toEqual(['script']);
     expect(g.nodes.get('ep1')!.params.style).toContain('35mm film look'); // handed down from the season
-    // The wired version gives the same Seedance shots as the drama example (props are names only here).
+    // The wired version gives the same Seedance shots as the drama example: outfits dress
+    // their wearer, objects (with their pictures) are props.
     const wired = toDrama(g);
     const original = Graph.fromJSON(dramaGraph.examples![0].graph, dramaGraph.createRegistry());
-    expect(seedanceShot(wired, 's4c').prompt).toBe(seedanceShot(original, 's4c').prompt);
-    expect(fromDrama(dramaGraph.examples![0].graph).nodes.find((n) => n.id === 's1b')!.params.props).toBe('Dog-eared script');
+    for (const id of ['s1b', 's4a', 's4c']) expect(seedanceShot(wired, id).prompt).toBe(seedanceShot(original, id).prompt);
+    expect(seedanceShot(wired, 's1b').refs.map((r) => r.label)).toContain('Dog-eared script (prop)');
+    expect(fromDrama(dramaGraph.examples![0].graph).nodes.filter((n) => n.type === 'drama2/prop')).toHaveLength(3);
   });
 
   it('lists where things appear', async () => {
@@ -39,6 +48,9 @@ describe('Drama boards (drama2)', () => {
     expect(titles(g, 'maya', 'Episodes')).toEqual(['Episode 1: The Read-Through', 'Episode 2: Opening Night']);
     expect(titles(g, 'maya', 'Outfits')).toEqual(['Stage blacks']);
     expect(titles(g, 'park', 'Episodes')).toEqual(['Episode 1: The Read-Through']);
+    expect(titles(g, 'script', 'Scenes')).toEqual(['Ep 1 · Scene 1 · DAY', 'Ep 2 · Scene 1 · NIGHT']);
+    expect(titles(g, 'jules-lead', 'Episodes')).toEqual(['Episode 2: Opening Night']);
+    expect(titles(g, 'sc4', 'Props')).toEqual(['Stage blacks (Maya)', 'Dog-eared script', 'Lead costume (Jules)']);
     expect(titles(g, 's3b', 'Episodes')).toEqual(['Episode 1: The Read-Through']);
     expect(titles(g, 'ep2', 'Actors')).toEqual(['Maya (Priya S.)', 'Jules (Alex K.)']);
     expect(titles(g, 'ep2', 'Locations')).toEqual(['School hall', 'Backstage']);
@@ -47,7 +59,7 @@ describe('Drama boards (drama2)', () => {
     expect((r.results.get('maya')!.outputs!.lists as { title: string }[]).map((l) => l.title)).toEqual(['Scenes', 'Episodes', 'Outfits']);
   });
 
-  it('adds new shots, scenes and outfits to what is selected', () => {
+  it('adds new shots, scenes and props to what is selected', () => {
     const g = load();
     const shot = g.addNode('drama2/shot');
     view('scenes').onAdd!(shot, { graph: g, selected: g.nodes.get('s2b') });
@@ -57,9 +69,12 @@ describe('Drama boards (drama2)', () => {
     view('episodes').onAdd!(scene, { graph: g, selected: g.nodes.get('ep2') });
     expect(g.nodes.get('ep2')!.params.scenes).toEqual(['sc4', scene.id]);
     expect(scene.params.number).toBe(2);
-    const outfit = g.addNode('drama2/outfit');
-    view('cast').onAdd!(outfit, { graph: g, selected: g.nodes.get('theo') });
-    expect(outfit.params.character).toBe('theo');
+    const outfit = g.addNode('drama2/prop');
+    view('props').onAdd!(outfit, { graph: g, selected: g.nodes.get('jules-lead') });
+    expect(outfit.params).toMatchObject({ kind: 'Outfit', wornBy: 'jules' });
+    const thing = g.addNode('drama2/prop');
+    view('props').onAdd!(thing, { graph: g, selected: g.nodes.get('script') });
+    expect(thing.params).toMatchObject({ kind: 'Object', wornBy: '' });
   });
 });
 
@@ -75,8 +90,8 @@ describe('Editor views', () => {
 
   it('shows one view at a time with a tab per view', async () => {
     const { el, editor } = mount();
-    expect([...el.querySelectorAll('.nm-view-tab')].map((t) => t.textContent)).toEqual(['Cast6', 'Locations3', 'Scenes14', 'Episodes6']);
-    expect(shown(el)).toEqual(['maya', 'theo', 'jules', 'okafor', 'jules-lead', 'maya-blacks']);
+    expect([...el.querySelectorAll('.nm-view-tab')].map((t) => t.textContent)).toEqual(['Cast4', 'Locations3', 'Props3', 'Scenes14', 'Episodes6']);
+    expect(shown(el)).toEqual(['maya', 'theo', 'jules', 'okafor']);
     await editor.setView('scenes');
     expect(editor.currentView).toBe('scenes');
     expect(shown(el)).toHaveLength(14);
@@ -87,10 +102,11 @@ describe('Editor views', () => {
   it('lays out grids and rows', async () => {
     const { g, editor } = mount();
     await editor.layoutView({ animate: false });
-    // Each character, then their outfits.
     const ys = (ids: string[]) => ids.map((id) => g.nodes.get(id)!.y);
-    const reading = ['maya', 'maya-blacks', 'theo', 'jules', 'jules-lead', 'okafor'].sort((a, b) => g.nodes.get(a)!.y - g.nodes.get(b)!.y || g.nodes.get(a)!.x - g.nodes.get(b)!.x);
-    expect(reading).toEqual(['maya', 'maya-blacks', 'theo', 'jules', 'jules-lead', 'okafor']);
+    const reading = (ids: string[]) => [...ids].sort((a, b) => g.nodes.get(a)!.y - g.nodes.get(b)!.y || g.nodes.get(a)!.x - g.nodes.get(b)!.x);
+    // Props: outfits grouped by wearer (in cast order), then objects.
+    await editor.setView('props');
+    expect(reading(['script', 'jules-lead', 'maya-blacks'])).toEqual(['maya-blacks', 'jules-lead', 'script']);
     await editor.setView('scenes');
     // One row per scene: the scene first, its shots after it on the same row.
     const row1 = ['sc1', 's1a', 's1b', 's1c'];

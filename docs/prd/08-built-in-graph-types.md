@@ -46,17 +46,17 @@ The library needs proof that the extension model handles very different domains:
 
 A production isn't really a flow, and wiring many characters into many shots gets busy, so Drama boards edit the same model as tabs of cards with no wires.
 
-- **Tabs.** Cast (characters and their outfits) and Locations are grids. Scenes (a row per scene: the scene, then its shots) and Episodes (a row per episode: the episode, then its scenes) are rows. On a phone, grids are one column and rows scroll sideways.
-- **No wires.** Cards can't be connected. A shot picks one location and any characters, a scene picks its shots, an episode picks its scenes, and an outfit picks who wears it and in which scenes. The pickers only offer valid choices: a shot already in another scene isn't offered.
+- **Tabs.** Cast, Locations and Props are grids. Scenes (a row per scene: the scene, then its shots) and Episodes (a row per episode: the episode, then its scenes) are rows. On a phone, grids are one column and rows scroll sideways.
+- **Props.** A prop is either an Object or an Outfit, set by its type. An outfit has a wearer: put it on a shot and that character wears it there (in the video prompt it replaces their usual clothes, with its pictures). Objects have pictures too, which go into the prompts of the shots that use them. Outfits are listed first, grouped by wearer.
+- **No wires.** Cards can't be connected. A shot picks one location and any characters and props, a scene picks its shots, and an episode picks its scenes. The pickers only offer valid choices: a shot already in another scene isn't offered.
 - **Jumping around.** Every reference is a chip and every list entry a link. Tapping one switches to the tab that shows it, centres it and selects it; ← Back returns. They work without selecting the card first.
 - **What each card lists.**
-  - Characters and locations: the scenes and episodes they appear in (characters also their outfits).
+  - Characters, locations and props: the scenes and episodes they appear in (characters also their outfits).
   - Shots: their scene and episodes.
-  - Scenes: their episode, characters, locations and outfits.
+  - Scenes: their episode, characters, locations and props.
   - Episodes: their actors and locations.
-  - Lists expand and stay open while you edit.
-- **Adding.** + adds a type the current tab shows. With a scene selected, a new shot joins it, numbered next. With an episode selected, a new scene joins it. With a character selected, a new outfit is theirs.
-- **Same engine.** Underneath it's the drama model: the same checks, details cards and Seedance export (per shot, per scene, per episode). Props are names on a shot rather than cards, so they carry no pictures.
+- **Adding.** + adds a type the current tab shows. With a scene selected, a new shot joins it, numbered next. With an episode selected, a new scene joins it. With a prop selected, a new prop has the same type and wearer.
+- **Same engine.** Underneath it's the drama model: the same checks, details cards and Seedance export. A shot's prompt is identical to the wired version's.
 
 ## Function builder (`functionGraph`, id `function`)
 

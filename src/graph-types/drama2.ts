@@ -35,20 +35,27 @@ export const drama2Graph = defineGraphType({
   editor: {
     autoLayout: true,
     views: [
+      { id: 'cast', title: 'Cast', types: [D2.character], layout: 'grid' },
+      { id: 'locations', title: 'Locations', types: [D2.location], layout: 'grid' },
       {
-        id: 'cast',
-        title: 'Cast',
-        types: [D2.character, D2.outfit],
+        id: 'props',
+        title: 'Props',
+        types: [D2.prop],
         layout: 'grid',
-        // Each character, then the outfits they wear.
-        order: (g) => ofType(g, D2.character).flatMap((c) => [c.id, ...referrers(g, c.id, D2.outfit, 'character').map((o) => o.id)]),
+        // Outfits first, grouped by who wears them; then objects.
+        order: (g) => {
+          const props = ofType(g, D2.prop);
+          const outfits = props.filter((p) => p.params.kind === 'Outfit');
+          const byWearer = ofType(g, D2.character).flatMap((c) => outfits.filter((o) => o.params.wornBy === c.id));
+          return [...byWearer, ...outfits, ...props.filter((p) => p.params.kind !== 'Outfit')].map((p) => p.id);
+        },
+        // A new prop is the same type as the selected one (and worn by the same person).
         onAdd: (node, { graph, selected }) => {
-          if (node.type !== D2.outfit || !selected) return;
-          const who = selected.type === D2.character ? selected.id : selected.type === D2.outfit ? list([selected.params.character])[0] : undefined;
-          if (who) graph.setParam(node.id, 'character', who);
+          if (selected?.type !== D2.prop) return;
+          graph.setParam(node.id, 'kind', selected.params.kind ?? 'Object');
+          if (selected.params.kind === 'Outfit' && selected.params.wornBy) graph.setParam(node.id, 'wornBy', selected.params.wornBy);
         },
       },
-      { id: 'locations', title: 'Locations', types: [D2.location], layout: 'grid' },
       {
         id: 'scenes',
         title: 'Scenes',
@@ -95,7 +102,7 @@ export const drama2Graph = defineGraphType({
     ...ex,
     description:
       ex.id === 'term'
-        ? 'Tabs across the top. Tap a name chip or a list entry to jump to it (← Back returns). Select a card to edit it or open its lists; tap a shot, scene or episode twice for its Seedance export.'
+        ? 'Tabs across the top: cast, locations, props (objects and outfits), scenes, episodes. Tap a name chip or a list entry to jump to it (← Back returns). Select a card to edit it or open its lists; tap a shot, scene or episode twice for its Seedance export.'
         : ex.description,
     graph: fromDrama(ex.graph),
   })),
