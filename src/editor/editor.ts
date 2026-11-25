@@ -1358,12 +1358,14 @@ export class NodeEditor extends Emitter<EditorEvents> {
       const seen = new Set<string>();
       const order = [...(v.order?.(this.graph) ?? []), ...byDefault()].filter((id) => shownIds.has(id) && !seen.has(id) && seen.add(id));
       const colW = Math.max(160, ...order.map((id) => size(id).w));
+      // A little more room between columns than between rows, so cards read as separate.
+      const COL_GAP = 44;
       // Pick the column count whose whole grid, zoomed out to fit, fills the screen best.
       const { w: availW, h: availH } = this.viewArea();
       const gridFor = (cols: number) => {
         let h = 0;
         for (let i = 0; i < order.length; i += cols) h += Math.max(...order.slice(i, i + cols).map((id) => size(id).h)) + GAP;
-        const w = Math.min(cols, order.length) * (colW + GAP) - GAP;
+        const w = Math.min(cols, order.length) * (colW + COL_GAP) - COL_GAP;
         return Math.min(availW / w, availH / Math.max(1, h - GAP));
       };
       const kept = this.gridCols.get(v.id);
@@ -1384,7 +1386,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       let y = 0;
       for (let i = 0; i < order.length; i += cols) {
         const row = order.slice(i, i + cols);
-        row.forEach((id, c) => (pos[id] = { x: c * (colW + GAP), y }));
+        row.forEach((id, c) => (pos[id] = { x: c * (colW + COL_GAP), y }));
         y += Math.max(...row.map((id) => size(id).h)) + GAP;
       }
     } else {
