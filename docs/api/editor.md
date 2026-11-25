@@ -91,8 +91,8 @@ With `views`, the editor is a set of boards instead of one canvas. A tab bar run
 
 ```ts
 views: [
-  { id: 'cast', title: 'Cast', types: ['drama2/character', 'drama2/outfit'], layout: 'grid', order: (g) => [...] },
-  { id: 'scenes', title: 'Scenes', types: ['drama2/scene', 'drama2/shot'], layout: 'rows', rows: (g) => [[sceneId, ...shotIds], ...] },
+  { id: 'shots', title: 'Shots', types: ['drama2/shot'], layout: 'grid', order: (g) => [...shotIdsInStoryOrder] },
+  { id: 'scenes', title: 'Scenes', types: ['drama2/scene'], layout: 'rows', rows: (g) => sceneIds.map((id) => [id]) },
 ]
 ```
 

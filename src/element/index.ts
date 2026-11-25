@@ -185,6 +185,7 @@ export class NodeMapElement extends Base {
       direction: this.hasAttribute('direction') || !this._registry?.id ? dirAttr(this.getAttribute('direction')) : (getGraphType(this._registry.id)?.editor?.direction ?? 'auto'),
       layout: this._layout,
       views: this._registry?.id ? getGraphType(this._registry.id)?.editor?.views : undefined,
+      plugins: this._registry?.id ? getGraphType(this._registry.id)?.editor?.plugins : undefined,
     }));
     this.applyTheme(this.getAttribute('theme'));
     const fire = (type: string, detail: unknown) => this.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true }));

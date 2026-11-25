@@ -37,6 +37,9 @@ interface CompileNodeOptions { onEdit?(info: CustomNodeInfo): void }
 
 `resolveMeta(meta)` applies the same checks and defaults without compiling. `slug(name)` and `camel(name)` are the naming helpers.
 
+
+In the editor, a compiled node also has a ↘ button that opens its source map, running on the node's live inputs. It's view only: edits there aren't kept, and changing the node goes through "Edit in graph" (`onEdit`).
+
 ## `NodeLibrary`
 
 A collection of custom nodes, stored as plain JSON.

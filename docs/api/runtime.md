@@ -87,7 +87,7 @@ emitSource(graph, registry, {
 | `plan(graph, registry)` | Resolved steps in dependency order (bindings, constants and sources). Shared by `compile`, `dataflowEngine` and `emitSource`. |
 | `execute(steps, registry, inputs, signal?, onNode?)` | Runs a plan and returns `Map<nodeId, outputs>`. |
 | `dataflowEngine` | The dataflow behaviour as a `GraphEngine` (no memoisation). |
-| `graphNode({ type, title?, category?, color?, graph, registry })` | Wraps any map as a node type, with all its outputs. For single-output maps with validation and a name, prefer `compileNode`. |
+| `graphNode({ type, title?, category?, color?, graph, registry })` | Wraps any map as a node type, with all its outputs. In the editor the node has a ↘ button that opens the map inside, running on the node's live inputs. Edits there recompile the type and re-run every node of it, and a map with errors or no Output is refused (`NodeType.subgraph`). For single-output maps with validation and a name, prefer `compileNode`. |
 | `compileExpression(vars, expr)` | The expression compiler used by `math/expression` and `list/map`. It runs unsandboxed. |
 | `formatValue(v, max?)` | Short display text for a value. |
 | `INPUT_NODE`, `OUTPUT_NODE` | `'graph/input'`, `'graph/output'`. |

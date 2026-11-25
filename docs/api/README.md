@@ -5,11 +5,11 @@ Everything public in `mobile-nodemap`, grouped by module. All of it is also expo
 | Page | Covers | Entry point |
 | --- | --- | --- |
 | [Core](core.md) | `Graph`, `GraphJSON`, `History`, `Emitter`, `Registry` | `mobile-nodemap/core` |
-| [Nodes](nodes.md) | `defineNode`, `extendNode`, `NodeType`, ports, params, param kinds, port types, details | `mobile-nodemap/core` |
-| [Graph types and packs](graph-types.md) | `defineGraphType`, `definePack`, rules, engines, built-in graph types | root |
+| [Nodes](nodes.md) | `defineNode`, `extendNode`, `NodeType`, ports, params (`when`), param kinds (`ref` / `refs`), port types (wire styles), details, `caption`, `subgraph` | `mobile-nodemap/core` |
+| [Graph types and packs](graph-types.md) | `defineGraphType`, `definePack`, rules, engines, `EditorPlugin`, built-in graph types (and the Seedance export) | root |
 | [Runtime](runtime.md) | `Evaluator`, `compile`, `compileFunction`, `emitSource`, `signature`, `plan`, `execute` | `mobile-nodemap/runtime` |
 | [Library](library.md) | `compileNode`, `NodeLibrary` | root |
-| [Editor](editor.md) | `NodeEditor`: options, methods, events, styles | `mobile-nodemap/editor` |
+| [Editor](editor.md) | `NodeEditor`: options, methods, events, styles, views (tabs), links, plugins, nested maps, `choose` | `mobile-nodemap/editor` |
 | [Layout](layout.md) | `layered`, `elkLayout`, `Router`, `findFreeSpot`, geometry | `mobile-nodemap/layout` |
 | [Themes](themes.md) | `defineTheme`, `registerTheme`, flavors, built-in themes | root |
 | [Ports and adapters](ports-and-adapters.md) | the standard interfaces and their implementations | root |

@@ -26,7 +26,7 @@ The editor renders in a shadow root. `--nm-*` variables set on the element or it
 
 | Property | |
 | --- | --- |
-| `graphType` | A `GraphType` object; no registration needed. |
+| `graphType` | A `GraphType` object; no registration needed. Its editor defaults (direction, views as tabs, plugins) apply. |
 | `registry` | Defaults to the graph type's registry. |
 | `layout` | A layout engine. |
 | `value` | Get or set the map's JSON. |

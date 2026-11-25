@@ -228,7 +228,7 @@ function startSession(type: GraphType) {
   registry = type.createRegistry();
   graph = new Graph(registry);
   evaluator = new Evaluator(graph, registry);
-  editor = new NodeEditor($('#canvas'), { graph, registry, evaluator, wires: wiresSel.value as 'smart' | 'curved', layout: layoutEngine, direction: type.editor?.direction, views: type.editor?.views });
+  editor = new NodeEditor($('#canvas'), { graph, registry, evaluator, wires: wiresSel.value as 'smart' | 'curved', layout: layoutEngine, direction: type.editor?.direction, views: type.editor?.views, plugins: type.editor?.plugins });
   applyTheme();
   const building = type === demoFunction;
   ($('[data-panel="build"]') as HTMLElement).hidden = !building;
@@ -678,7 +678,7 @@ function renderHelp() {
   panelTitle.textContent = 'How to use it';
   panelBody.innerHTML = `
   <ul class="help">
-    <li><b>Graph type</b> the picker next to the logo switches what you are building: maths, a network, a UML class diagram, a drama production, or colour palettes from a third-party pack</li>
+    <li><b>Graph type</b> the picker next to the logo switches what you are building: maths, a network, a UML class diagram, a drama production (wired, or as Drama boards: tabs of cards), or colour palettes from a third-party pack</li>
     <li><b>Pan</b> drag the background · <b>Zoom</b> pinch, or scroll with a trackpad</li>
     <li><b>Move</b> drag any node · <b>Select</b> tap it, then use the toolbar</li>
     <li><b>Go to a neighbour</b> zoomed in, connected nodes off screen show as chips on the screen edge: tap one to go there</li>
@@ -688,6 +688,10 @@ function renderHelp() {
     <li><b>Add</b> long-press the background, or press <kbd>+</kbd>. With a node, port or wire selected, <kbd>+</kbd> adds a node wired to it and nudges its neighbours aside</li>
     <li><b>Tidy</b> the layout button (or <kbd>L</kbd>) arranges the map in one roomy flow: left to right, or top to bottom on a portrait phone. Wires route around nodes</li>
     <li><b>Themes</b> pick one of three light and three dark themes. Node shapes and colours follow each node's flavor: sources, transforms, sinks, views and control</li>
+    <li><b>Tabs</b> some graph types (Drama boards) are tabs of cards instead of one canvas. Grids open zoomed out: tap a card to zoom in. Name chips and list entries jump to their card, even on another tab; <b>← Back</b> returns</li>
+    <li><b>Pickers</b> a card's “+ …” picker adds a reference; past 8 choices it opens a searchable list. On scenes and episodes, ‹ › reorder shots or scenes and the numbers follow</li>
+    <li><b>Open a node</b> nodes made of a map (like Hypotenuse) have a <b>↘</b> button: it opens the map inside, running on the node's live inputs. Back (or <kbd>Esc</kbd>) returns</li>
+    <li><b>Video</b> tap a drama shot, scene or episode twice for its Seedance script, and download it as a zip: one pack per shot with its numbered reference images</li>
     <li><b>Build your own node</b> in the λ Function builder: Inputs become arguments and the one Output is the result. <b>Build</b> adds it to your library and shows it as one TypeScript function</li>
   </ul>
   <p class="note">Everything here is a plug-in. A graph type picks the nodes, port types, rules and engine; a pack is what a library publishes.</p>

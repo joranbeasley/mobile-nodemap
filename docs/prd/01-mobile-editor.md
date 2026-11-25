@@ -32,6 +32,11 @@ Wiring nodes on a phone with desktop editors means mis-taps, accidental zooms an
 | E17 | A node's fields only respond once the node is selected; the first tap on a node (even on a field) selects it | Shipped |
 | E18 | Connection dots are 18 px with touch areas that reach outward from the node, so they're easy to hit without stealing taps from the header | Shipped |
 | E15 | When zoomed out (below the readable zoom, 60% by default), tapping a node never edits its fields or starts a wire: it zooms in on that node and selects it | Shipped |
+| E19 | Views: graph types can make the editor a set of tabs, each showing some node types as a grid (shaped to fill the screen when zoomed out), in rows, or with their own layout | Shipped |
+| E20 | Links: chips and list entries jump to a node, switching tab when needed; ← Back returns. They work before their card is selected | Shipped |
+| E21 | Nodes made of maps open in place (↘) on their live inputs, with Back and Escape; edits can recompile the node type | Shipped |
+| E22 | Long reference lists open a searchable chooser (a bottom sheet above any other sheet) | Shipped |
+| E23 | Params can show only when they apply (`when`); the card and the Edit sheet follow | Shipped |
 
 ## UX notes
 
