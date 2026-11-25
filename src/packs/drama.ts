@@ -145,7 +145,19 @@ export const imagesParam: ParamKind = {
     // ✨ Generate (when an image generator is set): a small panel with a prompt written
     // from the card, sent to the generator; results are copied in like added photos.
     const gen = getImageGenerator();
-    const p = ctx.param as { prompt?: (node: NodeInstance, graph: Graph) => { prompt: string; aspect?: string } | undefined };
+    const p = ctx.param as { prompt?: (node: NodeInstance, graph: Graph) => { prompt: string; aspect?: string } | undefined; browse?: boolean };
+    /** Copy a picture in from a service (its links expire); keep the link if it can't be fetched. */
+    const keep = async (url: string, signal?: AbortSignal): Promise<{ src: string; copied: boolean }> => {
+      if (url.startsWith('data:')) return { src: url, copied: true }; // already the picture itself
+      try {
+        const res = await fetch(url, { signal });
+        if (!res.ok) throw new Error(String(res.status));
+        return { src: await imageFileToDataUrl(await res.blob()), copied: true };
+      } catch (err) {
+        if ((err as Error).name === 'AbortError') throw err;
+        return { src: url, copied: false };
+      }
+    };
     let panel: HTMLElement | undefined;
     let note = '';
     const closePanel = () => {
@@ -211,14 +223,9 @@ export const imagesParam: ParamKind = {
           let kept = 0;
           const added: string[] = [];
           for (const url of result.images.slice(0, Math.max(0, max - list.length))) {
-            try {
-              const res = await fetch(url, { signal: abort.signal });
-              if (!res.ok) throw new Error(String(res.status));
-              added.push(await imageFileToDataUrl(await res.blob()));
-              kept++;
-            } catch {
-              added.push(url);
-            }
+            const k = await keep(url, abort.signal);
+            added.push(k.src);
+            if (k.copied) kept++;
           }
           if (!added.length) throw new Error(`${gen.name} returned no picture`);
           note = `Added ${added.length} from ${gen.name}${result.credits != null ? ` · ${result.credits} credits` : ''}${kept < added.length ? ' · linked, not copied: the link expires' : ''}`;
@@ -289,6 +296,49 @@ export const imagesParam: ParamKind = {
           g.addEventListener('click', openPanel);
           wrap.append(g);
         }
+      }
+      // 🔍 (fields that allow it): search the person's existing pictures on the service.
+      if (gen?.browse && p.browse && ctx.choose && list.length < max) {
+        const s = document.createElement('button');
+        s.type = 'button';
+        s.className = 'dr-gen dr-browse';
+        s.textContent = '🔍';
+        s.title = `Search your ${gen.name} assets`;
+        s.setAttribute('aria-label', `Search your ${gen.name} assets`);
+        s.addEventListener('click', async () => {
+          if (gen.key && !gen.key.get()) {
+            openPanel();
+            const st = wrap.querySelector('.dr-gen-status');
+            if (st) st.textContent = `Add your ${gen.key.label} here, then tap 🔍 again.`;
+            return;
+          }
+          s.disabled = true;
+          s.textContent = '…';
+          try {
+            const assets = await gen.browse!();
+            if (!assets.length) {
+              note = `No pictures or 3D models on ${gen.name} yet`;
+              return;
+            }
+            const id = await ctx.choose!({
+              title: `Your ${gen.name} assets`,
+              placeholder: `Search ${assets.length} by prompt or name`,
+              items: assets.map((a) => ({ id: a.id, label: a.label, hint: a.hint, image: a.thumb })),
+            });
+            const asset = assets.find((a) => a.id === id);
+            if (!asset) return;
+            const k = await keep(asset.url);
+            note = `Added from ${gen.name}${k.copied ? '' : ' · linked, not copied: the link expires'}`;
+            commit([...list, k.src]);
+          } catch (err) {
+            note = (err as Error).message || `Couldn't reach ${gen.name}`;
+          } finally {
+            s.disabled = false;
+            s.textContent = '🔍';
+            draw();
+          }
+        });
+        wrap.append(s);
       }
       if (note) wrap.append(Object.assign(document.createElement('small'), { className: 'dr-gen-note', textContent: note }));
       if (panel) wrap.append(panel);
@@ -421,7 +471,7 @@ const propNode = defineNode({
   tags: ['object', 'item', 'thing'],
   description: 'An object the shots need',
   outputs: { used: { type: DRAMA.prop, label: 'in shots' } },
-  params: [description(false, 'What it is'), images('images', 'images', true)],
+  params: [description(false, 'What it is'), { ...images('images', 'images', true), browse: true }],
   onCreate: (n) => void (n.label ??= 'New prop'),
   meta: { drama: 'prop' },
 });
@@ -438,7 +488,7 @@ const costumeNode = defineNode({
   description: 'What a character wears in the scenes it is wired into',
   inputs: { character: { type: DRAMA.character, label: 'character', description: 'Who wears it' } },
   outputs: { scenes: { type: DRAMA.costume, label: 'in scenes' } },
-  params: [description(false, 'What they wear: garments, colours, accessories'), images()],
+  params: [description(false, 'What they wear: garments, colours, accessories'), { ...images(), browse: true }],
   onCreate: (n) => void (n.label ??= 'New costume'),
   meta: { drama: 'costume' },
 });

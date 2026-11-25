@@ -989,7 +989,13 @@ export class NodeEditor extends Emitter<EditorEvents> {
         list.textContent = '';
         count.textContent = words.length ? `${hits.length} of ${opts.items.length} match` : `${opts.items.length} to choose from`;
         for (const it of hits) {
-          const b = h('button', { type: 'button', class: 'nm-sheet-item', role: 'option', 'data-id': it.id }, h('i'), it.label, h('small', {}, it.hint ?? ''));
+          const b = h(
+            'button',
+            { type: 'button', class: `nm-sheet-item${it.image ? ' nm-has-thumb' : ''}`, role: 'option', 'data-id': it.id },
+            it.image ? h('img', { class: 'nm-choose-thumb', src: it.image, alt: '', loading: 'lazy' }) : h('i'),
+            it.label,
+            h('small', {}, it.hint ?? ''),
+          );
           b.addEventListener('click', () => {
             if (performance.now() < guardUntil) return;
             done(it.id);

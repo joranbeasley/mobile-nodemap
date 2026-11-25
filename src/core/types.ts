@@ -103,7 +103,7 @@ export interface ParamControlContext {
 export interface ChooseOptions {
   title: string;
   placeholder?: string;
-  items: { id: string; label: string; hint?: string }[];
+  items: { id: string; label: string; hint?: string; /** A preview image. */ image?: string }[];
 }
 
 /** A custom editor for params (and inline port values): `registry.defineParamKind({ kind: 'color', render })`. */

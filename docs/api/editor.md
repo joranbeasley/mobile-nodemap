@@ -84,7 +84,7 @@ Bottom sheets (the add menu and the Edit sheet) open in an overlay layer over th
 | `addToolbarButton({ id, label, icon, run, primary? })` | Add a toolbar button before +. `icon` is an `<svg>` string, an emoji or short text. Returns a function that removes it. |
 | `enterNode(id)` | Open the map inside a node (`NodeType.subgraph`) in a layer over this one, with a Back bar. Its Input nodes get the node's live input values, and it re-runs when they change. With `save`, edits are saved after a short pause: every node of that type is rebuilt and re-run, and a map that can't compile is refused with a message. Escape or Back closes it, and inner maps can be opened in turn. Returns the inner `NodeEditor`. |
 | `leaveNode()` / `innerEditor` | Close the inner map, or reach its editor. |
-| `choose({ title, placeholder?, items })` | A searchable list in a bottom sheet, above anything else open (the Edit sheet too). Items are `{ id, label, hint? }`; the search matches labels and hints, ignoring accents. Enter picks the first match and Escape or the backdrop closes it. Resolves with the picked id or `undefined`. Param controls get it as `ctx.choose`. |
+| `choose({ title, placeholder?, items })` | A searchable list in a bottom sheet, above anything else open (the Edit sheet too). Items are `{ id, label, hint?, image? }` (`image` shows a thumbnail); the search matches labels and hints, ignoring accents. Enter picks the first match and Escape or the backdrop closes it. Resolves with the picked id or `undefined`. Param controls get it as `ctx.choose`. |
 
 ## Views
 

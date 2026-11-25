@@ -110,3 +110,56 @@ describe('✨ Generate in image fields', () => {
     editor.destroy();
   });
 });
+
+describe('Searching existing assets', () => {
+  it('lists pictures and 3D model thumbnails from Meshy, newest first', async () => {
+    const rows: Record<string, unknown[]> = {
+      '/openapi/v1/text-to-image': [{ id: 'i1', status: 'SUCCEEDED', prompt: 'a brass key', image_urls: ['https://a/key.png'], created_at: 2 }],
+      '/openapi/v2/text-to-3d': [{ id: 'm1', status: 'SUCCEEDED', prompt: 'old wooden chair', thumbnail_url: 'https://a/chair.png', created_at: 3 }],
+      '/openapi/v1/image-to-3d': [{ id: 'm2', status: 'FAILED', name: 'broken', thumbnail_url: 'https://a/x.png', created_at: 4 }],
+      '/openapi/v1/multi-image-to-3d': [],
+    };
+    const seen: string[] = [];
+    const gen = meshyImageGenerator({
+      apiKey: 'k',
+      fetch: (async (url: string) => {
+        seen.push(url);
+        const path = new URL(url).pathname;
+        return { ok: true, status: 200, json: async () => rows[path] ?? [] };
+      }) as unknown as typeof fetch,
+    });
+    const assets = await gen.browse!();
+    expect(assets.map((a) => [a.label, a.hint?.split(' · ')[0], a.url])).toEqual([
+      ['old wooden chair', '3D model', 'https://a/chair.png'],
+      ['a brass key', 'Picture', 'https://a/key.png'],
+    ]);
+    expect(seen.every((u) => u.includes('page_size=50') && u.includes('sort_order=desc'))).toBe(true);
+  });
+
+  it('offers 🔍 on prop pictures and adds the chosen one', async () => {
+    const fake: ImageGenerator = {
+      id: 'fake',
+      name: 'Fakeshy',
+      key: { label: 'Fake key', get: () => 'k', set: () => {} },
+      generate: async () => ({ images: [] }),
+      browse: async () => [{ id: 'a1', label: 'Dog-eared script', hint: 'Picture', thumb: 'data:image/png;base64,QUJD', url: 'data:image/png;base64,QUJD' }],
+    };
+    setImageGenerator(fake);
+    const g = Graph.fromJSON(drama2Graph.examples![0].graph, drama2Graph.createRegistry());
+    const el = document.createElement('div');
+    document.body.append(el);
+    const editor = new NodeEditor(el, { graph: g, registry: g.registry!, views: drama2Graph.editor!.views });
+    await editor.setView('props');
+    expect(el.querySelector('.nm-node[data-id="theo"] .dr-browse')).toBeNull(); // characters don't get it
+    el.querySelector<HTMLButtonElement>('.nm-node[data-id="script"] .dr-browse')!.click();
+    await tick(10);
+    const sheet = document.querySelector<HTMLElement>('.nm-choose')!;
+    expect(sheet.querySelector('.nm-choose-thumb')).toBeTruthy();
+    await tick(360);
+    sheet.querySelector<HTMLButtonElement>('.nm-sheet-item')!.click();
+    await tick(30);
+    expect(g.nodes.get('script')!.params.images as string[]).toHaveLength(2);
+    expect(el.querySelector('.nm-node[data-id="script"] .dr-gen-note')!.textContent).toBe('Added from Fakeshy');
+    editor.destroy();
+  });
+});

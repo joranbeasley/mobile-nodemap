@@ -177,6 +177,7 @@ export const css = /* css */ `
 /* A searchable chooser stacks above any other sheet (the edit sheet included). */
 .nm-sheet-backdrop.nm-choose-backdrop { z-index: 10; }
 .nm-sheet.nm-choose { z-index: 11; }
+.nm-choose-thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; flex: none; background: var(--_node-2, #eee); }
 /* Nodes made of maps: an open button in the header, and the inner map in a layer with a Back bar. */
 .nm-enter { all: unset; flex: none; margin-left: 4px; width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; cursor: pointer;
   font: 600 14px/1 var(--_font); color: var(--_accent); background: color-mix(in srgb, var(--_accent) 12%, transparent); }

@@ -23,6 +23,19 @@ export interface ImageResult {
   credits?: number;
 }
 
+/** A picture the service already has (an earlier generation or a 3D model's thumbnail). */
+export interface ImageAsset {
+  id: string;
+  /** Its prompt or name. */
+  label: string;
+  /** What it is, e.g. "Picture · 3 days ago" or "3D model". */
+  hint?: string;
+  /** A small preview. */
+  thumb: string;
+  /** The picture to add. */
+  url: string;
+}
+
 export interface ImageGenerator {
   id: string;
   /** Shown on the button and in messages, e.g. "Meshy". */
@@ -32,6 +45,8 @@ export interface ImageGenerator {
   /** An API key the person gives once; the host decides where it is kept. */
   key?: { label: string; help?: string; get(): string | null | undefined; set(value: string): void };
   generate(req: ImageRequest): Promise<ImageResult>;
+  /** The person's existing pictures on the service, newest first, to search and reuse. */
+  browse?(opts?: { signal?: AbortSignal }): Promise<ImageAsset[]>;
 }
 
 let current: ImageGenerator | null = null;
@@ -102,6 +117,45 @@ export function meshyImageGenerator(
     models: MESHY_IMAGE_MODELS,
     defaultModel: opts.model ?? 'nano-banana',
     key: { help: 'From meshy.ai → API. Kept in this browser only and sent only to Meshy.', ...key },
+    async browse({ signal } = {}) {
+      // Pictures from text-to-image, and the thumbnails of 3D models (all newest first).
+      const list = async (path: string) => {
+        try {
+          const rows = await call(`${path}?page_size=50&sort_order=desc`, { signal });
+          return Array.isArray(rows) ? (rows as Record<string, any>[]).filter((r) => r.status === 'SUCCEEDED') : [];
+        } catch (err) {
+          if ((err as Error).name === 'AbortError' || /API key/.test((err as Error).message)) throw err;
+          return [];
+        }
+      };
+      const ago = (t?: number) => {
+        if (!t) return '';
+        const days = Math.floor((Date.now() - t) / 86_400_000);
+        return days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`;
+      };
+      const [images, t3d, i3d, m3d] = await Promise.all([
+        list('/openapi/v1/text-to-image'),
+        list('/openapi/v2/text-to-3d'),
+        list('/openapi/v1/image-to-3d'),
+        list('/openapi/v1/multi-image-to-3d'),
+      ]);
+      const out: (ImageAsset & { t: number })[] = [];
+      for (const r of images)
+        (r.image_urls ?? []).forEach((url: string, i: number) =>
+          out.push({ id: `${r.id}:${i}`, label: String(r.prompt ?? 'Picture'), hint: ['Picture', ago(r.finished_at ?? r.created_at)].filter(Boolean).join(' · '), thumb: url, url, t: r.created_at ?? 0 }),
+        );
+      for (const r of [...t3d, ...i3d, ...m3d])
+        if (r.thumbnail_url)
+          out.push({
+            id: String(r.id),
+            label: String(r.name || r.prompt || r.object_prompt || r.texture_prompt || '3D model'),
+            hint: ['3D model', ago(r.finished_at ?? r.created_at)].filter(Boolean).join(' · '),
+            thumb: r.thumbnail_url,
+            url: r.thumbnail_url,
+            t: r.created_at ?? 0,
+          });
+      return out.sort((a, b) => b.t - a.t).map(({ t, ...a }) => (void t, a));
+    },
     async generate({ prompt, aspect, model, signal, onProgress }) {
       const aspect_ratio = nearestAspect(aspect);
       const created = await call('/openapi/v1/text-to-image', {

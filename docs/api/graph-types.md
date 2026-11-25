@@ -178,6 +178,8 @@ interface ImageGenerator {
 
 `meshyImageGenerator({ key | apiKey, model?, baseUrl?, pollMs?, timeoutMs?, fetch? })` calls Meshy's text-to-image API straight from the browser (`POST /openapi/v1/text-to-image` with `ai_model`, `prompt` and `aspect_ratio`, then polls the task). Models: `MESHY_IMAGE_MODELS` (Nano Banana, Nano Banana 2 / 2 Lite / Pro, GPT Image 2; default `nano-banana`). Aspect ratios Meshy doesn't take are mapped to the nearest of 1:1, 16:9, 9:16, 4:3, 3:4, 3:2 and 2:3. Errors explain themselves: no key, a bad key, no credits, a failed task. The credits a picture used are shown after it's added.
 
+**Searching existing assets.** A generator can also offer `browse()`: the person's existing pictures on the service, newest first, as `{ id, label, hint, thumb, url }`. Image fields with `browse: true` then get a 🔍 button next to ✨. It opens the editor's searchable chooser (now with thumbnails), matching each asset's prompt or name, and copies the chosen picture in. For Meshy, `browse()` lists your text-to-image pictures and the thumbnails of your text-to-3D, image-to-3D and multi-image-to-3D models (the newest 50 of each that succeeded). In the drama types, props and costumes have it (on boards, objects and outfits).
+
 `dramaImagePrompt(graph, node, param?)` writes the drama prompts, and every drama and drama-board image field uses it:
 
 | Card | Prompt | Aspect |
