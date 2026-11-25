@@ -318,9 +318,9 @@ const shotNode = defineNode({
   params: [
     { name: 'number', label: 'shot', kind: 'text', default: '1', placeholder: '1, 2, 2A…' },
     { name: 'framing', label: 'framing', kind: 'select', options: FRAMINGS, default: 'Medium' },
-    ref('location', 'location', D2.location),
-    refs('characters', 'characters', D2.character),
-    refs('props', 'props', D2.prop),
+    { ...ref('location', 'location', D2.location), create: true },
+    { ...refs('characters', 'characters', D2.character), create: true },
+    { ...refs('props', 'props', D2.prop), create: true },
     text('description', 'description', 'What we see and hear'),
     images('images', 'frames'),
     { name: 'movement', label: 'camera', kind: 'select', options: MOVES, default: 'Static', advanced: true },

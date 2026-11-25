@@ -179,7 +179,8 @@ describe('Editor views', () => {
     await new Promise((r) => setTimeout(r, 10));
     const sheet = document.querySelector<HTMLElement>('.nm-choose')!;
     expect(sheet).toBeTruthy();
-    expect(sheet.querySelectorAll('.nm-sheet-item')).toHaveLength(10);
+    expect(sheet.querySelectorAll('.nm-sheet-item')).toHaveLength(11); // + New character, then the ten free ones
+    expect(sheet.querySelector('.nm-sheet-item')!.textContent).toContain('+ New character');
     // Search matches names and hints (who plays them).
     const search = sheet.querySelector('input')!;
     search.value = 'robin';
@@ -247,6 +248,19 @@ describe('Editor views', () => {
     await editor.back();
     expect(editor.currentView).toBe('shots');
     expect(editor.selection.node).toBeUndefined();
+    editor.destroy();
+  });
+
+  it('always offers to add characters to a shot, even when all are on it', async () => {
+    const { g, el, editor } = mount();
+    await editor.setView('shots');
+    const sel = el.querySelector<HTMLSelectElement>('.nm-node[data-id="s1a"] [data-param="characters"] .dr2-pick')!;
+    expect([...sel.options].map((o) => o.textContent)).toEqual(['+ character…', '+ New character']);
+    sel.value = [...sel.options][1].value;
+    sel.dispatchEvent(new Event('change'));
+    const added = (g.nodes.get('s1a')!.params.characters as string[]).at(-1)!;
+    expect(g.nodes.get(added)!.type).toBe('drama2/character');
+    expect(g.nodes.get(added)!.label).toBe('New character');
     editor.destroy();
   });
 
