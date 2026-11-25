@@ -118,7 +118,11 @@ export const imagesParam: ParamKind = {
     file.type = 'file';
     file.accept = 'image/*';
     file.multiple = true;
-    file.hidden = true;
+    // The input itself takes the tap (inside the "+" label) rather than being clicked from
+    // code: iOS Safari, in-app browsers and sandboxed frames only reliably open the picker
+    // for a direct tap. It is invisible, not display:none, so it stays tappable.
+    file.className = 'dr-file';
+    file.setAttribute('aria-label', 'Add images');
     const commit = (next: string[]) => {
       list = next;
       draw();
@@ -138,7 +142,7 @@ export const imagesParam: ParamKind = {
       if (added.length) commit([...list, ...added]);
     });
     const draw = () => {
-      wrap.replaceChildren(file);
+      wrap.replaceChildren();
       list.forEach((src, i) => {
         const t = document.createElement('span');
         t.className = 'dr-thumb';
@@ -176,18 +180,15 @@ export const imagesParam: ParamKind = {
         wrap.append(t);
       });
       if (list.length < max) {
-        const add = document.createElement('button');
-        add.type = 'button';
+        const add = document.createElement('label');
         add.className = 'dr-add';
-        add.textContent = list.length ? '+' : '+ Add images';
-        add.setAttribute('aria-label', 'Add images');
-        add.addEventListener('click', () => file.click());
+        add.append(list.length ? '+' : '+ Add images', file);
         wrap.append(add);
       }
     };
     // Inside a <label>, a tap on a thumbnail's gap would "click" the first button: don't.
     wrap.addEventListener('click', (e) => {
-      if (!(e.target as Element).closest('button, input')) e.preventDefault();
+      if (!(e.target as Element).closest('button, input, label')) e.preventDefault();
     });
     (wrap as HTMLElement & { _set?: (v: unknown) => void })._set = (v) => {
       list = imageList(v);
@@ -810,7 +811,9 @@ const css = `
 .dr-images:has(.dr-mv) { gap: 14px 16px; }
 .dr-add { all: unset; box-sizing: border-box; min-width: 44px; height: 44px; padding: 0 12px; border-radius: 6px; border: 1.5px dashed var(--_border);
   color: var(--_muted); font: 500 12px/1 var(--_font); display: grid; place-items: center; cursor: pointer; }
-.dr-add:hover, .dr-add:focus-visible { border-color: var(--_accent); color: var(--_accent); }
+.dr-add:hover, .dr-add:focus-within { border-color: var(--_accent); color: var(--_accent); }
+.dr-add { position: relative; overflow: hidden; }
+.dr-file { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 0; }
 .dr-status { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--_text); }
 .dr-status b { font-weight: 600; }
 .dr-status span { color: var(--_muted); white-space: pre-line; font-size: 11.5px; }

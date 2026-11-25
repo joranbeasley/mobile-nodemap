@@ -107,7 +107,9 @@ views: [
 
 Grid and rows views lay themselves out:
 - after nodes are added or removed, params change or cards change size;
-- after a node is dragged, which snaps it back into place.
+- after cards change size.
+
+Cards in grid and rows views don't move: dragging one pans the view, so the map is easy to grab on a phone even when zoomed in on a card. Taps still select (or, zoomed out, zoom in).
 
 Tidy re-runs the layout and returns to the top-left. Fit fits the view's own nodes.
 

@@ -82,7 +82,7 @@ export interface EditorEvents extends Record<string, unknown> {
 type Gesture =
   | { kind: 'pan'; sx: number; sy: number; vx: number; vy: number; moved: boolean; timer?: ReturnType<typeof setTimeout> }
   | { kind: 'pinch'; dist: number; mx: number; my: number; vp: Viewport }
-  | { kind: 'node'; id: string; sx: number; sy: number; nx: number; ny: number; moved: boolean }
+  | { kind: 'node'; id: string; sx: number; sy: number; nx: number; ny: number; moved: boolean; vx?: number; vy?: number }
   | { kind: 'wire'; anchor: Anchor; sx: number; sy: number; moved: boolean; detached?: Edge }
   | { kind: 'edge'; id: string; sx: number; sy: number; moved: boolean; vx: number; vy: number };
 
@@ -1350,7 +1350,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
     const byDefault = () => [...shown].sort((a, b) => typeRank(a) - typeRank(b)).map((n) => n.id);
     const shownIds = new Set(shown.map((n) => n.id));
     const pos: Positions = {};
-    const GAP = 24;
+    const GAP = 40;
     if (typeof v.layout === 'function') {
       const r = this.root.getBoundingClientRect();
       Object.assign(pos, v.layout(shown.map((n) => ({ id: n.id, type: n.type, ...size(n.id) })).map(({ id, type, w, h }) => ({ id, type, w, h })), { graph: this.graph, width: Math.max(320, r.width - 32) }));
@@ -1359,7 +1359,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       const order = [...(v.order?.(this.graph) ?? []), ...byDefault()].filter((id) => shownIds.has(id) && !seen.has(id) && seen.add(id));
       const colW = Math.max(160, ...order.map((id) => size(id).w));
       // A little more room between columns than between rows, so cards read as separate.
-      const COL_GAP = 44;
+      const COL_GAP = 64;
       // Pick the column count whose whole grid, zoomed out to fit, fills the screen best.
       const { w: availW, h: availH } = this.viewArea();
       const gridFor = (cols: number) => {
@@ -2460,7 +2460,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
       this.gesture = { kind: 'wire', anchor, ...base };
     } else if (nodeEl) {
       const n = this.graph.nodes.get(nodeEl.dataset.id!)!;
-      this.gesture = { kind: 'node', id: n.id, nx: n.x, ny: n.y, ...base };
+      // On boards (grid and rows views) cards don't move: dragging one pans, so the map is easy to grab.
+      this.gesture = { kind: 'node', id: n.id, nx: n.x, ny: n.y, ...(this.gridded ? { vx: this.vp.x, vy: this.vp.y } : {}), ...base };
     } else if (edgeHit) {
       this.gesture = { kind: 'edge', id: (edgeHit as SVGElement).dataset.edge!, vx: this.vp.x, vy: this.vp.y, ...base };
     } else {
@@ -2502,12 +2503,13 @@ export class NodeEditor extends Emitter<EditorEvents> {
     if (!g.moved && Math.hypot(dx, dy) > TAP) {
       g.moved = true;
       if (g.kind === 'pan') clearTimeout(g.timer);
-      if (g.kind === 'node') this.records.get(g.id)?.el.classList.add('nm-dragging');
+      if (g.kind === 'node' && g.vx === undefined) this.records.get(g.id)?.el.classList.add('nm-dragging');
       if (g.kind === 'wire') this.beginWire(g);
     }
     if (!g.moved) return;
 
     if (g.kind === 'pan' || g.kind === 'edge') this.setViewport({ x: g.vx + dx, y: g.vy + dy });
+    else if (g.kind === 'node' && g.vx !== undefined) this.setViewport({ x: g.vx + dx, y: g.vy! + dy });
     else if (g.kind === 'node') this.graph.moveNode(g.id, Math.round(g.nx + dx / this.vp.k), Math.round(g.ny + dy / this.vp.k));
     else if (g.kind === 'wire') {
       const from = this.portPos(g.anchor, g.anchor.dir);
@@ -2546,7 +2548,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
         break;
       case 'node':
         this.records.get(g.id)?.el.classList.remove('nm-dragging');
-        if (g.moved && this.gridded) this.scheduleViewLayout();
+        if (g.moved && this.gridded && g.vx === undefined) this.scheduleViewLayout();
         if (g.moved) {
           this.scheduleRoute();
           const n = this.graph.nodes.get(g.id);
