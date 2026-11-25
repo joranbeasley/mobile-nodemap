@@ -99,7 +99,7 @@ views: [
 | --- | --- |
 | `id`, `title` | The tab. |
 | `types` | Node types shown in the view and offered by its + button. |
-| `layout` | `'grid'`: cards in as many columns as fit the screen (one on a phone). `'rows'`: one row per group, its first card heading the row. `'flow'` (default): the usual layered layout. Or your own function `(nodes, { graph, width }) => positions` (`ViewLayout`). |
+| `layout` | `'grid'`: cards in the number of columns that makes the whole grid, zoomed out, fill the screen best. The count is chosen when the view opens, is tidied, the screen changes size or cards are added or removed, and kept while cards are edited. The view opens zoomed out to show it all; tap a card to zoom in. `'rows'`: one row per group, its first card heading the row. `'flow'` (default): the usual layered layout. Or your own function `(nodes, { graph, width }) => positions` (`ViewLayout`). |
 | `rows(graph)` | Rows layout: node ids per row, in order. Nodes left out go in a last row. |
 | `order(graph)` | Grid layout: node ids in order (default: by `types`, then as added). |
 | `onAdd(node, { graph, selected })` | After + adds a node in this view, link it to what was selected (a shot to the selected scene), number it, and so on. |

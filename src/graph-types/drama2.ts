@@ -18,6 +18,17 @@ const shotsOf = (g: Graph, sc: NodeInstance) => refsOf(g, sc, 'shots').sort((a, 
 const nextNumber = (ns: NodeInstance[]) => Math.max(0, ...ns.map((n) => Number.parseInt(String(n.params.number ?? ''), 10) || 0)) + 1;
 const push = (g: Graph, holder: NodeInstance, param: string, id: string) => g.setParam(holder.id, param, [...list(holder.params[param]), id]);
 
+/** The scene a selection belongs to: the scene itself, or a shot's scene. */
+const sceneOf = (g: Graph, n?: NodeInstance) => (n?.type === D2.scene ? n : n?.type === D2.shot ? referrers(g, n.id, D2.scene, 'shots')[0] : undefined);
+
+/** A new shot joins the selected scene (or the selected shot's scene), numbered next. */
+function addShotTo(graph: Graph, shot: NodeInstance, selected?: NodeInstance) {
+  const sc = sceneOf(graph, selected);
+  if (!sc) return;
+  graph.setParam(shot.id, 'number', String(nextNumber(refsOf(graph, sc, 'shots'))));
+  push(graph, sc, 'shots', shot.id);
+}
+
 /**
  * Drama as boards instead of wires. Four tabs: Cast (characters and their outfits) and
  * Locations as grids; Scenes (each scene with its shots) and Episodes (each episode with its
@@ -57,6 +68,15 @@ export const drama2Graph = defineGraphType({
         },
       },
       {
+        id: 'shots',
+        title: 'Shots',
+        types: [D2.shot],
+        layout: 'grid',
+        // Story order: by episode and scene, then shot number; shots not in a scene last.
+        order: (g) => scenesInOrder(g).flatMap((sc) => shotsOf(g, sc).map((s) => s.id)),
+        onAdd: (node, { graph, selected }) => addShotTo(graph, node, selected),
+      },
+      {
         id: 'scenes',
         title: 'Scenes',
         types: [D2.scene, D2.shot],
@@ -64,15 +84,11 @@ export const drama2Graph = defineGraphType({
         // A row per scene: the scene, then its shots in order.
         rows: (g) => scenesInOrder(g).map((sc) => [sc.id, ...shotsOf(g, sc).map((s) => s.id)]),
         onAdd: (node, { graph, selected }) => {
-          const sceneOf = (n?: NodeInstance) => (n?.type === D2.scene ? n : n?.type === D2.shot ? referrers(graph, n.id, D2.scene, 'shots')[0] : undefined);
-          if (node.type === D2.shot) {
-            const sc = sceneOf(selected);
-            if (!sc) return;
-            graph.setParam(node.id, 'number', String(nextNumber(refsOf(graph, sc, 'shots'))));
-            push(graph, sc, 'shots', node.id);
-          } else if (node.type === D2.scene) {
+          if (node.type === D2.shot) addShotTo(graph, node, selected);
+          else if (node.type === D2.scene) {
             // Next scene number, in the same episode as the selected scene.
-            const ep = sceneOf(selected) && referrers(graph, sceneOf(selected)!.id, D2.episode, 'scenes')[0];
+            const sel = sceneOf(graph, selected);
+            const ep = sel && referrers(graph, sel.id, D2.episode, 'scenes')[0];
             graph.setParam(node.id, 'number', nextNumber(ep ? refsOf(graph, ep, 'scenes') : ofType(graph, D2.scene).filter((s) => s.id !== node.id)));
             if (ep) push(graph, ep, 'scenes', node.id);
           }
@@ -102,7 +118,7 @@ export const drama2Graph = defineGraphType({
     ...ex,
     description:
       ex.id === 'term'
-        ? 'Tabs across the top: cast, locations, props (objects and outfits), scenes, episodes. Tap a name chip or a list entry to jump to it (← Back returns). Select a card to edit it or open its lists; tap a shot, scene or episode twice for its Seedance export.'
+        ? 'Tabs across the top: cast, locations, props (objects and outfits), shots, scenes, episodes. Grids open zoomed out: tap a card to zoom in. Tap a name chip or a list entry to jump to it (← Back returns). Select a card to edit it or open its lists; tap a shot, scene or episode twice for its Seedance export.'
         : ex.description,
     graph: fromDrama(ex.graph),
   })),

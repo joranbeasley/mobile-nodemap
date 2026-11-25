@@ -7,12 +7,13 @@ const view = (id: string) => drama2Graph.editor!.views!.find((v) => v.id === id)
 const titles = (g: Graph, id: string, list: string) => drama2Lists(g, toDrama(g), id).find((l) => l.title === list)!.items.map((i) => i.title);
 
 describe('Drama boards (drama2)', () => {
-  it('is registered with five views and no ports', () => {
+  it('is registered with six views and no ports', () => {
     expect(getGraphType('drama2')).toBe(drama2Graph);
     expect(drama2Graph.editor!.views!.map((v) => [v.id, v.layout])).toEqual([
       ['cast', 'grid'],
       ['locations', 'grid'],
       ['props', 'grid'],
+      ['shots', 'grid'],
       ['scenes', 'rows'],
       ['episodes', 'rows'],
     ]);
@@ -69,6 +70,9 @@ describe('Drama boards (drama2)', () => {
     view('episodes').onAdd!(scene, { graph: g, selected: g.nodes.get('ep2') });
     expect(g.nodes.get('ep2')!.params.scenes).toEqual(['sc4', scene.id]);
     expect(scene.params.number).toBe(2);
+    const fromShotsTab = g.addNode('drama2/shot');
+    view('shots').onAdd!(fromShotsTab, { graph: g, selected: g.nodes.get('s3a') });
+    expect(g.nodes.get('sc3')!.params.shots).toEqual(['s3a', 's3b', fromShotsTab.id]);
     const outfit = g.addNode('drama2/prop');
     view('props').onAdd!(outfit, { graph: g, selected: g.nodes.get('jules-lead') });
     expect(outfit.params).toMatchObject({ kind: 'Outfit', wornBy: 'jules' });
@@ -90,7 +94,7 @@ describe('Editor views', () => {
 
   it('shows one view at a time with a tab per view', async () => {
     const { el, editor } = mount();
-    expect([...el.querySelectorAll('.nm-view-tab')].map((t) => t.textContent)).toEqual(['Cast4', 'Locations3', 'Props3', 'Scenes14', 'Episodes6']);
+    expect([...el.querySelectorAll('.nm-view-tab')].map((t) => t.textContent)).toEqual(['Cast4', 'Locations3', 'Props3', 'Shots10', 'Scenes14', 'Episodes6']);
     expect(shown(el)).toEqual(['maya', 'theo', 'jules', 'okafor']);
     await editor.setView('scenes');
     expect(editor.currentView).toBe('scenes');
@@ -113,6 +117,26 @@ describe('Editor views', () => {
     expect(new Set(ys(row1)).size).toBe(1);
     expect(row1.map((id) => g.nodes.get(id)!.x)).toEqual([...row1.map((id) => g.nodes.get(id)!.x)].sort((a, b) => a - b));
     expect(g.nodes.get('sc2')!.y).toBeGreaterThan(g.nodes.get('sc1')!.y);
+    editor.destroy();
+  });
+
+  it('shapes grids to fill the screen when zoomed out', async () => {
+    const { g, el, editor } = mount();
+    // A wide screen: the ten shots spread into several columns, in story order.
+    el.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: 1600, bottom: 900, width: 1600, height: 900, toJSON() {} }) as DOMRect;
+    await editor.setView('shots');
+    const cols = (ids: string[]) => new Set(ids.map((id) => g.nodes.get(id)!.x)).size;
+    const shots = ['s1a', 's1b', 's1c', 's2a', 's2b', 's3a', 's3b', 's4a', 's4b', 's4c'];
+    const wide = cols(shots);
+    expect(wide).toBeGreaterThan(2);
+    expect(g.nodes.get('s1a')!.x).toBe(0);
+    expect(g.nodes.get('s1b')!.x).toBeGreaterThan(0);
+    // A tall, narrow screen: fewer columns.
+    el.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: 400, bottom: 900, width: 400, height: 900, toJSON() {} }) as DOMRect;
+    await editor.layoutView({ animate: false, home: true });
+    expect(cols(shots)).toBeLessThan(wide);
+    // It opens zoomed out to show the whole grid.
+    expect(editor.viewport.k).toBeLessThan(1);
     editor.destroy();
   });
 

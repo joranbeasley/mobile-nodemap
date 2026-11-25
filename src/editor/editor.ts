@@ -187,6 +187,9 @@ export class NodeEditor extends Emitter<EditorEvents> {
   /** The editor open on a node's inner map (see enterNode), if any. */
   private inner?: { editor: NodeEditor; layer: HTMLElement; close: () => void };
   private extraButtons = new Map<string, HTMLElement>();
+  /** Column counts chosen per grid view, kept steady while cards are edited. */
+  private gridCols = new Map<string, { cols: number; n: number }>();
+  private gridReshape = false;
 
   constructor(container: HTMLElement, options: EditorOptions) {
     super();
@@ -270,6 +273,11 @@ export class NodeEditor extends Emitter<EditorEvents> {
     if (typeof ResizeObserver !== 'undefined') {
       const ro = new ResizeObserver(() => {
         if (this.direction === 'auto' && this.resolveFlow() !== this.flowNow) this.setDirection('auto');
+        // Grids are shaped to the screen: reshape them when it turns or resizes.
+        if (this.view?.layout === 'grid') {
+          this.gridReshape = true;
+          this.scheduleViewLayout();
+        }
       });
       ro.observe(this.root);
       this.disposers.push(() => ro.disconnect());
@@ -1274,8 +1282,29 @@ export class NodeEditor extends Emitter<EditorEvents> {
       const seen = new Set<string>();
       const order = [...(v.order?.(this.graph) ?? []), ...byDefault()].filter((id) => shownIds.has(id) && !seen.has(id) && seen.add(id));
       const colW = Math.max(160, ...order.map((id) => size(id).w));
-      const r = this.root.getBoundingClientRect();
-      const cols = Math.max(1, Math.floor((Math.max(r.width, colW) - 32 + GAP) / (colW + GAP)));
+      // Pick the column count whose whole grid, zoomed out to fit, fills the screen best.
+      const { w: availW, h: availH } = this.viewArea();
+      const gridFor = (cols: number) => {
+        let h = 0;
+        for (let i = 0; i < order.length; i += cols) h += Math.max(...order.slice(i, i + cols).map((id) => size(id).h)) + GAP;
+        const w = Math.min(cols, order.length) * (colW + GAP) - GAP;
+        return Math.min(availW / w, availH / Math.max(1, h - GAP));
+      };
+      const kept = this.gridCols.get(v.id);
+      let cols = 1;
+      if (kept && kept.n === order.length && !opts.home && !this.gridReshape) cols = kept.cols;
+      else {
+        let best = -1;
+        for (let c = 1; c <= Math.max(1, order.length); c++) {
+          const k = gridFor(c);
+          if (k > best + 1e-6) {
+            best = k;
+            cols = c;
+          }
+        }
+      }
+      this.gridCols.set(v.id, { cols, n: order.length });
+      this.gridReshape = false;
       let y = 0;
       for (let i = 0; i < order.length; i += cols) {
         const row = order.slice(i, i + cols);
@@ -1303,7 +1332,16 @@ export class NodeEditor extends Emitter<EditorEvents> {
       return n.x !== p.x || n.y !== p.y;
     });
     if (moved) await this.animateTo(pos, opts.animate === false ? 0 : 220);
-    if (opts.home) this.viewHome();
+    // A grid opens zoomed out to show all of it (tap a card to zoom in); rows start top-left.
+    if (opts.home) (v.layout === 'grid' ? this.fit({ minScale: 0 }) : this.viewHome());
+  }
+
+  /** The screen area a view's cards can use, without the tab bar and toolbar, in pixels. */
+  private viewArea(): { w: number; h: number } {
+    const r = this.root.getBoundingClientRect();
+    const w = (r.width || 1024) - 64;
+    const h = (r.height || 768) - 64 - (this.toolbar ? 64 : 0) - (this.viewBar ? 48 : 0);
+    return { w: Math.max(160, w), h: Math.max(160, h) };
   }
 
   /** Top-left of the current view at a readable zoom. */

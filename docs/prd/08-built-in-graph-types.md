@@ -46,7 +46,7 @@ The library needs proof that the extension model handles very different domains:
 
 A production isn't really a flow, and wiring many characters into many shots gets busy, so Drama boards edit the same model as tabs of cards with no wires.
 
-- **Tabs.** Cast, Locations and Props are grids. Scenes (a row per scene: the scene, then its shots) and Episodes (a row per episode: the episode, then its scenes) are rows. On a phone, grids are one column and rows scroll sideways.
+- **Tabs.** Cast, Locations, Props and Shots (in story order: episode, scene, shot number) are grids shaped to the screen. They open zoomed out to show every card, and a tap zooms in. Scenes (a row per scene: the scene, then its shots, like a storyboard) and Episodes (a row per episode: the episode, then its scenes) are rows that scroll sideways.
 - **Props.** A prop is either an Object or an Outfit, set by its type. An outfit has a wearer: put it on a shot and that character wears it there (in the video prompt it replaces their usual clothes, with its pictures). Objects have pictures too, which go into the prompts of the shots that use them. Outfits are listed first, grouped by wearer.
 - **No wires.** Cards can't be connected. A shot picks one location and any characters and props, a scene picks its shots, and an episode picks its scenes. The pickers only offer valid choices: a shot already in another scene isn't offered.
 - **Jumping around.** Every reference is a chip and every list entry a link. Tapping one switches to the tab that shows it, centres it and selects it; ← Back returns. They work without selecting the card first.
@@ -55,7 +55,7 @@ A production isn't really a flow, and wiring many characters into many shots get
   - Shots: their scene and episodes.
   - Scenes: their episode, characters, locations and props.
   - Episodes: their actors and locations.
-- **Adding.** + adds a type the current tab shows. With a scene selected, a new shot joins it, numbered next. With an episode selected, a new scene joins it. With a prop selected, a new prop has the same type and wearer.
+- **Adding.** + adds a type the current tab shows. With a scene or shot selected (Scenes or Shots tab), a new shot joins that scene, numbered next. With an episode selected, a new scene joins it. With a prop selected, a new prop has the same type and wearer.
 - **Same engine.** Underneath it's the drama model: the same checks, details cards and Seedance export. A shot's prompt is identical to the wired version's.
 
 ## Function builder (`functionGraph`, id `function`)
