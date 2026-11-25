@@ -45,6 +45,8 @@ export interface ImageGenerator {
   /** An API key the person gives once; the host decides where it is kept. */
   key?: { label: string; help?: string; get(): string | null | undefined; set(value: string): void };
   generate(req: ImageRequest): Promise<ImageResult>;
+  /** Where to make pictures by hand when this page can't reach the service (offered with the prompt). */
+  site?: string;
   /** The person's existing pictures on the service, newest first, to search and reuse. */
   browse?(opts?: { signal?: AbortSignal }): Promise<ImageAsset[]>;
 }
@@ -106,7 +108,14 @@ export function meshyImageGenerator(
   const call = async (path: string, init: RequestInit = {}) => {
     const k = key.get();
     if (!k) throw new Error('Add your Meshy API key first');
-    const res = await doFetch(`${base}${path}`, { ...init, headers: { Authorization: `Bearer ${k}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) } });
+    let res: Response;
+    try {
+      res = await doFetch(`${base}${path}`, { ...init, headers: { Authorization: `Bearer ${k}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) } });
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') throw err;
+      // A network-level failure: the page's host (e.g. a sandboxed artifact) or the browser blocked it.
+      throw Object.assign(new Error("This page can't reach Meshy: where it is open, calls to other sites are blocked. Copy the prompt and make the picture on meshy.ai, then add it with +."), { code: 'blocked' });
+    }
     const body = (await res.json().catch(() => ({}))) as Record<string, any>;
     if (!res.ok) throw new Error(body.message || `Meshy said ${res.status}${res.status === 401 ? ': check your API key' : res.status === 402 ? ': not enough credits' : ''}`);
     return body;
@@ -114,6 +123,7 @@ export function meshyImageGenerator(
   return {
     id: 'meshy',
     name: 'Meshy',
+    site: 'https://www.meshy.ai/',
     models: MESHY_IMAGE_MODELS,
     defaultModel: opts.model ?? 'nano-banana',
     key: { help: 'From meshy.ai → API. Kept in this browser only and sent only to Meshy.', ...key },
@@ -124,7 +134,7 @@ export function meshyImageGenerator(
           const rows = await call(`${path}?page_size=50&sort_order=desc`, { signal });
           return Array.isArray(rows) ? (rows as Record<string, any>[]).filter((r) => r.status === 'SUCCEEDED') : [];
         } catch (err) {
-          if ((err as Error).name === 'AbortError' || /API key/.test((err as Error).message)) throw err;
+          if ((err as Error).name === 'AbortError' || (err as { code?: string }).code === 'blocked' || /API key/.test((err as Error).message)) throw err;
           return [];
         }
       };

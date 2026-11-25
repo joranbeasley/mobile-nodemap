@@ -239,6 +239,23 @@ export const imagesParam: ParamKind = {
       });
       const buttons = el('div', { class: 'dr-gen-row' });
       buttons.append(go, cancel);
+      // The prompt is useful on its own too: copy it (and open the service's site) to make the
+      // picture by hand, then add it with +. Handy where this page can't reach the service.
+      const copy = el('button', { type: 'button', class: 'dr-gen-cancel' }, 'Copy prompt') as HTMLButtonElement;
+      copy.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(prompt.value);
+          status.textContent = 'Prompt copied.';
+        } catch {
+          prompt.select();
+          status.textContent = 'Prompt selected: copy it from the menu.';
+        }
+      });
+      buttons.append(copy);
+      if (gen.site) {
+        const open = el('a', { href: gen.site, target: '_blank', rel: 'noopener', class: 'dr-gen-cancel dr-gen-link' }, `Open ${gen.name}`);
+        buttons.append(open);
+      }
       panel.append(prompt, row, keyRow, buttons, status);
       wrap.append(panel);
       prompt.focus({ preventScroll: true });
@@ -1065,6 +1082,7 @@ const css = `
 .dr-gen-go:disabled { opacity: .6; cursor: progress; }
 .dr-gen-cancel { font: 12px var(--_font); padding: 6px 12px; border-radius: 999px; border: 1px solid var(--_border); background: transparent; color: var(--_text); cursor: pointer; }
 .dr-gen-status { font-size: 11.5px; color: var(--_muted); min-height: 1em; }
+.dr-gen-link { text-decoration: none; display: inline-block; }
 .dr-file { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 0; }
 .dr-status { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--_text); }
 .dr-status b { font-weight: 600; }

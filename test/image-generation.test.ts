@@ -163,3 +163,16 @@ describe('Searching existing assets', () => {
     editor.destroy();
   });
 });
+
+describe('When the page cannot reach Meshy', () => {
+  it('says so plainly instead of "Failed to fetch"', async () => {
+    const gen = meshyImageGenerator({
+      apiKey: 'k',
+      fetch: (async () => {
+        throw new TypeError('Failed to fetch');
+      }) as unknown as typeof fetch,
+    });
+    await expect(gen.generate({ prompt: 'x' })).rejects.toThrow(/can't reach Meshy.*Copy the prompt/);
+    expect(gen.site).toBe('https://www.meshy.ai/');
+  });
+});
