@@ -278,7 +278,7 @@ const sceneNode = defineNode({
   color: '#5f3dc4',
   icon: '❏',
   flavor: 'transform',
-  width: 260,
+  width: 440,
   description: 'A numbered scene: a set of shots',
   caption: (n) => `Scene ${Number(n.params.number ?? 1)} · ${n.params.time ?? 'DAY'}`,
   params: [

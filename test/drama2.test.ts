@@ -63,7 +63,7 @@ describe('Drama boards (drama2)', () => {
   it('adds new shots, scenes and props to what is selected', () => {
     const g = load();
     const shot = g.addNode('drama2/shot');
-    view('scenes').onAdd!(shot, { graph: g, selected: g.nodes.get('s2b') });
+    view('shots').onAdd!(shot, { graph: g, selected: g.nodes.get('s2b') });
     expect(g.nodes.get('sc2')!.params.shots).toEqual(['s2a', 's2b', shot.id]);
     expect(shot.params.number).toBe('3');
     const scene = g.addNode('drama2/scene');
@@ -94,11 +94,11 @@ describe('Editor views', () => {
 
   it('shows one view at a time with a tab per view', async () => {
     const { el, editor } = mount();
-    expect([...el.querySelectorAll('.nm-view-tab')].map((t) => t.textContent)).toEqual(['Cast4', 'Locations3', 'Props3', 'Shots10', 'Scenes14', 'Episodes6']);
+    expect([...el.querySelectorAll('.nm-view-tab')].map((t) => t.textContent)).toEqual(['Cast4', 'Locations3', 'Props3', 'Shots10', 'Scenes4', 'Episodes6']);
     expect(shown(el)).toEqual(['maya', 'theo', 'jules', 'okafor']);
     await editor.setView('scenes');
     expect(editor.currentView).toBe('scenes');
-    expect(shown(el)).toHaveLength(14);
+    expect(shown(el)).toEqual(['sc1', 'sc2', 'sc3', 'sc4']); // scenes only: shots are chips on them
     expect(el.querySelectorAll('.nm-port')).toHaveLength(0);
     editor.destroy();
   });
@@ -112,11 +112,12 @@ describe('Editor views', () => {
     await editor.setView('props');
     expect(reading(['script', 'jules-lead', 'maya-blacks'])).toEqual(['maya-blacks', 'jules-lead', 'script']);
     await editor.setView('scenes');
-    // One row per scene: the scene first, its shots after it on the same row.
-    const row1 = ['sc1', 's1a', 's1b', 's1c'];
-    expect(new Set(ys(row1)).size).toBe(1);
-    expect(row1.map((id) => g.nodes.get(id)!.x)).toEqual([...row1.map((id) => g.nodes.get(id)!.x)].sort((a, b) => a - b));
-    expect(g.nodes.get('sc2')!.y).toBeGreaterThan(g.nodes.get('sc1')!.y);
+    // One wide scene card per row, in story order.
+    const scenes = ['sc1', 'sc2', 'sc3', 'sc4'];
+    expect(new Set(scenes.map((id) => g.nodes.get(id)!.x)).size).toBe(1);
+    expect(ys(scenes)).toEqual([...ys(scenes)].sort((a, b) => a - b));
+    expect(new Set(ys(scenes)).size).toBe(4);
+    expect(g.registry!.get('drama2/scene')!.width).toBeGreaterThan(g.registry!.get('drama2/shot')!.width!);
     editor.destroy();
   });
 
@@ -152,7 +153,7 @@ describe('Editor views', () => {
     expect(wornBy('script')).toBe(false);
     // The edit sheet follows the type too.
     editor.openNodeEditor('script');
-    const sheetField = () => document.querySelector('.nm-edit [data-param="wornBy"]')!.closest('label')!;
+    const sheetField = () => document.querySelector('.nm-edit [data-param="wornBy"]')!.closest<HTMLElement>('.nm-edit-field')!;
     expect(sheetField().hidden).toBe(true);
     g.setParam('script', 'kind', 'Outfit');
     expect(sheetField().hidden).toBe(false);
@@ -201,9 +202,21 @@ describe('Editor views', () => {
     editor.destroy();
   });
 
-  it('jumps to a linked node in its view, and back', async () => {
+  it('opens a scene’s shot on the Shots tab', async () => {
     const { el, editor } = mount();
     await editor.setView('scenes');
+    const chip = el.querySelector<HTMLButtonElement>('.nm-node[data-id="sc1"] [data-param="shots"] [data-nm-open="s1b"]')!;
+    expect(chip.textContent).toBe('Shot 2 · Close-up');
+    chip.click();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(editor.currentView).toBe('shots');
+    expect(editor.selection.node).toBe('s1b');
+    editor.destroy();
+  });
+
+  it('jumps to a linked node in its view, and back', async () => {
+    const { el, editor } = mount();
+    await editor.setView('shots');
     const chip = el.querySelector<HTMLButtonElement>('.nm-node[data-id="s1a"] [data-nm-open="hall"]')!;
     expect(chip.textContent).toBe('School hall');
     chip.click();
@@ -212,7 +225,7 @@ describe('Editor views', () => {
     expect(editor.selection.node).toBe('hall');
     expect(el.querySelector('.nm-view-back')).toBeTruthy();
     await editor.back();
-    expect(editor.currentView).toBe('scenes');
+    expect(editor.currentView).toBe('shots');
     expect(editor.selection.node).toBeUndefined();
     editor.destroy();
   });

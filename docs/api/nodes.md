@@ -35,6 +35,7 @@ const router = extendNode(device, { type: 'net/router', title: 'Router', outputs
 | `color` | CSS colour | Header colour (themes may override, see `nodeColors`). |
 | `caption(node)` | `→ string` | Header title for nodes without a name, from their params (e.g. `Shot 2 · Close-up`). Updates as params change. |
 | `icon` | text, emoji or `<svg…>` | Header and add menu. |
+| `width` | px | Fixed card width; it overrides the default 176–250 px limits. |
 | `flavor` | `'source' \| 'transform' \| 'sink' \| 'view' \| 'control' \| string` | Role, for themes. Inferred when left out. |
 | `width` | `number` | Fixed width in px. |
 | `inputs`, `outputs` | `PortDef[]` | |

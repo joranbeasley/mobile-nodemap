@@ -79,19 +79,17 @@ export const drama2Graph = defineGraphType({
       {
         id: 'scenes',
         title: 'Scenes',
-        types: [D2.scene, D2.shot],
+        types: [D2.scene],
         layout: 'rows',
-        // A row per scene: the scene, then its shots in order.
-        rows: (g) => scenesInOrder(g).map((sc) => [sc.id, ...shotsOf(g, sc).map((s) => s.id)]),
+        // One wide scene card per row, in story order. Its shots are chips on the card: tap one
+        // to open it on the Shots tab.
+        rows: (g) => scenesInOrder(g).map((sc) => [sc.id]),
         onAdd: (node, { graph, selected }) => {
-          if (node.type === D2.shot) addShotTo(graph, node, selected);
-          else if (node.type === D2.scene) {
-            // Next scene number, in the same episode as the selected scene.
-            const sel = sceneOf(graph, selected);
-            const ep = sel && referrers(graph, sel.id, D2.episode, 'scenes')[0];
-            graph.setParam(node.id, 'number', nextNumber(ep ? refsOf(graph, ep, 'scenes') : ofType(graph, D2.scene).filter((s) => s.id !== node.id)));
-            if (ep) push(graph, ep, 'scenes', node.id);
-          }
+          // Next scene number, in the same episode as the selected scene.
+          const sel = sceneOf(graph, selected);
+          const ep = sel && referrers(graph, sel.id, D2.episode, 'scenes')[0];
+          graph.setParam(node.id, 'number', nextNumber(ep ? refsOf(graph, ep, 'scenes') : ofType(graph, D2.scene).filter((s) => s.id !== node.id)));
+          if (ep) push(graph, ep, 'scenes', node.id);
         },
       },
       {

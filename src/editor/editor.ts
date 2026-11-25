@@ -1464,7 +1464,9 @@ export class NodeEditor extends Emitter<EditorEvents> {
     );
     const form = h('div', { class: 'nm-sheet-list nm-form' });
     const field = (label: string, control: HTMLElement, hint?: string) =>
-      h('label', { class: 'nm-edit-field' }, h('span', {}, label), control, ...(hint ? [h('small', {}, hint)] : []));
+      // A label makes a whole row tappable for one input; a custom control (several buttons) gets a plain wrapper,
+      // or a tap anywhere in it would also "click" its first button.
+      h(control.dataset.paramKind ? 'div' : 'label', { class: 'nm-edit-field' }, h('span', {}, label), control, ...(hint ? [h('small', {}, hint)] : []));
 
     const name = h('input', { type: 'text', id: 'nm-edit-name', autocomplete: 'off', spellcheck: 'false', placeholder: typeTitle, 'aria-label': 'Name' });
     name.value = node.label ?? '';
@@ -1780,7 +1782,11 @@ export class NodeEditor extends Emitter<EditorEvents> {
     const el = h('div', { class: 'nm-node', 'data-id': node.id, role: 'group', 'aria-label': def?.title ?? node.type });
     if (def?.color) el.style.setProperty('--nm-type-color', def.color);
     el.dataset.flavor = flavorOf(def, this.registry.inputsOf(node), this.registry.outputsOf(node));
-    if (def?.width) el.style.width = `${def.width}px`;
+    if (def?.width) {
+      // A node type's own width wins over the default size limits.
+      el.style.width = `${def.width}px`;
+      el.style.maxWidth = 'none';
+    }
     el.append(
       h(
         'div',
@@ -1794,7 +1800,10 @@ export class NodeEditor extends Emitter<EditorEvents> {
     );
     const body = h('div', { class: 'nm-body' });
     if (!def) body.append(h('div', { class: 'nm-error' }, `Unknown node type "${node.type}"`));
-    const field = (p: ParamDef) => h('label', { class: 'nm-field' }, h('span', {}, p.label ?? p.name), this.paramControl(node, p));
+    const field = (p: ParamDef) => {
+      const control = this.paramControl(node, p);
+      return h(control.dataset.paramKind ? 'div' : 'label', { class: 'nm-field' }, h('span', {}, p.label ?? p.name), control);
+    };
     const params = (def?.params ?? []).filter((p) => shows(p, node));
     params.filter((p) => !p.advanced).forEach((p) => body.append(field(p)));
     const advanced = params.filter((p) => p.advanced);
