@@ -575,6 +575,43 @@ export class NodeEditor extends Emitter<EditorEvents> {
     };
   }
 
+  /**
+   * Glide (without zooming) so a node is fully on screen; one bigger than the screen shows
+   * from its top-left. Does nothing when it is already in view.
+   */
+  panIntoView(id: string, pad = 16): void {
+    const n = this.graph.nodes.get(id);
+    const rec = this.records.get(id);
+    if (!n || !rec) return;
+    const r = this.root.getBoundingClientRect();
+    if (!r.width) return;
+    const k = this.vp.k;
+    const top = (this.viewBar ? 52 : 0) + pad;
+    const bottom = r.height - (this.toolbar ? 72 : 0) - pad;
+    const left = pad;
+    const right = r.width - pad;
+    const x0 = n.x * k + this.vp.x;
+    const y0 = n.y * k + this.vp.y;
+    const w = rec.w * k;
+    const hh = rec.h * k;
+    // Fits: nudge it in. Too big: line its top (or left) edge up with the screen's.
+    const dx = w > right - left ? left - x0 : x0 < left ? left - x0 : x0 + w > right ? right - (x0 + w) : 0;
+    const dy = hh > bottom - top ? (y0 > top || y0 + hh < bottom ? top - y0 : 0) : y0 < top ? top - y0 : y0 + hh > bottom ? bottom - (y0 + hh) : 0;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+    const from = { ...this.vp };
+    const reduce = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    cancelAnimationFrame(this.zoomAnim);
+    if (reduce || typeof requestAnimationFrame === 'undefined') return this.setViewport({ x: from.x + dx, y: from.y + dy });
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const t = Math.min(1, (now - t0) / 240);
+      const e = 1 - Math.pow(1 - t, 3);
+      this.setViewport({ x: from.x + dx * e, y: from.y + dy * e });
+      if (t < 1) this.zoomAnim = requestAnimationFrame(step);
+    };
+    this.zoomAnim = requestAnimationFrame(step);
+  }
+
   /** Pan (without zooming) so a node is fully on screen. */
   ensureVisible(id: string, pad = 24): void {
     const n = this.graph.nodes.get(id);
@@ -2576,7 +2613,11 @@ export class NodeEditor extends Emitter<EditorEvents> {
             // A second tap on the same node opens its Edit sheet; a first tap selects it.
             const now = performance.now();
             // The tap that selects a node must not also reach its (now live) fields.
-            if (this.selected.node !== g.id) this.fieldGuard = { id: g.id, until: now + 350 };
+            if (this.selected.node !== g.id) {
+              this.fieldGuard = { id: g.id, until: now + 350 };
+              // Focusing a card brings all of it on screen (keeping the zoom).
+              requestAnimationFrame(() => this.panIntoView(g.id));
+            }
             const again = this.lastTap?.id === g.id && now - this.lastTap.t < 350;
             this.lastTap = { id: g.id, t: now };
             this.select({ node: g.id });

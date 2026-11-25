@@ -55,6 +55,7 @@ Bottom sheets (the add menu and the Edit sheet) open in an overlay layer over th
 | `autoLayout({ animate?, fit?, maxWidth? })` | Tidy in the current flow, as one roomy flow (never wrapped unless you pass `maxWidth`). Records the flow in `graph.meta.flow`; a map arranged for the other flow is tidied automatically when it opens. |
 | `setLayout(engine)` / `setWires(style)` / `setTheme(theme \| null)` | |
 | `fit({ padding?, minScale? })` | `minScale` (default 0.6) keeps text readable; pass `0` to show everything. |
+| `panIntoView(id)` | Glide (keeping the zoom) so a node is fully on screen; one bigger than the screen shows from its top. Selecting a node with a tap does this. |
 | `goToNode(id)` | Pan (keeping the zoom) so a node is centred, and select it. What tapping a ghost does. |
 | `renderGhosts()` | Redraw the edge ghosts now (they redraw by themselves on pan, zoom, edits and selection). |
 | `zoomToNode(id, { animate?, zoom? })` | Centre a node at a comfortable zoom (100%, or smaller if it wouldn't fit). |
