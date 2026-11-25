@@ -46,7 +46,7 @@ The library needs proof that the extension model handles very different domains:
 
 A production isn't really a flow, and wiring many characters into many shots gets busy, so Drama boards edit the same model as tabs of cards with no wires.
 
-- **Tabs.** Cast, Locations, Props and Shots (in story order: episode, scene, shot number) are grids shaped to the screen. They open zoomed out to show every card, and a tap zooms in. Scenes shows one wide scene card per row, in story order. Its shots are chips (tap one to open it on the Shots tab), and a filmstrip of their frames serves as the storyboard. Episodes (a row per episode: the episode, then its scenes) are rows that scroll sideways.
+- **Tabs.** Cast, Locations, Props and Shots (in story order: episode, scene, shot number) are grids shaped to the screen. They open zoomed out to show every card, and a tap zooms in. Scenes shows one wide scene card per row, in story order. Its shots are chips (tap one to open it on the Shots tab), and a filmstrip of their frames serves as the storyboard. Episodes works the same way: one wide episode card per row, by number, with its scenes as chips that open them on the Scenes tab.
 - **Props.** A prop is either an Object or an Outfit, set by its type. An outfit has a wearer: put it on a shot and that character wears it there (in the video prompt it replaces their usual clothes, with its pictures). Objects have pictures too, which go into the prompts of the shots that use them. Outfits are listed first, grouped by wearer.
 - **No wires.** Cards can't be connected. A shot picks one location and any characters and props, a scene picks its shots, and an episode picks its scenes. The pickers only offer valid choices: a shot already in another scene isn't offered.
 - **Jumping around.** Every reference is a chip and every list entry a link. Tapping one switches to the tab that shows it, centres it and selects it; ← Back returns. They work without selecting the card first.
@@ -55,7 +55,7 @@ A production isn't really a flow, and wiring many characters into many shots get
   - Shots: their scene and episodes.
   - Scenes: their episode, characters, locations and props.
   - Episodes: their actors and locations.
-- **Adding.** + adds a type the current tab shows. On the Shots tab, with a shot selected, a new shot joins that shot's scene, numbered next. With an episode selected, a new scene joins it. With a prop selected, a new prop has the same type and wearer.
+- **Adding.** + adds a type the current tab shows. On the Shots tab, with a shot selected, a new shot joins that shot's scene, numbered next. On the Scenes tab, with a scene selected, a new scene joins that scene's episode, numbered next. With a prop selected, a new prop has the same type and wearer.
 - **Same engine.** Underneath it's the drama model: the same checks, details cards and Seedance export. A shot's prompt is identical to the wired version's.
 
 ## Function builder (`functionGraph`, id `function`)

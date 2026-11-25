@@ -304,7 +304,7 @@ const episodeNode = defineNode({
   color: '#c2255c',
   icon: '▶',
   flavor: 'sink',
-  width: 260,
+  width: 440,
   description: 'A titled, numbered episode: a set of scenes',
   params: [number(), refs('scenes', 'scenes', D2.scene, true), text('description', 'description', 'Optional synopsis'), images('images', 'poster', true), ...look],
   onCreate: (n) => void (n.label ??= 'Untitled episode'),

@@ -67,9 +67,13 @@ describe('Drama boards (drama2)', () => {
     expect(g.nodes.get('sc2')!.params.shots).toEqual(['s2a', 's2b', shot.id]);
     expect(shot.params.number).toBe('3');
     const scene = g.addNode('drama2/scene');
-    view('episodes').onAdd!(scene, { graph: g, selected: g.nodes.get('ep2') });
+    // A new scene joins the selected scene's episode, numbered next.
+    view('scenes').onAdd!(scene, { graph: g, selected: g.nodes.get('sc4') });
     expect(g.nodes.get('ep2')!.params.scenes).toEqual(['sc4', scene.id]);
     expect(scene.params.number).toBe(2);
+    const episode = g.addNode('drama2/episode');
+    view('episodes').onAdd!(episode, { graph: g });
+    expect(episode.params.number).toBe(3);
     const fromShotsTab = g.addNode('drama2/shot');
     view('shots').onAdd!(fromShotsTab, { graph: g, selected: g.nodes.get('s3a') });
     expect(g.nodes.get('sc3')!.params.shots).toEqual(['s3a', 's3b', fromShotsTab.id]);
@@ -94,7 +98,7 @@ describe('Editor views', () => {
 
   it('shows one view at a time with a tab per view', async () => {
     const { el, editor } = mount();
-    expect([...el.querySelectorAll('.nm-view-tab')].map((t) => t.textContent)).toEqual(['Cast4', 'Locations3', 'Props3', 'Shots10', 'Scenes4', 'Episodes6']);
+    expect([...el.querySelectorAll('.nm-view-tab')].map((t) => t.textContent)).toEqual(['Cast4', 'Locations3', 'Props3', 'Shots10', 'Scenes4', 'Episodes2']);
     expect(shown(el)).toEqual(['maya', 'theo', 'jules', 'okafor']);
     await editor.setView('scenes');
     expect(editor.currentView).toBe('scenes');
@@ -199,6 +203,22 @@ describe('Editor views', () => {
     expect(await pending).toBeUndefined();
     expect(document.querySelector('.nm-edit')).toBeTruthy(); // the edit sheet is still open
     editor.closePalette();
+    editor.destroy();
+  });
+
+  it('shows episodes as wide cards whose scene chips open the Scenes tab', async () => {
+    const { g, el, editor } = mount();
+    await editor.setView('episodes');
+    expect(shown(el)).toEqual(['ep1', 'ep2']);
+    expect(g.nodes.get('ep1')!.x).toBe(g.nodes.get('ep2')!.x);
+    expect(g.nodes.get('ep2')!.y).toBeGreaterThan(g.nodes.get('ep1')!.y);
+    expect(g.registry!.get('drama2/episode')!.width).toBe(440);
+    const chip = el.querySelector<HTMLButtonElement>('.nm-node[data-id="ep1"] [data-param="scenes"] [data-nm-open="sc2"]')!;
+    expect(chip.textContent).toBe('Scene 2 · NIGHT');
+    chip.click();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(editor.currentView).toBe('scenes');
+    expect(editor.selection.node).toBe('sc2');
     editor.destroy();
   });
 

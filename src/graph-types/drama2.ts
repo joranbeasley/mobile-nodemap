@@ -95,20 +95,12 @@ export const drama2Graph = defineGraphType({
       {
         id: 'episodes',
         title: 'Episodes',
-        types: [D2.episode, D2.scene],
+        types: [D2.episode],
         layout: 'rows',
-        // A row per episode: the episode, then its scenes in order.
-        rows: (g) =>
-          ofType(g, D2.episode)
-            .sort((a, b) => num(a) - num(b))
-            .map((ep) => [ep.id, ...refsOf(g, ep, 'scenes').sort((a, b) => num(a) - num(b)).map((s) => s.id)]),
-        onAdd: (node, { graph, selected }) => {
-          if (node.type === D2.episode) return void graph.setParam(node.id, 'number', nextNumber(ofType(graph, D2.episode).filter((e) => e.id !== node.id)));
-          const ep = selected?.type === D2.episode ? selected : selected?.type === D2.scene ? referrers(graph, selected.id, D2.episode, 'scenes')[0] : undefined;
-          if (!ep) return;
-          graph.setParam(node.id, 'number', nextNumber(refsOf(graph, ep, 'scenes')));
-          push(graph, ep, 'scenes', node.id);
-        },
+        // One wide episode card per row, by number. Its scenes are chips on the card: tap one to
+        // open it on the Scenes tab.
+        rows: (g) => ofType(g, D2.episode).sort((a, b) => num(a) - num(b)).map((ep) => [ep.id]),
+        onAdd: (node, { graph }) => graph.setParam(node.id, 'number', nextNumber(ofType(graph, D2.episode).filter((e) => e.id !== node.id))),
       },
     ],
   },
