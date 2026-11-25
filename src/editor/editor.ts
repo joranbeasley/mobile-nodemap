@@ -1350,7 +1350,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
     const byDefault = () => [...shown].sort((a, b) => typeRank(a) - typeRank(b)).map((n) => n.id);
     const shownIds = new Set(shown.map((n) => n.id));
     const pos: Positions = {};
-    const GAP = 40;
+    const GAP = 24;
     if (typeof v.layout === 'function') {
       const r = this.root.getBoundingClientRect();
       Object.assign(pos, v.layout(shown.map((n) => ({ id: n.id, type: n.type, ...size(n.id) })).map(({ id, type, w, h }) => ({ id, type, w, h })), { graph: this.graph, width: Math.max(320, r.width - 32) }));
@@ -1359,7 +1359,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       const order = [...(v.order?.(this.graph) ?? []), ...byDefault()].filter((id) => shownIds.has(id) && !seen.has(id) && seen.add(id));
       const colW = Math.max(160, ...order.map((id) => size(id).w));
       // A little more room between columns than between rows, so cards read as separate.
-      const COL_GAP = 64;
+      const COL_GAP = 44;
       // Pick the column count whose whole grid, zoomed out to fit, fills the screen best.
       const { w: availW, h: availH } = this.viewArea();
       const gridFor = (cols: number) => {
