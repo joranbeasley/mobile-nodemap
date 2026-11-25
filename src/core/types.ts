@@ -93,6 +93,17 @@ export interface ParamControlContext {
   set(value: unknown): void;
   /** Stable key: put it in a `data-key` attribute on the focusable element to keep focus across re-renders. */
   key: string;
+  /**
+   * Ask the person to pick one item from a searchable sheet (given by the editor). Resolves
+   * with the picked id, or undefined if they close it. Use it when a plain select gets long.
+   */
+  choose?: (opts: ChooseOptions) => Promise<string | undefined>;
+}
+
+export interface ChooseOptions {
+  title: string;
+  placeholder?: string;
+  items: { id: string; label: string; hint?: string }[];
 }
 
 /** A custom editor for params (and inline port values): `registry.defineParamKind({ kind: 'color', render })`. */

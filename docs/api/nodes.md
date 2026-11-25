@@ -87,7 +87,7 @@ Any param can take `when: (params) => boolean`, which shows it only when it appl
 ```ts
 registry.defineParamKind({
   kind: 'color',
-  render({ param, node, graph, value, set, key }) {   // return an element; call set(v) on change; graph: the map
+  render({ param, node, graph, value, set, key, choose }) {   // return an element; call set(v) on change; graph: the map; choose: a searchable picker sheet
     const input = document.createElement('input');
     input.type = 'color';
     input.dataset.key = key;                    // keeps focus across re-renders
@@ -106,7 +106,7 @@ Drama boards add two kinds for references to other nodes (`refParam`, `refsParam
 { name: 'shots', kind: 'refs', of: 'drama2/shot', exclusive: true }          // a list of ids
 ```
 
-Each referenced node shows as a chip: tap it to jump to that node (`data-nm-open`) and tap × to remove it. A picker adds one. With `exclusive`, a node can be referred to by only one node through that param, so the picker offers only free ones (a shot belongs to one scene).
+Each referenced node shows as a chip: tap it to jump to that node (`data-nm-open`) and tap × to remove it. A picker adds one: a plain select up to `searchAbove` choices (default 8), and beyond that a button that opens the editor's searchable chooser (`ctx.choose`). The chooser shows a hint under each name (who plays a character, a shot's episode and scene, a prop's type and wearer). With `exclusive`, a node can be referred to by only one node through that param, so the picker offers only free ones (a shot belongs to one scene).
 
 ## `PortTypeDef`: custom value types
 

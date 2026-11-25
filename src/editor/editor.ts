@@ -2,7 +2,7 @@ import { Emitter } from '../core/emitter.js';
 import { Graph, ConnectionError } from '../core/graph.js';
 import { History } from '../core/history.js';
 import { Registry } from '../core/registry.js';
-import type { BuiltinParamDef, Edge, NodeInstance, NodeResult, NodeType, ParamDef, ParamKind, PortDef, PortRef } from '../core/types.js';
+import type { BuiltinParamDef, ChooseOptions, Edge, NodeInstance, NodeResult, NodeType, ParamDef, ParamKind, PortDef, PortRef } from '../core/types.js';
 import type { Evaluator } from '../runtime/evaluator.js';
 import { formatValue } from '../runtime/stdlib.js';
 import { css, injectPackStyles, injectStyles } from './styles.js';
@@ -905,9 +905,77 @@ export class NodeEditor extends Emitter<EditorEvents> {
     (this.sheet as any)._off?.();
     this.sheet.remove();
     this.sheet = undefined;
-    this.overlayEl?.remove();
-    this.overlayEl = undefined;
+    if (!this.chooser) {
+      this.overlayEl?.remove();
+      this.overlayEl = undefined;
+    }
     this.root.focus({ preventScroll: true });
+  }
+
+  private chooser?: { sheet: HTMLElement; backdrop: HTMLElement; done: (id?: string) => void };
+
+  /**
+   * A searchable list in a bottom sheet, over anything else open (the edit sheet too).
+   * Resolves with the picked id, or undefined when closed. Param controls get it as
+   * `ctx.choose`; plugins can call it directly.
+   */
+  choose(opts: ChooseOptions): Promise<string | undefined> {
+    this.chooser?.done();
+    return new Promise((resolve) => {
+      const guardUntil = performance.now() + 350;
+      const backdrop = h('div', { class: 'nm-sheet-backdrop nm-choose-backdrop' });
+      const search = h('input', { type: 'search', placeholder: opts.placeholder ?? 'Search', 'aria-label': opts.placeholder ?? 'Search', autocomplete: 'off', spellcheck: 'false' });
+      const list = h('div', { class: 'nm-sheet-list', role: 'listbox', 'aria-label': opts.title });
+      const count = h('small', {}, '');
+      const sheet = h(
+        'div',
+        { class: 'nm-sheet nm-choose', role: 'dialog', 'aria-label': opts.title },
+        h('div', { class: 'nm-sheet-grip' }),
+        h('div', { class: 'nm-sheet-head' }, h('strong', {}, opts.title), count, search),
+        list,
+      );
+      const done = (id?: string) => {
+        if (this.chooser?.sheet !== sheet) return;
+        backdrop.remove();
+        sheet.remove();
+        this.chooser = undefined;
+        if (!this.sheet) {
+          this.overlayEl?.remove();
+          this.overlayEl = undefined;
+        }
+        resolve(id);
+      };
+      const norm = (t: string) => t.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+      const render = () => {
+        const words = norm(search.value).split(/\s+/).filter(Boolean);
+        const hits = opts.items.filter((it) => words.every((w) => norm(`${it.label} ${it.hint ?? ''}`).includes(w)));
+        list.textContent = '';
+        count.textContent = words.length ? `${hits.length} of ${opts.items.length} match` : `${opts.items.length} to choose from`;
+        for (const it of hits) {
+          const b = h('button', { type: 'button', class: 'nm-sheet-item', role: 'option', 'data-id': it.id }, h('i'), it.label, h('small', {}, it.hint ?? ''));
+          b.addEventListener('click', () => {
+            if (performance.now() < guardUntil) return;
+            done(it.id);
+          });
+          list.append(b);
+        }
+        if (!hits.length) list.append(h('div', { class: 'nm-sheet-cat' }, 'Nothing matches'));
+      };
+      search.addEventListener('input', render);
+      search.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') (list.querySelector('.nm-sheet-item') as HTMLButtonElement | null)?.click();
+        if (e.key === 'Escape') done();
+      });
+      backdrop.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        if (performance.now() >= guardUntil) done();
+      });
+      sheet.addEventListener('pointerdown', (e) => e.stopPropagation());
+      render();
+      this.overlay().append(backdrop, sheet);
+      this.chooser = { sheet, backdrop, done };
+      if (matchMedia?.('(pointer: fine)').matches) search.focus();
+    });
   }
 
   /**
@@ -1590,6 +1658,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
 
   destroy(): void {
     this.inner?.close();
+    this.chooser?.done();
     cancelAnimationFrame(this.zoomAnim);
     cancelAnimationFrame(this.ghostFrame);
     this.closePalette();
@@ -1860,7 +1929,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
   }
 
   private customControl(kind: ParamKind, node: NodeInstance, param: ParamDef, value: unknown, key: string): HTMLElement {
-    const el = kind.render({ param, node, graph: this.graph, value, key, set: (v) => this.graph.setParam(node.id, param.name, v) });
+    const el = kind.render({ param, node, graph: this.graph, value, key, set: (v) => this.graph.setParam(node.id, param.name, v), choose: (o) => this.choose(o) });
     el.dataset.paramKind = kind.kind;
     el.dataset.param = param.name;
     return el;

@@ -43,7 +43,34 @@ export const refsOf = (graph: Graph, n: NodeInstance | undefined, param: string)
 export const referrers = (graph: Graph, id: string, type: string, param: string): NodeInstance[] =>
   [...graph.nodes.values()].filter((n) => n.type === type && idList(n.params[param]).includes(id));
 
-type RefParam = { name: string; label?: string; of: string; exclusive?: boolean };
+type RefParam = { name: string; label?: string; of: string; exclusive?: boolean; searchAbove?: number };
+
+/** A second line for a node in a picker, to tell similar names apart. */
+function refHint(graph: Graph, n: NodeInstance): string {
+  const p = n.params;
+  const words = (v: unknown, k = 8) => String(v ?? '').replace(/\s+/g, ' ').trim().split(' ').slice(0, k).join(' ');
+  switch (n.type) {
+    case D2.character:
+      return [p.actor ? `played by ${p.actor}` : '', words(p.description)].filter(Boolean).join(' · ');
+    case D2.location:
+      return [p.setting === 'EXT' ? 'Exterior' : 'Interior', words(p.description)].filter(Boolean).join(' · ');
+    case D2.prop: {
+      const who = p.kind === 'Outfit' ? refsOf(graph, n, 'wornBy')[0] : undefined;
+      return [p.kind === 'Outfit' ? `Outfit${who ? ` for ${nodeTitle(graph, who)}` : ''}` : 'Object', words(p.description, 6)].filter(Boolean).join(' · ');
+    }
+    case D2.shot: {
+      const sc = referrers(graph, n.id, D2.scene, 'shots')[0];
+      const ep = sc && referrers(graph, sc.id, D2.episode, 'scenes')[0];
+      return [ep ? `Ep ${Number(ep.params.number ?? 1)}` : '', sc ? nodeTitle(graph, sc) : 'not in a scene', words(p.description, 6)].filter(Boolean).join(' · ');
+    }
+    case D2.scene: {
+      const ep = referrers(graph, n.id, D2.episode, 'scenes')[0];
+      return [ep ? `Episode ${Number(ep.params.number ?? 1)}: ${nodeTitle(graph, ep)}` : 'not in an episode', words(p.description, 6)].filter(Boolean).join(' · ');
+    }
+    default:
+      return words(p.description);
+  }
+}
 
 /**
  * A control for references to other nodes: a chip per node (tap to jump to it, × to remove)
@@ -97,11 +124,30 @@ function refControl(single: boolean): ParamKind {
         );
         const options = [...graph.nodes.values()].filter((x) => x.type === p.of && !value.includes(x.id) && !taken.has(x.id));
         if (!options.length && (!single || value.length)) return;
+        const label = single && value.length ? 'Change…' : `+ ${typeTitle}…`;
+        // Long lists get a searchable sheet instead of a plain select.
+        if (ctx.choose && options.length > (p.searchAbove ?? 8)) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'dr2-pick dr2-search';
+          btn.textContent = label;
+          btn.setAttribute('aria-label', single && value.length ? `Change ${p.label ?? p.name}` : `Add ${typeTitle}`);
+          btn.addEventListener('click', async () => {
+            const id = await ctx.choose!({
+              title: single && value.length ? `Change ${p.label ?? p.name}` : `Add ${typeTitle}`,
+              placeholder: `Search ${options.length} ${typeTitle}s`,
+              items: options.map((x) => ({ id: x.id, label: nodeTitle(graph, x), hint: refHint(graph, x) })),
+            });
+            if (id) commit(single ? [id] : [...value, id]);
+          });
+          wrap.append(btn);
+          return;
+        }
         const pick = document.createElement('select');
         pick.className = 'dr2-pick';
         pick.setAttribute('aria-label', single && value.length ? `Change ${p.label ?? p.name}` : `Add ${typeTitle}`);
         const option = (label: string, v: string) => Object.assign(document.createElement('option'), { textContent: label, value: v });
-        pick.append(option(single && value.length ? 'Change…' : `+ ${typeTitle}…`, ''));
+        pick.append(option(label, ''));
         for (const x of options) pick.append(option(nodeTitle(graph, x), x.id));
         if (!options.length) pick.disabled = true;
         pick.addEventListener('change', () => {
@@ -535,6 +581,9 @@ const css = `
 .nm-node:not(.nm-selected) .dr2-chip .dr2-x { display: none; }
 .dr2-pick { font: 12px var(--_font); max-width: 100%; min-height: 28px; }
 .nm-node:not(.nm-selected) .dr2-pick { display: none; }
+.dr2-search { font: 500 12px/1 var(--_font); min-height: 30px; padding: 0 12px; border-radius: 999px; border: 1px dashed var(--_border);
+  background: transparent; color: var(--_accent); cursor: pointer; }
+.dr2-search:hover, .dr2-search:focus-visible { border-color: var(--_accent); }
 .nm-node:has(.dr2-list) .nm-view { max-height: none; overflow: visible; }
 .dr2-list { margin-top: 6px; border-top: 1px solid var(--_border); padding-top: 4px; font: 12px/1.35 var(--_font); }
 .dr2-list summary { cursor: pointer; font-weight: 600; padding: 4px 0; list-style-position: inside; }

@@ -174,6 +174,9 @@ export const css = /* css */ `
 .nm-toast { position: absolute; left: 50%; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--_danger); color: #fff;
   padding: 8px 14px; border-radius: 8px; font-size: 13px; z-index: 6; pointer-events: none; transition: opacity .2s; max-width: calc(100% - 32px); }
 
+/* A searchable chooser stacks above any other sheet (the edit sheet included). */
+.nm-sheet-backdrop.nm-choose-backdrop { z-index: 10; }
+.nm-sheet.nm-choose { z-index: 11; }
 /* Nodes made of maps: an open button in the header, and the inner map in a layer with a Back bar. */
 .nm-enter { all: unset; flex: none; margin-left: 4px; width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; cursor: pointer;
   font: 600 14px/1 var(--_font); color: var(--_accent); background: color-mix(in srgb, var(--_accent) 12%, transparent); }

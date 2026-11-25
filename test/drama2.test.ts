@@ -160,6 +160,47 @@ describe('Editor views', () => {
     editor.destroy();
   });
 
+  it('switches to a searchable chooser for long lists', async () => {
+    const { g, el, editor } = mount();
+    await editor.setView('shots');
+    const picker = () => el.querySelector<HTMLElement>('.nm-node[data-id="s1a"] [data-param="characters"] .dr2-pick')!;
+    // The shot already has all four characters; one new one is free: a plain select.
+    g.addNode('drama2/character', { id: 'extra0', label: 'Zed' });
+    expect(picker().tagName).toBe('SELECT');
+    // Past eight free choices it becomes a button that opens a search sheet.
+    for (let i = 1; i <= 9; i++) g.addNode('drama2/character', { id: `extra${i}`, label: `Extra ${i}`, params: { actor: i === 7 ? 'Robin Q.' : '' } });
+    expect(picker().tagName).toBe('BUTTON');
+    picker().click();
+    await new Promise((r) => setTimeout(r, 10));
+    const sheet = document.querySelector<HTMLElement>('.nm-choose')!;
+    expect(sheet).toBeTruthy();
+    expect(sheet.querySelectorAll('.nm-sheet-item')).toHaveLength(10);
+    // Search matches names and hints (who plays them).
+    const search = sheet.querySelector('input')!;
+    search.value = 'robin';
+    search.dispatchEvent(new Event('input'));
+    expect([...sheet.querySelectorAll('.nm-sheet-item')].map((b) => b.getAttribute('data-id'))).toEqual(['extra7']);
+    await new Promise((r) => setTimeout(r, 360)); // the guard against the opening tap
+    sheet.querySelector<HTMLButtonElement>('.nm-sheet-item')!.click();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(document.querySelector('.nm-choose')).toBeNull();
+    expect(g.nodes.get('s1a')!.params.characters).toEqual(['maya', 'theo', 'jules', 'okafor', 'extra7']);
+    editor.destroy();
+  });
+
+  it('chooser closes without a pick and stacks over the edit sheet', async () => {
+    const { editor } = mount();
+    editor.openNodeEditor('maya');
+    const pending = editor.choose({ title: 'Pick', items: [{ id: 'a', label: 'A' }] });
+    expect(document.querySelector('.nm-edit')).toBeTruthy();
+    const search = document.querySelector<HTMLInputElement>('.nm-choose input')!;
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(await pending).toBeUndefined();
+    expect(document.querySelector('.nm-edit')).toBeTruthy(); // the edit sheet is still open
+    editor.closePalette();
+    editor.destroy();
+  });
+
   it('jumps to a linked node in its view, and back', async () => {
     const { el, editor } = mount();
     await editor.setView('scenes');
