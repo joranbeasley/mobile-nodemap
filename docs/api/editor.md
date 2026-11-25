@@ -31,6 +31,7 @@ Bottom sheets (the add menu and the Edit sheet) open in an overlay layer over th
 | `wires` | `'smart'` | `'smart'` (routed around nodes) or `'curved'`. |
 | `direction` | `'auto'` | `'LR'` (left to right), `'TB'` (top to bottom: inputs on the top edge, outputs on the bottom, wires run down) or `'auto'` (top to bottom on narrow portrait screens, else left to right; follows rotation). A graph type can set it with `editor.direction`. Top to bottom, ports with no editor or value lose their row (their label sits beside the dot), and nodes with four or more ports on an edge label only linked ports until selected. |
 | `layout` | `layered()` | Engine used by `autoLayout()`. |
+| `plugins` | none | `EditorPlugin`s to install, as well as those from the registry's packs. See [graph types](graph-types.md#editorplugin). |
 | `views` | none | Tabs, each showing some node types as a grid, in rows or as a flow. See [Views](#views). A graph type sets them with `editor.views`. |
 | `placement` | `true` | Place new and dropped nodes in free space; push nodes aside. |
 | `theme` | page colours | A theme id or object, or `{ light, dark }`. See [themes](themes.md). |
@@ -72,7 +73,16 @@ Bottom sheets (the add menu and the Edit sheet) open in an overlay layer over th
 - `error` (the message shown in the toast);
 - `theme` (the `Theme`);
 - `details` `{ node }`;
-- `view` `{ id }` (the shown view changed).
+- `view` `{ id }` (the shown view changed);
+- `enter` / `leave` `{ node }` (a node's inner map opened or closed).
+
+## Plugins and nested maps
+
+| Method | |
+| --- | --- |
+| `addToolbarButton({ id, label, icon, run, primary? })` | Add a toolbar button before +. `icon` is an `<svg>` string, an emoji or short text. Returns a function that removes it. |
+| `enterNode(id)` | Open the map inside a node (`NodeType.subgraph`) in a layer over this one, with a Back bar. Its Input nodes get the node's live input values, and it re-runs when they change. With `save`, edits are saved after a short pause: every node of that type is rebuilt and re-run, and a map that can't compile is refused with a message. Escape or Back closes it, and inner maps can be opened in turn. Returns the inner `NodeEditor`. |
+| `leaveNode()` / `innerEditor` | Close the inner map, or reach its editor. |
 
 ## Views
 
@@ -89,7 +99,7 @@ views: [
 | --- | --- |
 | `id`, `title` | The tab. |
 | `types` | Node types shown in the view and offered by its + button. |
-| `layout` | `'grid'`: cards in as many columns as fit the screen (one on a phone). `'rows'`: one row per group, its first card heading the row. `'flow'` (default): the usual layered layout. |
+| `layout` | `'grid'`: cards in as many columns as fit the screen (one on a phone). `'rows'`: one row per group, its first card heading the row. `'flow'` (default): the usual layered layout. Or your own function `(nodes, { graph, width }) => positions` (`ViewLayout`). |
 | `rows(graph)` | Rows layout: node ids per row, in order. Nodes left out go in a last row. |
 | `order(graph)` | Grid layout: node ids in order (default: by `types`, then as added). |
 | `onAdd(node, { graph, selected })` | After + adds a node in this view, link it to what was selected (a shot to the selected scene), number it, and so on. |

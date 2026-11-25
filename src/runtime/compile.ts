@@ -163,7 +163,11 @@ export const dataflowEngine: GraphEngine = {
   },
 };
 
-/** Package a node map as a reusable node type (a user-defined function made of nodes). */
+/**
+ * Package a node map as a reusable node type (a user-defined function made of nodes). The
+ * node can be opened in the editor to see the map inside running on its inputs; edits there
+ * recompile it, and every node of the type picks them up.
+ */
 export function graphNode(opts: {
   type: string;
   title?: string;
@@ -172,15 +176,38 @@ export function graphNode(opts: {
   graph: Graph | GraphJSON;
   registry: Registry;
 }): NodeType {
-  const fn = compile(opts.graph, opts.registry, opts.title ?? opts.type);
-  const sig = signature(opts.graph);
+  const title = opts.title ?? opts.type;
+  let source: GraphJSON = structuredClone(opts.graph instanceof Graph ? opts.graph.toJSON() : opts.graph);
+  let fn = compile(source, opts.registry, title);
+  const sig = signature(source);
   return {
     type: opts.type,
-    title: opts.title ?? opts.type,
+    title,
     category: opts.category ?? 'Functions',
     color: opts.color,
     inputs: sig.inputs,
     outputs: sig.outputs,
     run: (inputs, ctx) => fn(inputs, { signal: ctx.signal }),
+    subgraph: () => ({
+      graph: structuredClone(source),
+      registry: opts.registry,
+      title,
+      save: (next) => {
+        // Check and compile first: a broken map throws here and the node keeps working as it was.
+        const problems = Graph.fromJSON(next, opts.registry).validate().filter((i) => i.level === 'error');
+        if (problems.length) throw new Error(problems.map((i) => i.message).join('; '));
+        if (!signature(next).outputs.length) throw new Error('The map needs an Output node');
+        const compiled = compile(next, opts.registry, title);
+        fn = compiled;
+        source = structuredClone(next);
+        const s = signature(next);
+        // The registry may hold a copy of this type: update the one it serves.
+        const live = opts.registry.get(opts.type);
+        if (live) {
+          live.inputs = s.inputs;
+          live.outputs = s.outputs;
+        }
+      },
+    }),
   };
 }

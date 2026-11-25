@@ -92,6 +92,8 @@ export function compileNode(source: Graph | GraphJSON, registry: Registry, meta:
       code: { lang: 'js', text: (js ??= emitSource(json, registry, { name: fnName, lang: 'js', single: true })) },
       actions: options.onEdit ? [{ label: 'Edit in graph', primary: true, run: () => options.onEdit!(structuredClone(info)) }] : [],
     }),
+    // Open it to see the map inside on live inputs. Edits there aren't kept: "Edit in graph" is the way to change it.
+    subgraph: () => ({ graph: structuredClone(json), registry, title: m.name }),
     meta: { source: json, compiledFrom: registry.id, custom: true },
   };
 }

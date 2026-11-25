@@ -1,4 +1,4 @@
-import { Registry, type GraphEngine, type GraphRules, type NodeInput, type NodePack } from './registry.js';
+import { Registry, type EditorPlugin, type GraphEngine, type GraphRules, type NodeInput, type NodePack } from './registry.js';
 import type { GraphJSON, NodeInstance, ParamKind, PortTypeDef } from './types.js';
 import type { Graph } from './graph.js';
 
@@ -18,7 +18,18 @@ export interface GraphTypeEditorDefaults {
   direction?: 'auto' | 'LR' | 'TB';
   /** Tabs that each show some node types, laid out as a grid, in rows or as a flow. */
   views?: EditorView[];
+  /** Editor plugins for maps of this type (packs can contribute their own too). */
+  plugins?: EditorPlugin[];
 }
+
+/**
+ * A view's own layout: positions for the cards it shows, given their sizes and the width
+ * of the screen in map units.
+ */
+export type ViewLayout = (
+  nodes: { id: string; type: string; w: number; h: number }[],
+  ctx: { graph: Graph; width: number },
+) => Record<string, { x: number; y: number }>;
 
 /**
  * A tab in the editor: which node types it shows (and its + button adds) and how they are
@@ -35,7 +46,7 @@ export interface EditorView {
    * 'grid': cards in as many columns as fit the screen. 'rows': one row per group (see
    * `rows`). 'flow' (default): the usual layered layout.
    */
-  layout?: 'grid' | 'rows' | 'flow';
+  layout?: 'grid' | 'rows' | 'flow' | ViewLayout;
   /** Rows layout: node ids per row, in order. Nodes left out go in a last row. */
   rows?: (graph: Graph) => string[][];
   /** Grid layout: node ids in order. Default: by `types` order, then as added. */

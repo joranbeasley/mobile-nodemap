@@ -105,6 +105,8 @@ export interface NodePack {
   nodes?: NodeInput[];
   portTypes?: PortTypeDef[];
   paramKinds?: ParamKind[];
+  /** Editor plugins: installed by every editor showing a map that uses this pack. */
+  editorPlugins?: EditorPlugin[];
   /** Extra allowed connections between port types, as [from, to]. */
   conversions?: [PortType, PortType][];
   /** CSS for this pack's views and controls. The editor adds it once per document or shadow root. */
@@ -128,6 +130,18 @@ export interface ConnectionEnd extends PortRef {
 }
 
 /** Structural rules a graph type imposes on its maps. */
+/**
+ * Behaviour added to the editor by a pack or graph type: toolbar buttons, keyboard shortcuts,
+ * panels, reactions to selection or views. `install` gets the NodeEditor (typed loosely here
+ * so the core stays DOM-free) and may return a function that undoes it.
+ *
+ *   { id: 'acme/export', install: (editor) => editor.addToolbarButton({ id: 'export', label: 'Export', icon: '⇩', run: () => … }) }
+ */
+export interface EditorPlugin<Editor = any> {
+  id: string;
+  install(editor: Editor): void | (() => void);
+}
+
 export interface GraphRules {
   /** Allow wires that form loops (dataflow maps can't run them; network maps need them). Default false. */
   allowCycles?: boolean;
@@ -180,6 +194,8 @@ export class Registry {
   private compat = new Map<string, Set<string>>();
   private portTypeDefs = new Map<string, PortTypeDef>();
   private paramKindDefs = new Map<string, ParamKind>();
+  /** Editor plugins contributed by packs (see EditorPlugin). */
+  editorPlugins: EditorPlugin[] = [];
   private packIds = new Set<string>();
   private css = new Map<string, string>();
 
@@ -211,6 +227,9 @@ export class Registry {
     const pack = defs as NodePack;
     pack.portTypes?.forEach((p) => this.definePortType(p));
     pack.paramKinds?.forEach((k) => this.defineParamKind(k));
+    pack.editorPlugins?.forEach((p) => {
+      if (!this.editorPlugins.some((x) => x.id === p.id)) this.editorPlugins.push(p);
+    });
     pack.conversions?.forEach(([a, b]) => this.allowConversion(a, b));
     pack.nodes?.forEach((d) => this.define(d));
     if (pack.css) this.css.set(pack.id ?? `pack-${this.css.size}`, pack.css);
@@ -312,6 +331,9 @@ export class Registry {
     other.types.forEach((t) => this.types.set(t.type, t));
     other.portTypeDefs.forEach((p) => this.portTypeDefs.set(p.id, p));
     other.paramKindDefs.forEach((k) => this.paramKindDefs.set(k.kind, k));
+    other.editorPlugins.forEach((p) => {
+      if (!this.editorPlugins.some((x) => x.id === p.id)) this.editorPlugins.push(p);
+    });
     other.compat.forEach((tos, from) => tos.forEach((to) => this.allowConversion(from, to)));
     other.packIds.forEach((p) => this.packIds.add(p));
     other.css.forEach((c, id) => this.css.set(id, c));

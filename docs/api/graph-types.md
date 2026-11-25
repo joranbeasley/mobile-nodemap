@@ -14,7 +14,7 @@ const lab = defineGraphType({
   exclude: ['async/*', 'text/case'],
   rules: { ... },                      // below
   engine: myEngine,                    // replaces dataflow
-  editor: { wires: 'smart', autoLayout: true, direction: 'TB' }, // direction: 'auto' | 'LR' | 'TB'; views: tabs (see editor.md)
+  editor: { wires: 'smart', autoLayout: true, direction: 'TB' }, // direction: 'auto' | 'LR' | 'TB'; views: tabs (see editor.md); plugins: EditorPlugin[]
   examples: [{ id, name, description?, graph }],
   setup(registry) { ... },             // last word
 });
@@ -75,6 +75,7 @@ interface NodePack {
   nodes?: NodeSpec[];
   portTypes?: PortTypeDef[];
   paramKinds?: ParamKind[];
+  editorPlugins?: EditorPlugin[];  // installed by every editor showing a map that uses this pack
   conversions?: [from, to][];
   css?: string;                  // injected once per document or shadow root
   setup?(registry): void;
@@ -82,6 +83,23 @@ interface NodePack {
 ```
 
 Install it with `registry.use(pack)`, or list it in a graph type's `packs`.
+
+### `EditorPlugin`
+
+Behaviour a pack or graph type adds to the editor: toolbar buttons, shortcuts, panels, reactions to selection or views.
+
+```ts
+const exportPlugin: EditorPlugin<NodeEditor> = {
+  id: 'acme/export',
+  install(editor) {
+    const off = editor.addToolbarButton({ id: 'export', label: 'Export', icon: '⇩', run: () => save(editor.graph.toJSON()) });
+    const unsub = editor.on('select', ({ node }) => …);
+    return () => { off(); unsub(); };     // optional: undo on destroy
+  },
+};
+```
+
+Plugins come from packs (`editorPlugins`), from a graph type (`editor.plugins`) and from the editor's `plugins` option. Each id is installed once. A plugin gets the whole public `NodeEditor` API: events, `addToolbarButton`, `openNode`, `setView`, `enterNode`, `notify`, `graph`, `registry` and so on.
 
 ## Built-in graph types and packs
 

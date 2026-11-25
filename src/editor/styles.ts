@@ -174,6 +174,23 @@ export const css = /* css */ `
 .nm-toast { position: absolute; left: 50%; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--_danger); color: #fff;
   padding: 8px 14px; border-radius: 8px; font-size: 13px; z-index: 6; pointer-events: none; transition: opacity .2s; max-width: calc(100% - 32px); }
 
+/* Nodes made of maps: an open button in the header, and the inner map in a layer with a Back bar. */
+.nm-enter { all: unset; flex: none; margin-left: 4px; width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; cursor: pointer;
+  font: 600 14px/1 var(--_font); color: var(--_accent); background: color-mix(in srgb, var(--_accent) 12%, transparent); }
+.nm-enter:hover, .nm-enter:focus-visible { background: color-mix(in srgb, var(--_accent) 22%, transparent); }
+.nm-node:not(.nm-selected) .nm-enter { pointer-events: auto !important; }
+.nm-sublayer { position: absolute; inset: 0; z-index: 7; background: var(--_bg); animation: nm-sub-in .18s ease-out; }
+@keyframes nm-sub-in { from { opacity: 0; transform: scale(.98); } }
+@media (prefers-reduced-motion: reduce) { .nm-sublayer { animation: none; } }
+.nm-subcanvas { position: absolute; inset: 52px 0 0 0; }
+.nm-crumbs { position: absolute; top: 8px; left: max(8px, env(safe-area-inset-left, 0px)); right: max(8px, env(safe-area-inset-right, 0px)); z-index: 8;
+  display: flex; align-items: center; gap: 10px; font: 13px/1.3 var(--_font); color: var(--_muted); pointer-events: none; }
+.nm-crumbs > * { pointer-events: auto; }
+.nm-crumbs b { color: var(--_text); }
+.nm-crumbs span { background: var(--_node); border: 1px solid var(--_border); border-radius: 999px; padding: 8px 12px; box-shadow: var(--_shadow); }
+.nm-crumb-back { flex: none; min-height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--_accent); background: var(--_accent); color: #fff;
+  font: 600 13px/1 var(--_font); cursor: pointer; box-shadow: var(--_shadow); }
+.nm-btn-text { font: 600 14px/1 var(--_font); }
 /* Views: tabs across the top; each shows some node types as a grid, in rows or as a flow. */
 .nm-views { position: absolute; top: 8px; left: max(8px, env(safe-area-inset-left, 0px)); right: max(8px, env(safe-area-inset-right, 0px)); z-index: 4;
   display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 2px; }

@@ -157,6 +157,12 @@ export interface NodeType {
    * Custom nodes use it to show their JavaScript and an "Edit in graph" action.
    */
   details?: (node: NodeInstance, ctx: NodeDetailsContext) => NodeDetails;
+  /**
+   * A node that is itself a node map. The editor shows an "open" button on it; opening shows
+   * the map inside, running on this node's live inputs, and, with `save`, edits there change
+   * this node type. `graphNode()` and library nodes set it.
+   */
+  subgraph?: (node: NodeInstance) => NodeSubgraph | undefined;
   /** Set false for impure nodes (random, clock) so results are never reused from cache. */
   pure?: boolean;
   view?: NodeView;
@@ -170,6 +176,16 @@ export interface NodeType {
   migrate?: (params: Record<string, unknown>, fromVersion: number) => Record<string, unknown>;
   /** Free-form data for engines and tools (e.g. a network role). */
   meta?: Record<string, unknown>;
+}
+
+/** The map inside a node (see NodeType.subgraph). */
+export interface NodeSubgraph {
+  graph: GraphJSON;
+  /** The registry the inner map's nodes come from. */
+  registry: import('./registry.js').Registry;
+  title?: string;
+  /** Keep edits made inside: called with the edited map. Without it, the map opens read-only in spirit (edits are dropped on the way out). */
+  save?: (graph: GraphJSON) => void;
 }
 
 /** What `details()` can look at: the map around the node and its latest result. */

@@ -13,6 +13,8 @@ import { findFreeSpot } from '../layout/place.js';
 import { bezierPath, overlaps, roundedPath } from '../layout/geometry.js';
 import type { LayoutEngine, LayoutInput, Positions, Rect } from '../layout/types.js';
 import type { EditorView } from '../core/graph-type.js';
+import type { EditorPlugin } from '../core/registry.js';
+import { Evaluator as EvaluatorImpl } from '../runtime/evaluator.js';
 
 type Dir = 'in' | 'out';
 export interface Anchor extends PortRef {
@@ -49,6 +51,8 @@ export interface EditorOptions {
    * node, switching tab when needed; a Back button returns.
    */
   views?: EditorView[];
+  /** Plugins to install (as well as those the registry's packs contribute). See EditorPlugin. */
+  plugins?: EditorPlugin<NodeEditor>[];
   /**
    * Below this zoom the map is an overview: tapping a node zooms in on it instead of
    * touching its fields or ports. Default 0.6 (the readable zoom phones open at). 0 turns it off.
@@ -180,6 +184,9 @@ export class NodeEditor extends Emitter<EditorEvents> {
   private viewBar?: HTMLElement;
   private viewHistory: { view: string; node?: string }[] = [];
   private viewTimer?: ReturnType<typeof setTimeout>;
+  /** The editor open on a node's inner map (see enterNode), if any. */
+  private inner?: { editor: NodeEditor; layer: HTMLElement; close: () => void };
+  private extraButtons = new Map<string, HTMLElement>();
 
   constructor(container: HTMLElement, options: EditorOptions) {
     super();
@@ -266,6 +273,18 @@ export class NodeEditor extends Emitter<EditorEvents> {
       });
       ro.observe(this.root);
       this.disposers.push(() => ro.disconnect());
+    }
+    // Plugins from packs, then from the caller (a graph type's editor.plugins come in here).
+    const seen = new Set<string>();
+    for (const plugin of [...this.registry.editorPlugins, ...(options.plugins ?? [])]) {
+      if (seen.has(plugin.id)) continue;
+      seen.add(plugin.id);
+      try {
+        const undo = plugin.install(this);
+        if (typeof undo === 'function') this.disposers.push(undo);
+      } catch (err) {
+        console.error(`Editor plugin ${plugin.id} failed to install`, err);
+      }
     }
   }
 
@@ -1002,6 +1021,143 @@ export class NodeEditor extends Emitter<EditorEvents> {
     }
   }
 
+  // ---------------------------------------------------------------- plugins
+
+  /**
+   * Add a button to the toolbar (before +). `icon` is an `<svg>` string, an emoji or short
+   * text. Returns a function that removes it.
+   */
+  addToolbarButton(spec: { id: string; label: string; icon: string; run: () => void; primary?: boolean }): () => void {
+    this.extraButtons.get(spec.id)?.remove();
+    const b = h('button', { class: `nm-btn${spec.primary ? ' nm-primary' : ''}`, type: 'button', 'aria-label': spec.label, title: spec.label, 'data-action': spec.id });
+    if (spec.icon.trim().startsWith('<svg')) b.innerHTML = spec.icon;
+    else b.append(h('span', { class: 'nm-btn-text' }, spec.icon));
+    b.addEventListener('click', () => spec.run());
+    this.extraButtons.set(spec.id, b);
+    const plus = this.toolbar?.querySelector('[data-action="plus"]');
+    if (plus) this.toolbar!.insertBefore(b, plus);
+    else this.toolbar?.append(b);
+    return () => {
+      b.remove();
+      if (this.extraButtons.get(spec.id) === b) this.extraButtons.delete(spec.id);
+    };
+  }
+
+  // ---------------------------------------------------------------- nodes made of maps
+
+  private enterButton(id: string): HTMLElement {
+    const b = h('button', { type: 'button', class: 'nm-enter', 'aria-label': 'Open the map inside', title: 'Open the map inside', 'data-nm-live': '' }, '↘');
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.enterNode(id);
+    });
+    return b;
+  }
+
+  /** The editor open on a node's inner map, while one is open. */
+  get innerEditor(): NodeEditor | undefined {
+    return this.inner?.editor;
+  }
+
+  /**
+   * Open the map inside a node (NodeType.subgraph) in a layer over this one, running on the
+   * node's live inputs. With `save`, edits there change the node type and every node of it
+   * re-runs. Back (or Escape) returns. Nodes inside can be opened in turn.
+   */
+  enterNode(id: string): NodeEditor | undefined {
+    const node = this.graph.nodes.get(id);
+    const def = node && this.registry.get(node.type);
+    const sub = node && def?.subgraph?.(node);
+    if (!node || !sub) return undefined;
+    this.inner?.close();
+    this.closePalette();
+    this.hideDetails();
+    const title = sub.title ?? this.titleOf(node);
+    const layer = h('div', { class: 'nm-sublayer', role: 'region', 'aria-label': `Inside ${title}` });
+    const back = h('button', { type: 'button', class: 'nm-crumb-back', 'aria-label': 'Back' }, '← Back');
+    const crumbs = h(
+      'div',
+      { class: 'nm-crumbs' },
+      back,
+      h('span', {}, h('b', {}, title), sub.save ? ' · changes apply to every node of this type' : ' · view only: changes here are not kept'),
+    );
+    const canvas = h('div', { class: 'nm-subcanvas' });
+    layer.append(canvas, crumbs);
+    // The layer is its own world: keep its gestures and keys away from the map underneath.
+    for (const ev of ['pointerdown', 'pointermove', 'pointerup', 'wheel', 'keydown', 'click', 'dblclick', 'contextmenu'])
+      layer.addEventListener(ev, (e) => e.stopPropagation());
+    this.root.append(layer);
+
+    const graph = Graph.fromJSON(sub.graph, sub.registry);
+    const evaluator = new EvaluatorImpl(graph, sub.registry);
+    // The node's live inputs feed the inner map's Input nodes (by name).
+    const feed = () => {
+      const n = this.graph.nodes.get(id);
+      const values = n && this.evaluator ? this.evaluator.inputValues(n) : (n?.params ?? {});
+      const changed = JSON.stringify(values) !== JSON.stringify(evaluator.graphInputs);
+      if (changed) void evaluator.run({ inputs: { ...values } });
+    };
+    evaluator.graphInputs = {};
+    const editor = new NodeEditor(canvas, {
+      graph,
+      registry: sub.registry,
+      evaluator,
+      wires: this.wireStyle,
+      direction: this.direction,
+      layout: this.layoutEngine,
+      theme: this.theme,
+    });
+    feed();
+    const offs: (() => void)[] = [];
+    if (this.evaluator) offs.push(this.evaluator.on('done', feed));
+    let saveTimer: ReturnType<typeof setTimeout> | undefined;
+    if (sub.save) {
+      offs.push(
+        graph.on('change', (c) => {
+          if (c.kind === 'node:move') return;
+          clearTimeout(saveTimer);
+          saveTimer = setTimeout(() => {
+            try {
+              sub.save!(graph.toJSON());
+            } catch (err) {
+              editor.notify(err instanceof Error ? err.message : String(err));
+              return;
+            }
+            // Ports may have changed; results certainly have.
+            for (const n of this.graph.nodes.values()) if (n.type === node.type) this.buildNode(n);
+            for (const n of this.graph.nodes.values()) if (n.type === node.type) this.measure(n.id);
+            this.refreshLinks();
+            this.scheduleRoute();
+            this.evaluator?.invalidate();
+            void this.evaluator?.run();
+          }, 250);
+        }),
+      );
+    }
+    const close = () => {
+      if (this.inner?.layer !== layer) return;
+      clearTimeout(saveTimer);
+      offs.forEach((off) => off());
+      editor.destroy();
+      layer.remove();
+      this.inner = undefined;
+      this.emit('leave', { node: id });
+      this.root.focus({ preventScroll: true });
+    };
+    back.addEventListener('click', close);
+    layer.addEventListener('keydown', (e) => {
+      if ((e as KeyboardEvent).key === 'Escape' && !editor.innerEditor) close();
+    });
+    this.inner = { editor, layer, close };
+    this.emit('enter', { node: id });
+    return editor;
+  }
+
+  /** Close the inner map opened with enterNode. */
+  leaveNode(): void {
+    this.inner?.close();
+  }
+
   // ---------------------------------------------------------------- views
 
   /** The id of the view (tab) being shown, if the editor has views. */
@@ -1015,7 +1171,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
 
   /** A view that lays itself out (grid or rows) rather than a free canvas. */
   private get gridded(): boolean {
-    return !!this.view && (this.view.layout === 'grid' || this.view.layout === 'rows');
+    return !!this.view && !!this.view.layout && this.view.layout !== 'flow';
   }
 
   /** Show another view (tab): its nodes, its layout and its + menu. */
@@ -1111,7 +1267,10 @@ export class NodeEditor extends Emitter<EditorEvents> {
     const shownIds = new Set(shown.map((n) => n.id));
     const pos: Positions = {};
     const GAP = 24;
-    if (v.layout === 'grid') {
+    if (typeof v.layout === 'function') {
+      const r = this.root.getBoundingClientRect();
+      Object.assign(pos, v.layout(shown.map((n) => ({ id: n.id, type: n.type, ...size(n.id) })).map(({ id, type, w, h }) => ({ id, type, w, h })), { graph: this.graph, width: Math.max(320, r.width - 32) }));
+    } else if (v.layout === 'grid') {
       const seen = new Set<string>();
       const order = [...(v.order?.(this.graph) ?? []), ...byDefault()].filter((id) => shownIds.has(id) && !seen.has(id) && seen.add(id));
       const colW = Math.max(160, ...order.map((id) => size(id).w));
@@ -1344,6 +1503,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       delete root.dataset.nodeColors;
       delete root.dataset.theme;
     };
+    this.inner?.editor.setTheme(theme);
     if (!theme) return clear();
     const resolve = (t: string | Theme) => (typeof t === 'string' ? getTheme(t) : t);
     const apply = (t: Theme | undefined) => {
@@ -1373,6 +1533,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
   }
 
   destroy(): void {
+    this.inner?.close();
     cancelAnimationFrame(this.zoomAnim);
     cancelAnimationFrame(this.ghostFrame);
     this.closePalette();
@@ -1501,6 +1662,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
         ...(def?.icon ? [iconEl(def.icon)] : []),
         h('span', { class: 'nm-title' }, this.titleOf(node)),
         h('span', { class: 'nm-cat' }, def?.category ?? ''),
+        ...(def?.subgraph ? [this.enterButton(node.id)] : []),
       ),
     );
     const body = h('div', { class: 'nm-body' });

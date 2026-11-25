@@ -22,6 +22,10 @@ Every domain needs its own nodes, value types, editors, rules and sometimes its 
 | X6 | Custom param kinds render in node bodies and as inline port editors, and update on undo | Shipped |
 | X7 | Pack CSS injected once per document or shadow root | Shipped |
 | X8 | A complete third-party example (the Palette pack in the demo) | Shipped |
+| X9 | Editor plugins from packs and graph types (`EditorPlugin`), with `addToolbarButton` and the editor's public API | Shipped |
+| X10 | Graph types declare views (tabs with grid, rows, flow or custom layouts) and navigation links (`data-nm-open`) | Shipped |
+| X11 | Node types made of maps (`subgraph`) open in place on live inputs; edits recompile the type | Shipped |
+| X12 | Param kinds receive the graph, so controls can refer to other nodes | Shipped |
 
 ## Ecosystem conventions
 

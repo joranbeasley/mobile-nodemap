@@ -44,6 +44,7 @@ const router = extendNode(device, { type: 'net/router', title: 'Router', outputs
 | `pure` | `boolean` | `false` = never cache. |
 | `view` | `{ render(el, result, node) }` | Custom preview inside the node. See `reactView` for React. |
 | `emit(inputs, params)` | `→ Record<port, jsExpression>` | Inline this node in `emitSource` output. |
+| `subgraph(node)` | `→ { graph, registry, title?, save? }` | The node is itself a node map. The editor shows an ↘ button on it that opens the map inside, running on the node's live inputs. With `save`, edits there change the node type (`graphNode()` does this; it refuses a map with errors or no Output). Without `save`, edits are dropped (library nodes). |
 | `details(node, ctx)` | `→ NodeDetails` | What the editor shows when the node is tapped. `ctx` has the `graph` and the node's latest `result`. |
 | `onCreate(node)` | `→ params \| void` | New nodes only (not on load). |
 | `version`, `migrate(params, from)` | | Upgrade saved params. |
