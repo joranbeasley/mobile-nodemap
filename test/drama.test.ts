@@ -268,3 +268,21 @@ describe('Appearance and costumes', () => {
     expect(seedanceShot(g, 's4c').prompt).toContain('Deep green velvet');
   });
 });
+
+describe('Seedance cost estimate', () => {
+  it('prices each shot and the total from its seconds', () => {
+    const g = load('term');
+    const shot = seedanceShot(g, 's1a'); // 8 s
+    expect(shot.cost.credits).toEqual({ Pro: 136, Fast: 64, Mini: 40 });
+    expect(shot.markdown).toContain('**Estimated cost:** 8 s of video. One take of this shot: 136 (Pro) · 64 (Fast) · 40 (Mini) credits.');
+    expect(shot.markdown).toContain('With about 3 takes per shot: 408 (Pro) · 192 (Fast) · 120 (Mini) credits.');
+    // Episode 1: 43 s; the season's 3 s insert shot counts as Seedance's 4 s minimum.
+    const ep = seedanceScript(g, 'ep1');
+    expect(ep.cost).toMatchObject({ seconds: 43, credits: { Pro: 731, Fast: 344, Mini: 215 } });
+    expect(seedanceScript(g, 'season').cost.seconds).toBe(60);
+    // Rates and takes are options.
+    const custom = seedanceScript(g, 'ep1', { rates: { 'Seedance 2.5': 37 }, takes: 1 });
+    expect(custom.cost.credits).toEqual({ 'Seedance 2.5': 1591 });
+    expect(custom.markdown).not.toContain('takes per shot');
+  });
+});

@@ -648,10 +648,13 @@ const details = (node: NodeInstance, ctx: { graph: Graph }) => {
     const n = script.shots.length;
     const images = script.shots.reduce((t, s) => t + s.refs.length, 0);
     const title = node.type === T.shot ? script.title : node.type === T.scene ? `Scene ${Number(node.params.number ?? 1)}` : dramaName(node);
+    // A quick price tag: the first model in the rate table (Pro by default), one take.
+    const [model, credits] = Object.entries(script.cost.credits)[0] ?? ['', 0];
+    const price = model ? ` · ~${credits.toLocaleString('en')} credits (${model})` : '';
     const subtitle =
-      script.kind === 'shot'
+      (script.kind === 'shot'
         ? `Seedance shot · ${script.shots[0].duration} s · ${images} reference image${images === 1 ? '' : 's'}`
-        : `Seedance script · ${n} shot pack${n === 1 ? '' : 's'}${script.storyboard.length ? ` · storyboard` : ''}`;
+        : `Seedance script · ${n} shot pack${n === 1 ? '' : 's'}${script.storyboard.length ? ` · storyboard` : ''}`) + price;
     const save = (filename: string, data: Blob | string) => void Promise.resolve(saveDramaFile({ filename, data })).catch(() => undefined);
     return {
       title,

@@ -152,6 +152,8 @@ Each shot zip inside a pack is the same as that shot's own download. SVG picture
 
 **Costumes and appearance.** A character's `appearance` (age, build, hair, face, usual clothes) is repeated word for word in every prompt they are in: fixed wording is what keeps separately generated clips consistent. A costume wired into a scene overrides their usual clothes for every shot in that scene, and its pictures go in right after the character's. `sceneCostumes(graph, sceneId)` maps character ids to the costume they wear there. The engine warns about a costume with no character, two costumes for one character in a scene, and a costume for someone who isn't in any of the scene's shots.
 
+**Cost estimate.** Every `shot.md` and root file states the seconds of video and the credits for one take per model, plus a budget line for several takes. The rates default to Dreamina's published 720p Seedance 2.0 credits per generated second (`SEEDANCE_RATES`: Pro 17, Fast 8, Mini 5); pass `rates` and `takes` (default 3) to change them. `seedanceCost(seconds, opts)` does the sum, and `script.cost` / `shot.cost` carry it. The details card shows the first model's figure. Prices change, so check before you buy.
+
 **Settings.** `style`, `aspect`, `maxImages` ("reference images", default 9) and `maxClip` ("clip seconds", default 15) come from the shot's episode (under More), else its season, else `opts`. Set `maxImages` above 9 only for a model or platform that accepts more images per generation; Seedance 2.0 takes 9.
 
 Files reach the person through `saveDramaFile`, a browser download by default. A host can replace it with `setDramaFileSaver(fn)`; the demo uses the claude.ai artifact `downloads` capability when it is available.

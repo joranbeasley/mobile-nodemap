@@ -21,7 +21,43 @@ export interface SeedanceOptions {
   minClip?: number;
   /** Most reference images per generation. Default 9. */
   maxImages?: number;
+  /**
+   * Credits per generated second, per model, for the cost estimate. Default: Dreamina's
+   * published 720p Seedance 2.0 rates (Pro 17, Fast 8, Mini 5). Prices change: check yours.
+   */
+  rates?: Record<string, number>;
+  /** Expected takes per shot (retries) for the "budget" line. Default 3. */
+  takes?: number;
 }
+
+/** Dreamina's published 720p Seedance 2.0 credits per generated second (they change: check). */
+export const SEEDANCE_RATES: Record<string, number> = { Pro: 17, Fast: 8, Mini: 5 };
+
+/** Credits for some seconds of video, per model. */
+export interface SeedanceCost {
+  seconds: number;
+  /** Credits per model for one take of everything. */
+  credits: Record<string, number>;
+  takes: number;
+}
+
+export function seedanceCost(seconds: number, opts: SeedanceOptions = {}): SeedanceCost {
+  const rates = opts.rates ?? SEEDANCE_RATES;
+  return { seconds, takes: opts.takes ?? 3, credits: Object.fromEntries(Object.entries(rates).map(([m, r]) => [m, Math.round(seconds * r)])) };
+}
+
+const costLine = (c: SeedanceCost) =>
+  Object.entries(c.credits)
+    .map(([m, n]) => `${n.toLocaleString('en')} (${m})`)
+    .join(' · ');
+const costMarkdown = (c: SeedanceCost, what: string) => [
+  `**Estimated cost:** ${c.seconds} s of video. One take of ${what}: ${costLine(c)} credits.`,
+  ...(c.takes > 1
+    ? [`With about ${c.takes} takes per shot: ${costLine({ ...c, credits: Object.fromEntries(Object.entries(c.credits).map(([m, n]) => [m, n * c.takes])) })} credits.`]
+    : []),
+  '',
+  '_Dreamina 720p Seedance 2.0 rates per generated second; prices change, so check before you buy. Higher resolutions cost more._',
+];
 
 export interface SeedanceAsset {
   /** Path inside its zip, e.g. `images/01-maya.png` (shot packs) or `storyboard/scene-1-01.png`. */
@@ -38,6 +74,8 @@ export interface SeedanceShot {
   id: string;
   /** "Ep 1 · Scene 1 · Shot 2" */
   title: string;
+  /** Estimated credits for one take. */
+  cost: SeedanceCost;
   /** Zip name inside a scene, episode or season pack, e.g. `shots/02-scene-1-shot-2.zip`. */
   zipPath: string;
   /** Clip length asked for, in seconds (the shot's length, kept between the min and max). */
@@ -58,6 +96,8 @@ export interface SeedanceScript {
   /** Root markdown file name: shot.md, scene.md or script.md. */
   rootFile: string;
   markdown: string;
+  /** Estimated credits for all its shots. */
+  cost: SeedanceCost;
   shots: SeedanceShot[];
   /** Scene storyboard images, at `storyboard/…` in the pack. */
   storyboard: SeedanceAsset[];
@@ -264,7 +304,9 @@ export function seedanceShot(graph: Graph, shotId: string, opts: SeedanceOptions
   } else md.push('No reference images: add pictures to the characters, location or shot to keep them consistent.', '');
   if (dropped.length) md.push(`> Left out (this script allows ${cfg.maxImages} images per clip; raise “reference images” on the episode or season for more): ${dropped.map((a) => mdEsc(a.label)).join(', ')}`, '');
   md.push('**Prompt**', '', '```text', prompt, '```', '');
-  return { id: node.id, title, zipPath, duration, refs, dropped, prompt, markdown: md.join('\n') };
+  const cost = seedanceCost(duration, opts);
+  md.push(...costMarkdown(cost, 'this shot'), '');
+  return { id: node.id, title, zipPath, duration, cost, refs, dropped, prompt, markdown: md.join('\n') };
 }
 
 /**
@@ -277,7 +319,7 @@ export function seedanceScript(graph: Graph, id?: string, opts: SeedanceOptions 
   const node = id ? graph.nodes.get(id) : undefined;
   if (node?.type === 'drama/shot') {
     const shot = seedanceShot(graph, node.id, opts, 'shot.zip');
-    return { title: shot.title, kind: 'shot', rootFile: 'shot.md', markdown: shot.markdown, shots: [shot], storyboard: [] };
+    return { title: shot.title, kind: 'shot', rootFile: 'shot.md', markdown: shot.markdown, cost: shot.cost, shots: [shot], storyboard: [] };
   }
   const sc = scope(graph, id);
   const kind: SeedanceScript['kind'] = node?.type === 'drama/scene' ? 'scene' : node?.type === 'drama/episode' ? 'episode' : node?.type === 'drama/season' ? 'season' : 'production';
@@ -324,6 +366,8 @@ export function seedanceScript(graph: Graph, id?: string, opts: SeedanceOptions 
   md.push(`# ${mdEsc(sc.title)}: Seedance script`, '');
   md.push(`${shots.length} shot${shots.length === 1 ? '' : 's'} · ${Math.floor(secs / 60)}:${pad(secs % 60)} of video${storyboard.length ? ` · ${storyboard.length} storyboard image${storyboard.length === 1 ? '' : 's'}` : ''}`, '');
   md.push(
+    ...costMarkdown(seedanceCost(secs, opts), shots.length === 1 ? 'the shot' : `all ${shots.length} shots`),
+    '',
     '**How to use.** Every shot is one Seedance generation with its own pack in `shots/`. Each pack holds `shot.md` (duration, prompt) and its reference images, numbered in upload order (`images/01-…`, `images/02-…`). Upload them in that order so they become @Image1, @Image2 and so on, set the duration, paste the prompt, then join the clips in shot order.',
     '',
   );
@@ -381,7 +425,7 @@ export function seedanceScript(graph: Graph, id?: string, opts: SeedanceOptions 
     });
   }
   if (!blocks.length) md.push('_Nothing to film yet: wire shots into scenes._', '');
-  return { title: sc.title, kind, rootFile, markdown: md.join('\n').replace(/\n{3,}/g, '\n\n'), shots, storyboard };
+  return { title: sc.title, kind, rootFile, markdown: md.join('\n').replace(/\n{3,}/g, '\n\n'), cost: seedanceCost(secs, opts), shots, storyboard };
 }
 
 
