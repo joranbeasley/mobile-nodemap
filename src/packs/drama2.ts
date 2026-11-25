@@ -648,6 +648,7 @@ const css = `
 .dr2-chip button[data-nm-open]:hover, .dr2-chip button[data-nm-open]:focus-visible { color: var(--_accent); text-decoration: underline; }
 .dr2-chip .dr2-x { padding: 6px 8px 6px 2px; color: var(--_muted); }
 .nm-node:not(.nm-selected) .dr2-chip .dr2-x { display: none; }
+.nm-root[data-readonly] :is(.dr2-x, .dr2-mv, .dr2-pick) { display: none !important; }
 .dr2-chip .dr2-mv { padding: 6px 9px; min-width: 14px; text-align: center; color: var(--_muted); font-weight: 700; font-size: 14px; }
 .dr2-chip .dr2-mv:disabled { opacity: .3; cursor: default; }
 .nm-node:not(.nm-selected) .dr2-chip .dr2-mv { display: none; }

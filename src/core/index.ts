@@ -18,7 +18,7 @@ export type {
   GraphIssue,
 } from './registry.js';
 export { defineGraphType, registerGraphType, getGraphType, listGraphTypes, registryFor } from './graph-type.js';
-export type { GraphType, GraphTypeDef, GraphExample, GraphTypeEditorDefaults, EditorView, ViewLayout } from './graph-type.js';
+export type { GraphType, GraphTypeDef, GraphExample, GraphTypeEditorDefaults, EditorView, ViewLayout, EdgeStyle, EdgeStyler } from './graph-type.js';
 export { Graph, ConnectionError } from './graph.js';
 export { History } from './history.js';
 export type { GraphChange, GraphEvents } from './graph.js';

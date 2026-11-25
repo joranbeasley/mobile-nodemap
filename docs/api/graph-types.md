@@ -14,7 +14,7 @@ const lab = defineGraphType({
   exclude: ['async/*', 'text/case'],
   rules: { ... },                      // below
   engine: myEngine,                    // replaces dataflow
-  editor: { wires: 'smart', autoLayout: true, direction: 'TB' }, // direction: 'auto' | 'LR' | 'TB'; views: tabs (see editor.md); plugins: EditorPlugin[]
+  editor: { wires: 'smart', autoLayout: true, direction: 'TB' }, // direction: 'auto' | 'LR' | 'TB'; views: tabs (see editor.md); plugins: EditorPlugin[]; edgeStyle: (edge, graph) => EdgeStyle
   examples: [{ id, name, description?, graph }],
   setup(registry) { ... },             // last word
 });

@@ -317,6 +317,7 @@ export const imagesParam: ParamKind = {
         const view = document.createElement('button');
         view.type = 'button';
         view.className = 'dr-view';
+        view.dataset.nmView = ''; // still opens in view-only editors
         view.setAttribute('aria-label', `View image ${i + 1}`);
         view.style.backgroundImage = `url("${src.replace(/"/g, '%22')}")`;
         view.addEventListener('click', () => openLightbox(list, i, ctx.node.label));
@@ -1101,6 +1102,7 @@ const css = `
 .dr-rm { all: unset; position: absolute; top: -7px; right: -7px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
   background: var(--_node); color: var(--_text); border: 1px solid var(--_border); font: 600 14px/1 var(--_font); cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
 .nm-node:not(.nm-selected) .dr-rm { display: none; }
+.nm-root[data-readonly] :is(.dr-rm, .dr-mv, .dr-add, .dr-gen) { display: none !important; }
 .dr-mv { all: unset; position: absolute; bottom: -8px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
   background: var(--_node); color: var(--_text); border: 1px solid var(--_border); font: 700 14px/1 var(--_font); box-shadow: 0 1px 3px rgba(0,0,0,.2); }
 .dr-mv-l { left: -6px; }

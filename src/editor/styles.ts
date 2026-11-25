@@ -174,6 +174,15 @@ export const css = /* css */ `
 .nm-toast { position: absolute; left: 50%; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--_danger); color: #fff;
   padding: 8px 14px; border-radius: 8px; font-size: 13px; z-index: 6; pointer-events: none; transition: opacity .2s; max-width: calc(100% - 32px); }
 
+/* Layers that pan and zoom with the map (editor.addLayer), wire labels and pulses. */
+.nm-layer { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+.nm-layer-above { z-index: 5; }
+.nm-edge-label { position: absolute; left: 0; top: 0; white-space: nowrap; padding: 2px 7px; border-radius: 999px; font: 600 11px/1.3 var(--_font);
+  background: var(--_node); color: var(--nm-port-color, var(--_text)); border: 1px solid color-mix(in srgb, var(--nm-port-color, var(--_border)) 50%, var(--_border)); }
+.nm-pulse { fill: var(--_accent); filter: drop-shadow(0 0 4px currentColor); }
+/* View only: no editing controls. */
+.nm-root[data-readonly] .nm-toolbar :is([data-action="trash"], [data-action="edit"], [data-action="copy"], [data-action="undo"], [data-action="redo"], [data-action="plus"], .nm-sep) { display: none !important; }
+.nm-root[data-readonly] .nm-port { cursor: default; }
 /* A searchable chooser stacks above any other sheet (the edit sheet included). */
 .nm-sheet-backdrop.nm-choose-backdrop { z-index: 10; }
 .nm-sheet.nm-choose { z-index: 11; }

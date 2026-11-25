@@ -269,7 +269,7 @@ function startSession(type: GraphType) {
   registry = type.createRegistry();
   graph = new Graph(registry);
   evaluator = new Evaluator(graph, registry);
-  editor = new NodeEditor($('#canvas'), { graph, registry, evaluator, wires: wiresSel.value as 'smart' | 'curved', layout: layoutEngine, direction: type.editor?.direction, views: type.editor?.views, plugins: type.editor?.plugins });
+  editor = new NodeEditor($('#canvas'), { graph, registry, evaluator, wires: wiresSel.value as 'smart' | 'curved', layout: layoutEngine, direction: type.editor?.direction, views: type.editor?.views, plugins: type.editor?.plugins, edgeStyle: type.editor?.edgeStyle });
   applyTheme();
   const building = type === demoFunction;
   ($('[data-panel="build"]') as HTMLElement).hidden = !building;

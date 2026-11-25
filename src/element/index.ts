@@ -24,14 +24,14 @@ const hostCss = `
  *     <script type="application/json">{ "version": 1, "nodes": [...], "edges": [...] }</script>
  *   </node-map>
  *
- * Attributes: `graph-type` (a registered graph type id), `direction` (auto | LR | TB), `wires` (smart | curved), `theme` (light | dark, or a theme id such as midnight, paper, synthwave), `no-toolbar`, `no-eval`, `auto-layout`.
+ * Attributes: `graph-type` (a registered graph type id), `direction` (auto | LR | TB), `readonly` (view only), `wires` (smart | curved), `theme` (light | dark, or a theme id such as midnight, paper, synthwave), `no-toolbar`, `no-eval`, `auto-layout`.
  * Properties: `graphType`, `registry` (defaults to the graph type's), `value` (graph JSON), `graph`, `editor`, `evaluator`, `layout`.
  * Methods: `autoLayout()`, `fit()`, `run(inputs)`, `call(inputs)`.
  * Events: `change` ({ value, change }), `select` ({ node, edge }), `evaluate` (EvalReport).
  * Style it with CSS custom properties (--nm-bg, --nm-accent, …); they pass into the shadow root.
  */
 export class NodeMapElement extends Base {
-  static observedAttributes = ['wires', 'theme', 'graph-type', 'direction'];
+  static observedAttributes = ['wires', 'theme', 'graph-type', 'direction', 'readonly'];
 
   private _registry?: Registry;
   private _layout?: LayoutEngine;
@@ -134,6 +134,7 @@ export class NodeMapElement extends Base {
       this.mount();
     }
     if (name === 'direction' && this._editor) this._editor.setDirection(dirAttr(value));
+    if (name === 'readonly' && this._editor) this._editor.setReadOnly(value !== null);
     if (name === 'wires' && this._editor) this._editor.setWires(value === 'curved' ? 'curved' : 'smart');
     if (name === 'theme' && this._canvas) this.applyTheme(value);
   }
@@ -186,6 +187,8 @@ export class NodeMapElement extends Base {
       layout: this._layout,
       views: this._registry?.id ? getGraphType(this._registry.id)?.editor?.views : undefined,
       plugins: this._registry?.id ? getGraphType(this._registry.id)?.editor?.plugins : undefined,
+      edgeStyle: this._registry?.id ? getGraphType(this._registry.id)?.editor?.edgeStyle : undefined,
+      readOnly: this.hasAttribute('readonly'),
     }));
     this.applyTheme(this.getAttribute('theme'));
     const fire = (type: string, detail: unknown) => this.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true }));
