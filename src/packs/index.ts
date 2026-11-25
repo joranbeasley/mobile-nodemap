@@ -3,7 +3,7 @@ export { networkPack, networkEngine, ipIssues, deviceSpecs, SERVER_TYPES, dataSt
 export type { NetworkStatus } from './network.js';
 export { umlPack, umlEngine, umlView, umlToTypeScript, parseMembers as parseUmlMembers, UML } from './uml.js';
 export type { UmlMember, UmlStatus } from './uml.js';
-export { dramaPack, dramaEngine, dramaView, imagesParam, imageList, imageFileToDataUrl, openLightbox, shotList, appearances, shotInfo, sceneInfo, episodeInfo, dramaName, runtime as dramaRuntime, DRAMA, FRAMINGS, MOVES, TIMES } from './drama.js';
+export { dramaPack, dramaEngine, dramaView, imagesParam, imageList, imageFileToDataUrl, openLightbox, shotList, appearances, sceneCostumes, shotInfo, sceneInfo, episodeInfo, dramaName, runtime as dramaRuntime, DRAMA, FRAMINGS, MOVES, TIMES } from './drama.js';
 export type { DramaStatus, ShotInfo, SceneInfo, EpisodeInfo } from './drama.js';
 export { seedanceScript, seedanceShot, seedancePack, setDramaFileSaver, saveDramaFile, zip as zipFiles } from './drama-seedance.js';
 export type { SeedanceOptions, SeedanceScript, SeedanceAsset, SeedanceShot, FileSaver } from './drama-seedance.js';

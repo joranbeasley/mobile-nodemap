@@ -221,3 +221,43 @@ describe('Seedance export', () => {
     expect(text(files.get('script.md'))).toMatch(/^# Opening Night: Seedance script/);
   });
 });
+
+describe('Appearance and costumes', () => {
+  it('repeats appearance word for word and dresses characters per scene', () => {
+    const g = load('term');
+    // Opening night: Jules wears the lead costume, and its picture goes in right after the characters.
+    const s4c = seedanceShot(g, 's4c');
+    expect(s4c.refs.map((r) => r.path).slice(0, 2)).toEqual(['images/01-jules.jpg', 'images/02-jules-costume.jpg']);
+    expect(s4c.prompt).toContain(
+      '- Jules is @Image1, the understudy who knows every line of every part. Appearance: 16, small and quick, light brown skin, blonde bob with a fringe. Purple cardigan over a striped top. Costume in this scene: Deep green velvet frock coat with gold buttons, white ruffled shirt, black breeches, buckled shoes (@Image2); it replaces their usual clothes.',
+    );
+    expect(s4c.prompt).toContain('their clothes consistent with their costume');
+    // Scene 1 has no costumes: usual clothes, same appearance text.
+    const s1c = seedanceShot(g, 's1c');
+    expect(s1c.prompt).toContain('Appearance: 16, small and quick, light brown skin, blonde bob with a fringe. Purple cardigan over a striped top.');
+    expect(s1c.prompt).not.toContain('Costume in this scene');
+    expect(s1c.refs.some((r) => r.path.includes('costume'))).toBe(false);
+    // The script lists the scene's costumes and everyone's appearance.
+    const script = seedanceScript(g, 'ep2').markdown;
+    expect(script).toContain('**Costumes:** Jules: Deep green velvet frock coat');
+    expect(script).toContain('Appearance: Early 20s, slim, warm brown skin');
+    expect(shotList(g, 'sc4')).toContain('Costume, Maya: All-black crew clothes');
+  });
+
+  it('flags costumes that cannot apply', async () => {
+    const g = load('term');
+    g.addNode('drama/costume', { id: 'spare', params: { description: 'Second coat' } });
+    g.connect({ node: 'jules', port: 'appears' }, { node: 'spare', port: 'character' });
+    g.connect({ node: 'spare', port: 'scenes' }, { node: 'sc4', port: 'costumes' });
+    g.addNode('drama/costume', { id: 'nobody' });
+    g.addNode('drama/costume', { id: 'teacher' });
+    g.connect({ node: 'okafor', port: 'appears' }, { node: 'teacher', port: 'character' });
+    g.connect({ node: 'teacher', port: 'scenes' }, { node: 'sc4', port: 'costumes' });
+    const r = await run(g);
+    expect(st(r, 'sc4').warnings).toEqual(['Two costumes for Jules', 'Ms Okafor has a costume but isn’t in any shot']);
+    expect(st(r, 'nobody').warnings).toEqual(['Not linked to a character']);
+    expect(st(r, 'jules-lead').line).toBe('Jules · 1 scene');
+    // The first costume wired in wins.
+    expect(seedanceShot(g, 's4c').prompt).toContain('Deep green velvet');
+  });
+});

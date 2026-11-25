@@ -23,6 +23,11 @@ const art = {
   ),
   person: (bg: string, skin: string, hair: string, shirt: string) =>
     svg(`<rect width="160" height="100" fill="${bg}"/><path d="M40 100 Q80 50 120 100Z" fill="${shirt}"/><circle cx="80" cy="44" r="20" fill="${skin}"/><path d="M58 42 Q60 18 80 18 Q100 18 102 42 Q96 28 80 28 Q64 28 58 42Z" fill="${hair}"/>`),
+  /** Costume sketches on a dress form. */
+  outfit: (coat: string, trim: string, collar: string) =>
+    svg(
+      `<rect width="160" height="100" fill="#f1f3f5"/><line x1="80" y1="88" x2="80" y2="98" stroke="#868e96" stroke-width="3"/><path d="M56 22 Q80 14 104 22 L112 86 L48 86Z" fill="${coat}"/><path d="M72 18 L80 40 L88 18Z" fill="${collar}"/><line x1="80" y1="40" x2="80" y2="86" stroke="${trim}" stroke-width="2"/><g fill="${trim}"><circle cx="84" cy="50" r="2"/><circle cx="84" cy="62" r="2"/><circle cx="84" cy="74" r="2"/></g>`,
+    ),
   script: svg('<rect width="160" height="100" fill="#e9ecef"/><rect x="50" y="10" width="60" height="80" fill="#fff" stroke="#adb5bd" transform="rotate(-6 80 50)"/><g stroke="#868e96" stroke-width="2" transform="rotate(-6 80 50)"><line x1="58" y1="24" x2="100" y2="24"/><line x1="58" y1="34" x2="94" y2="34"/><line x1="66" y1="46" x2="100" y2="46"/><line x1="58" y1="58" x2="98" y2="58"/><line x1="58" y1="70" x2="86" y2="70"/></g>'),
   /** Storyboard frames: pencil figures, small for wide shots and big for close-ups. */
   frame: (kind: 'wide' | 'medium' | 'close' | 'two' | 'ots' | 'pov' | 'insert', note = '') => {
@@ -51,21 +56,22 @@ const art = {
 type P = Record<string, unknown>;
 const node = (id: string, type: string, params: P, label?: string): NodeInstance => ({ id, type: `drama/${type}`, x: 0, y: 0, params, ...(label ? { label } : {}) });
 const loc = (id: string, name: string, setting: 'INT' | 'EXT', description: string, images: string[]) => node(id, 'location', { setting, description, images }, name);
-const who = (id: string, name: string, description: string, images: string[], actor = '') => node(id, 'character', { description, images, actor }, name);
+const who = (id: string, name: string, description: string, images: string[], actor = '', appearance = '') => node(id, 'character', { description, appearance, images, actor }, name);
+const costume = (id: string, name: string, description: string, images: string[] = []) => node(id, 'costume', { description, images }, name);
 const prop = (id: string, name: string, description: string, images: string[] = []) => node(id, 'prop', { description, images }, name);
 const shot = (id: string, number: string, framing: string, description: string, images: string[], extra: P = {}) =>
   node(id, 'shot', { number, framing, description, images, movement: 'Static', duration: 6, ...extra });
 const scene = (id: string, number: number, time: string, description: string) => node(id, 'scene', { number, time, description, storyboard: [] });
 const episode = (id: string, number: number, title: string, description = '') => node(id, 'episode', { number, description, images: [] }, title);
 
-const OUT: Record<string, string> = { location: 'shots', character: 'appears', prop: 'used', shot: 'scene', scene: 'episode', episode: 'season' };
-const IN: Record<string, string> = { location: 'location', character: 'characters', prop: 'props', shot: 'shots', scene: 'scenes', episode: 'episodes' };
+const OUT: Record<string, string> = { location: 'shots', character: 'appears', prop: 'used', costume: 'scenes', shot: 'scene', scene: 'episode', episode: 'season' };
+const IN: Record<string, string> = { location: 'location', character: 'characters', prop: 'props', costume: 'costumes', shot: 'shots', scene: 'scenes', episode: 'episodes' };
 
 /** Build a production from [piece, whole] pairs: ports are picked from the node types. */
 function production(nodes: NodeInstance[], links: [string, string | string[]][]): GraphJSON {
   const kind = new Map(nodes.map((n) => [n.id, n.type.replace('drama/', '')]));
   const edges = links.flatMap(([a, bs]) =>
-    ([] as string[]).concat(bs).map((b) => ({ id: `${a}-${b}`, from: { node: a, port: OUT[kind.get(a)!] }, to: { node: b, port: IN[kind.get(a)!] } })),
+    ([] as string[]).concat(bs).map((b) => ({ id: `${a}-${b}`, from: { node: a, port: OUT[kind.get(a)!] }, to: { node: b, port: kind.get(b) === 'costume' ? 'character' : IN[kind.get(a)!] } })),
   );
   return { version: 1, type: 'drama', nodes, edges };
 }
@@ -105,13 +111,15 @@ export const dramaGraph = defineGraphType({
       description: 'Tap a scene or episode for its Seedance video script and asset pack, or a character to see every shot they are in. Select a node, then tap a picture to view it or “+” to add your own.',
       graph: production(
         [
-          who('maya', 'Maya', 'Stage manager. Runs everything from the wings with a clipboard and a headset.', [art.person('#d0ebff', '#c68642', '#2b2b2b', '#1971c2')], 'Priya S.'),
-          who('theo', 'Theo', 'The lead. Brilliant in rehearsal, terrified of an audience.', [art.person('#ffe8cc', '#f1c27d', '#a0522d', '#e8590c')], 'Sam R.'),
-          who('jules', 'Jules', 'The understudy who knows every line of every part.', [art.person('#e5dbff', '#e0ac69', '#f59f00', '#7048e8')], 'Alex K.'),
-          who('okafor', 'Ms Okafor', 'Drama teacher. Calm, until the lights fail.', [art.person('#d3f9d8', '#8d5524', '#495057', '#2f9e44')], 'Mrs Bell'),
+          who('maya', 'Maya', 'Stage manager. Runs everything from the wings with a clipboard and a headset.', [art.person('#d0ebff', '#c68642', '#2b2b2b', '#1971c2')], 'Priya S.', 'Early 20s, slim, warm brown skin, short black curly hair, round tortoiseshell glasses. Usually in a blue hoodie and black jeans, headset round her neck.'),
+          who('theo', 'Theo', 'The lead. Brilliant in rehearsal, terrified of an audience.', [art.person('#ffe8cc', '#f1c27d', '#a0522d', '#e8590c')], 'Sam R.', '17, tall and lanky, pale with freckles, messy auburn hair. Orange zip-up jacket over a white T-shirt.'),
+          who('jules', 'Jules', 'The understudy who knows every line of every part.', [art.person('#e5dbff', '#e0ac69', '#f59f00', '#7048e8')], 'Alex K.', '16, small and quick, light brown skin, blonde bob with a fringe. Purple cardigan over a striped top.'),
+          who('okafor', 'Ms Okafor', 'Drama teacher. Calm, until the lights fail.', [art.person('#d3f9d8', '#8d5524', '#495057', '#2f9e44')], 'Mrs Bell', 'Late 40s, Black British woman, close-cropped grey hair, gold hoop earrings. Green blazer, reading glasses on a chain.'),
           loc('hall', 'School hall', 'INT', 'The main hall: a raised stage, red curtains and 200 folding chairs.', [art.hall, art.hallSeats]),
           loc('back', 'Backstage', 'INT', 'Narrow, dark, full of rope and old scenery flats.', [art.backstage]),
           loc('park', 'Car park', 'EXT', 'Behind the school at sunset. One flickering lamp.', [art.carpark]),
+          costume('jules-lead', 'Lead costume', 'Deep green velvet frock coat with gold buttons, white ruffled shirt, black breeches, buckled shoes.', [art.outfit('#2b8a3e', '#fab005', '#f8f9fa')]),
+          costume('maya-blacks', 'Stage blacks', 'All-black crew clothes: black long-sleeve T-shirt, black cargo trousers, headset on, small torch clipped to the belt.', [art.outfit('#212529', '#495057', '#343a40')]),
           prop('script', 'Dog-eared script', 'Theo’s copy, every line highlighted twice.', [art.script]),
 
           shot('s1a', '1', 'Wide', 'The club gathers on the empty stage for the read-through.', [art.frame('wide', 'establishing')], { duration: 8, movement: 'Dolly' }),
@@ -143,6 +151,10 @@ export const dramaGraph = defineGraphType({
           ['jules', ['s1a', 's1c', 's2a', 's2b', 's4c']],
           ['okafor', ['s1a', 's3b']],
           ['script', ['s1b', 's4b']],
+          ['jules', 'jules-lead'],
+          ['maya', 'maya-blacks'],
+          ['jules-lead', 'sc4'],
+          ['maya-blacks', 'sc4'],
           ['s1a', 'sc1'],
           ['s1b', 'sc1'],
           ['s1c', 'sc1'],
@@ -169,8 +181,8 @@ export const dramaGraph = defineGraphType({
       graph: production(
         [
           loc('kitchen', 'Kitchen', 'INT', 'A small kitchen, morning light.', []),
-          who('a', 'Ana', 'Packing for a trip she hasn’t told anyone about.', [art.person('#fff3bf', '#e0ac69', '#343a40', '#f08c00')]),
-          who('b', 'Ben', 'Her brother. Notices everything.', [art.person('#dbe4ff', '#c68642', '#5c3d2e', '#364fc7')]),
+          who('a', 'Ana', 'Packing for a trip she hasn’t told anyone about.', [art.person('#fff3bf', '#e0ac69', '#343a40', '#f08c00')], '', 'Late 20s, dark hair in a low bun, olive skin. Mustard jumper, rolled-up jeans.'),
+          who('b', 'Ben', 'Her brother. Notices everything.', [art.person('#dbe4ff', '#c68642', '#5c3d2e', '#364fc7')], '', 'Early 20s, tall, brown skin, short brown hair, stubble. Navy T-shirt, grey joggers.'),
           shot('k1', '1', 'Wide', 'Ana fills a bag. Ben appears in the doorway.', [art.frame('wide')]),
           shot('k2', '2', 'Close-up', 'Ben: “Going somewhere?”', [art.frame('close')], { duration: 3 }),
           scene('ks', 1, 'MORNING', 'Ben finds out.'),

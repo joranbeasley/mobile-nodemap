@@ -17,6 +17,7 @@ export const DRAMA = {
   location: 'drama-location',
   character: 'drama-character',
   prop: 'drama-prop',
+  costume: 'drama-costume',
   shot: 'drama-shot',
   scene: 'drama-scene',
   episode: 'drama-episode',
@@ -26,6 +27,7 @@ const portTypes: PortTypeDef[] = [
   { id: DRAMA.location, label: 'Location', color: '#2f9e44', inline: false },
   { id: DRAMA.character, label: 'Character', color: '#e8590c', inline: false },
   { id: DRAMA.prop, label: 'Prop', color: '#ae3ec9', inline: false },
+  { id: DRAMA.costume, label: 'Costume', color: '#d6336c', inline: false },
   { id: DRAMA.shot, label: 'Shot', color: '#1971c2', inline: false },
   { id: DRAMA.scene, label: 'Scene', color: '#5f3dc4', inline: false },
   { id: DRAMA.episode, label: 'Episode', color: '#c2255c', inline: false },
@@ -187,6 +189,7 @@ const T = {
   location: 'drama/location',
   character: 'drama/character',
   prop: 'drama/prop',
+  costume: 'drama/costume',
   shot: 'drama/shot',
   scene: 'drama/scene',
   episode: 'drama/episode',
@@ -257,6 +260,15 @@ const characterNode = defineNode({
   outputs: { appears: { type: DRAMA.character, label: 'in shots' } },
   params: [
     description(false, 'Who they are'),
+    {
+      name: 'appearance',
+      label: 'appearance',
+      kind: 'text',
+      multiline: true,
+      default: '',
+      placeholder: 'Age, build, hair, face, usual clothes',
+      description: 'Repeated word for word in every video prompt they are in, to keep them looking the same',
+    },
     images(),
     { name: 'actor', label: 'played by', kind: 'text', default: '', placeholder: 'Cast member', advanced: true },
   ],
@@ -272,12 +284,29 @@ const propNode = defineNode({
   icon: '✦',
   flavor: 'source',
   width: 210,
-  tags: ['object', 'costume', 'item'],
-  description: 'An object or costume the shots need',
+  tags: ['object', 'item', 'thing'],
+  description: 'An object the shots need',
   outputs: { used: { type: DRAMA.prop, label: 'in shots' } },
   params: [description(false, 'What it is'), images('images', 'images', true)],
   onCreate: (n) => void (n.label ??= 'New prop'),
   meta: { drama: 'prop' },
+});
+
+const costumeNode = defineNode({
+  type: T.costume,
+  title: 'Costume',
+  category: 'Cast & places',
+  color: '#d6336c',
+  icon: '👕',
+  flavor: 'transform',
+  width: 230,
+  tags: ['wardrobe', 'outfit', 'clothes', 'look'],
+  description: 'What a character wears in the scenes it is wired into',
+  inputs: { character: { type: DRAMA.character, label: 'character', description: 'Who wears it' } },
+  outputs: { scenes: { type: DRAMA.costume, label: 'in scenes' } },
+  params: [description(false, 'What they wear: garments, colours, accessories'), images()],
+  onCreate: (n) => void (n.label ??= 'New costume'),
+  meta: { drama: 'costume' },
 });
 
 const shotNode = defineNode({
@@ -318,7 +347,10 @@ const sceneNode = defineNode({
   width: 250,
   tags: ['sequence', 'act'],
   description: 'A numbered scene made of shots, with an optional storyboard',
-  inputs: { shots: { type: DRAMA.shot, multiple: true, label: 'shots' } },
+  inputs: {
+    shots: { type: DRAMA.shot, multiple: true, label: 'shots' },
+    costumes: { type: DRAMA.costume, multiple: true, label: 'costumes', description: 'What characters wear in this scene' },
+  },
   outputs: { episode: { type: DRAMA.scene, label: 'episode' } },
   caption: (n) => `Scene ${Number(n.params.number ?? 1)} · ${n.params.time ?? 'DAY'}`,
   params: [
@@ -415,6 +447,8 @@ export interface SceneInfo {
   /** "INT. SCHOOL HALL — DAY" */
   slug: string;
   storyboard: string[];
+  /** Costumes wired into the scene, with who wears each. */
+  costumes: { costume: NodeInstance; character?: NodeInstance }[];
 }
 export interface EpisodeInfo {
   node: NodeInstance;
@@ -462,6 +496,7 @@ export function sceneInfo(graph: Graph, n: NodeInstance): SceneInfo {
     duration: shots.reduce((t, s) => t + s.duration, 0),
     slug: `${settings.length === 1 ? settings[0] : settings.length ? 'INT./EXT' : 'INT'}. ${place} — ${time}`,
     storyboard: imageList(n.params.storyboard),
+    costumes: from(graph, n.id, 'costumes').map((costume) => ({ costume, character: from(graph, costume.id, 'character')[0] })),
   };
 }
 
@@ -493,12 +528,23 @@ export function appearances(graph: Graph, id: string): { shot: ShotInfo; scene?:
     });
 }
 
+/** The costume each character wears in a scene (the first wired in, if there are two). */
+export function sceneCostumes(graph: Graph, sceneId: string): Map<string, NodeInstance> {
+  const out = new Map<string, NodeInstance>();
+  for (const c of from(graph, sceneId, 'costumes')) {
+    const who = from(graph, c.id, 'character')[0];
+    if (who && !out.has(who.id)) out.set(who.id, c);
+  }
+  return out;
+}
+
 const names = (ns: NodeInstance[]) => ns.map(dramaName).join(', ');
 const indent = (text: string, pad: string) => text.split('\n').map((l) => pad + l).join('\n');
 
 function sceneText(s: SceneInfo): string {
   const out = [`SCENE ${s.number}. ${s.slug}  (${runtime(s.duration)})`];
   if (s.description) out.push(indent(s.description, '  '));
+  for (const c of s.costumes) out.push(`  Costume, ${c.character ? dramaName(c.character) : '?'}: ${oneLineText(c.costume.params.description) || dramaName(c.costume)}`);
   for (const sh of s.shots) {
     const who = sh.characters.length ? names(sh.characters) : 'no one';
     out.push(`  ${sh.number.padEnd(4)} ${sh.framing.padEnd(18)} ${String(sh.duration).padStart(3)}s  ${who}${sh.props.length ? ` · props: ${names(sh.props)}` : ''}`);
@@ -541,12 +587,30 @@ export function shotList(graph: Graph, id?: string): string {
   return (parts.join('\n\n') || 'Nothing to list yet: wire shots into scenes and scenes into episodes.') + '\n';
 }
 
+const oneLineText = (v: unknown) => String(v ?? '').replace(/\s+/g, ' ').trim();
+
+function costumeText(graph: Graph, n: NodeInstance): string {
+  const who = from(graph, n.id, 'character')[0];
+  const lines = [`${dramaName(n)}: costume for ${who ? dramaName(who) : 'no one yet'}`];
+  const desc = String(n.params.description ?? '').trim();
+  if (desc) lines.push(desc);
+  const scenes = into(graph, n.id).filter((x) => x.type === T.scene);
+  lines.push('', scenes.length ? `Worn in ${scenes.length} scene${scenes.length > 1 ? 's' : ''}:` : 'Not wired into any scene yet.');
+  for (const sc of scenes) {
+    const ep = into(graph, sc.id).find((x) => x.type === T.episode);
+    lines.push(`  ${ep ? `Ep ${Number(ep.params.number ?? 1)} ${dramaName(ep)} · ` : ''}Scene ${Number(sc.params.number ?? 1)}`);
+  }
+  return lines.join('\n') + '\n';
+}
+
 function castText(graph: Graph, n: NodeInstance): string {
   const what = n.type === T.character ? 'Character' : n.type === T.location ? `Location (${n.params.setting ?? 'INT'})` : 'Prop';
   const lines = [`${dramaName(n)}: ${what}`];
   if (n.params.actor) lines.push(`Played by ${n.params.actor}`);
   const desc = String(n.params.description ?? '').trim();
   if (desc) lines.push(desc);
+  const look = String(n.params.appearance ?? '').trim();
+  if (look) lines.push(`Appearance: ${look}`);
   const apps = appearances(graph, n.id);
   lines.push('', apps.length ? `In ${apps.length} shot${apps.length > 1 ? 's' : ''}:` : 'Not in any shot yet.');
   for (const a of apps) {
@@ -584,6 +648,7 @@ const details = (node: NodeInstance, ctx: { graph: Graph }) => {
       ],
     };
   }
+  if (node.type === T.costume) return { title: dramaName(node), subtitle: 'Costume', code: { lang: 'text', text: costumeText(g, node) } };
   return { title: dramaName(node), subtitle: 'Appearances', code: { lang: 'text', text: castText(g, node) } };
 };
 
@@ -621,6 +686,11 @@ export const dramaEngine: GraphEngine = {
         const scenes = uniq(apps.map((a) => a.scene).filter(Boolean)).length;
         st.line = apps.length ? `${scenes} scene${scenes === 1 ? '' : 's'} · ${apps.length} shot${apps.length === 1 ? '' : 's'}` : 'Not in any shot yet';
         if (n.type === T.character && n.params.actor) st.sub = `Played by ${n.params.actor}`;
+      } else if (n.type === T.costume) {
+        const who = from(graph, n.id, 'character')[0];
+        const scenes = into(graph, n.id).filter((x) => x.type === T.scene).length;
+        st.line = `${who ? dramaName(who) : 'No character'} · ${scenes ? `${scenes} scene${scenes === 1 ? '' : 's'}` : 'not in a scene yet'}`;
+        if (!who) st.warnings.push('Not linked to a character');
       } else if (n.type === T.shot) {
         const s = shotInfo(graph, n);
         st.line = `${s.framing} · ${s.duration}s${s.movement !== 'Static' ? ` · ${s.movement.toLowerCase()}` : ''}`;
@@ -633,6 +703,13 @@ export const dramaEngine: GraphEngine = {
         st.sub = `${s.slug}${s.characters.length ? `\n${names(s.characters)}` : ''}`;
         st.strip = s.storyboard.length ? s.storyboard : s.shots.map((sh) => sh.images[0]).filter(Boolean);
         if (!s.shots.length) st.warnings.push('No shots');
+        const worn = new Map<string, number>();
+        for (const c of s.costumes) if (c.character) worn.set(c.character.id, (worn.get(c.character.id) ?? 0) + 1);
+        for (const [id, k] of worn) {
+          const who = dramaName(graph.nodes.get(id)!);
+          if (k > 1) st.warnings.push(`Two costumes for ${who}`);
+          else if (!s.characters.some((c) => c.id === id)) st.warnings.push(`${who} has a costume but isn’t in any shot`);
+        }
         if (has(T.episode) && !into(graph, n.id).length) st.warnings.push('Not in an episode');
       } else if (n.type === T.episode) {
         const e = episodeInfo(graph, n);
@@ -713,7 +790,7 @@ const css = `
 .dr-strip i { flex: 1 1 0; max-width: 56px; aspect-ratio: 16 / 10; border-radius: 3px; background: color-mix(in srgb, var(--_muted) 15%, var(--_node)) center / cover no-repeat; border: 1px solid var(--_border); }
 `;
 
-const nodes: NodeType[] = [locationNode, characterNode, propNode, shotNode, sceneNode, episodeNode, seasonNode].map((n) => ({ ...n, view: dramaView, details }));
+const nodes: NodeType[] = [locationNode, characterNode, costumeNode, propNode, shotNode, sceneNode, episodeNode, seasonNode].map((n) => ({ ...n, view: dramaView, details }));
 
 export const dramaPack = definePack({
   id: 'nodemap/drama',

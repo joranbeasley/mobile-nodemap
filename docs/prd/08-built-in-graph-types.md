@@ -33,14 +33,14 @@ The library needs proof that the extension model handles very different domains:
 ## Drama (`dramaGraph`, id `drama`)
 
 - For drama clubs, student films and web series: plan a production as a map.
-- Characters (name, description, pictures, played by), locations (name, INT/EXT, description, pictures) and props feed shots.
+- Characters (name, description, appearance, pictures, played by), costumes (what a character wears, with pictures, wired into the scenes where they wear it), locations (name, INT/EXT, description, pictures) and props feed shots.
 - A shot has exactly one location and any number of characters and props, plus a number, framing, camera movement, length, description and storyboard frames. Its header reads "Shot 2 · Close-up".
 - Numbered scenes are made of shots and have a time of day, a description and an optional storyboard. With no storyboard, the scene shows a filmstrip of its shots' first frames.
 - Episodes (title, number, optional description) are made of scenes, and seasons of episodes. Each piece belongs to one parent; characters and locations are reused freely.
 - Pictures: tap + on a selected node to add photos from the camera or library (shrunk before they are stored), tap a picture to view it full screen, × to remove it.
 - The engine shows on each node where it is used ("3 scenes · 5 shots"), scene sluglines ("INT. SCHOOL HALL — DAY"), cast lists and running times, and flags shots with no location or scene, empty scenes and duplicate scene numbers.
 - Tapping a character, location or prop lists every shot they are in.
-- **Video generation.** Every shot is one Seedance generation. Tapping a shot shows its `shot.md`: duration, the reference images to upload, numbered in upload order (`images/01-maya.jpg` becomes @Image1), and a ready-to-paste prompt. **Download shot (.zip)** saves `shot.md` with those images. A scene downloads as `scene.md`, one zip per shot and its optional storyboard. An episode or season downloads as `script.md`, the shot zips in story order and the storyboards. The root file lists every shot's pack, length and prompt. A video style, aspect ratio, images per clip (default 9) and clip length (default 15 s) can be set per episode or season.
+- **Video generation.** Every shot is one Seedance generation. Tapping a shot shows its `shot.md`: duration, the reference images to upload, numbered in upload order (`images/01-maya.jpg` becomes @Image1), and a ready-to-paste prompt. **Download shot (.zip)** saves `shot.md` with those images. A scene downloads as `scene.md`, one zip per shot and its optional storyboard. An episode or season downloads as `script.md`, the shot zips in story order and the storyboards. The root file lists every shot's pack, length and prompt. Each Seedance generation starts from nothing, so consistency comes from repeating the same evidence: the character's picture, their appearance text word for word, and in costume scenes the costume's description and pictures. A video style, aspect ratio, images per clip (default 9) and clip length (default 15 s) can be set per episode or season.
 
 ## Function builder (`functionGraph`, id `function`)
 

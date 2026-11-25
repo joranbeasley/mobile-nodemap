@@ -1,6 +1,6 @@
 import type { Graph } from '../core/graph.js';
 import type { NodeInstance } from '../core/types.js';
-import { dramaName, episodeInfo, imageList, sceneInfo, shotInfo, type EpisodeInfo, type SceneInfo } from './drama.js';
+import { dramaName, episodeInfo, imageList, sceneCostumes, sceneInfo, shotInfo, type EpisodeInfo, type SceneInfo } from './drama.js';
 
 /**
  * Export a production for Seedance video generation, one generation per shot.
@@ -180,10 +180,16 @@ export function seedanceShot(graph: Graph, shotId: string, opts: SeedanceOptions
   const cands: Cand[] = [];
   const first: Cand[] = [];
   const rest: Cand[] = [];
-  const add = (n: NodeInstance, kind: string) => {
-    imageList(n.params.images).forEach((src, i) => (i ? rest : first).push({ src, name: dramaName(n), label: `${dramaName(n)} (${kind}${i ? `, view ${i + 1}` : ''})` }));
+  const add = (n: NodeInstance, kind: string, name = dramaName(n)) => {
+    imageList(n.params.images).forEach((src, i) => (i ? rest : first).push({ src, name, label: `${dramaName(n)} (${kind}${i ? `, view ${i + 1}` : ''})` }));
   };
+  // What each character wears in this scene, if a costume is wired into it.
+  const costumes = scene ? sceneCostumes(graph, scene.node.id) : new Map<string, NodeInstance>();
   x.characters.forEach((c) => add(c, 'character'));
+  x.characters.forEach((c) => {
+    const k = costumes.get(c.id);
+    if (k) add(k, `${dramaName(c)}'s costume`, `${dramaName(c)}-costume`);
+  });
   if (x.location) add(x.location, 'location');
   x.props.forEach((p) => add(p, 'prop'));
   cands.push(...first);
@@ -206,15 +212,22 @@ export function seedanceShot(graph: Graph, shotId: string, opts: SeedanceOptions
   const lines: string[] = [];
   lines.push(`${sentence(cfg.style)} Aspect ratio ${cfg.aspect}.`);
   if (x.characters.length) {
-    lines.push(
-      `Characters: ${x.characters
-        .map((c) => {
-          const r = refsOf(c);
-          const d = oneLine(String(c.params.description ?? '')).split(/(?<=[.!?])\s/)[0]?.replace(/[.!?]$/, '');
-          return `${dramaName(c)}${r.length ? ` is ${r[0]}${r.length > 1 ? ` (more angles: ${r.slice(1).join(', ')})` : ''}` : ''}${d ? `, ${d.charAt(0).toLowerCase()}${d.slice(1)}` : ''}`;
-        })
-        .join('; ')}.`,
-    );
+    lines.push('Characters:');
+    for (const c of x.characters) {
+      const r = refsOf(c);
+      const d = oneLine(String(c.params.description ?? '')).split(/(?<=[.!?])\s/)[0]?.replace(/[.!?]$/, '');
+      const parts = [`${dramaName(c)}${r.length ? ` is ${r[0]}${r.length > 1 ? ` (more angles: ${r.slice(1).join(', ')})` : ''}` : ''}${d ? `, ${d.charAt(0).toLowerCase()}${d.slice(1)}` : ''}.`];
+      // Appearance goes in word for word, every time: fixed wording keeps separate clips consistent.
+      const look = oneLine(String(c.params.appearance ?? ''));
+      if (look) parts.push(`Appearance: ${sentence(look)}`);
+      const k = costumes.get(c.id);
+      if (k) {
+        const kr = refsOf(k);
+        const what = oneLine(String(k.params.description ?? '')) || dramaName(k);
+        parts.push(`Costume in this scene: ${what.replace(/[.!?]$/, '')}${kr.length ? ` (${kr.join(', ')})` : ''}; it replaces their usual clothes.`);
+      }
+      lines.push(`- ${parts.join(' ')}`);
+    }
   }
   if (x.location) {
     const l = x.location;
@@ -232,7 +245,10 @@ export function seedanceShot(graph: Graph, shotId: string, opts: SeedanceOptions
   if (frames.length) action.push(`Match the composition of ${frames.map((f) => `@Image${refs.indexOf(f) + 1}`).join(' and ')}.`);
   lines.push(`Shot (0–${duration} s): ${action.join(' ')}`);
   lines.push('');
-  lines.push(`Keep every character's face, hair and clothes consistent with their reference images. One continuous shot. No subtitles, captions or on-screen text.`);
+  const dressed = x.characters.some((c) => costumes.has(c.id));
+  lines.push(
+    `${dressed ? "Keep each character's face and hair consistent with their character images and their clothes consistent with their costume." : "Keep every character's face, hair and clothes consistent with their reference images."} One continuous shot. No subtitles, captions or on-screen text.`,
+  );
   const prompt = lines.join('\n');
 
   const md: string[] = [];
@@ -311,17 +327,21 @@ export function seedanceScript(graph: Graph, id?: string, opts: SeedanceOptions 
     '**How to use.** Every shot is one Seedance generation with its own pack in `shots/`. Each pack holds `shot.md` (duration, prompt) and its reference images, numbered in upload order (`images/01-…`, `images/02-…`). Upload them in that order so they become @Image1, @Image2 and so on, set the duration, paste the prompt, then join the clips in shot order.',
     '',
   );
-  const sheet = (title: string, nodes: NodeInstance[], extra: (n: NodeInstance) => string) => {
+  const sheet = (title: string, nodes: NodeInstance[], extra: (n: NodeInstance) => string, more: (n: NodeInstance) => string = () => '') => {
     if (!nodes.length) return;
     md.push(`## ${title}`, '');
     for (const n of nodes) {
       const e = extra(n);
       const d = oneLine(String(n.params.description ?? ''));
-      md.push(`- **${mdEsc(dramaName(n))}**${e ? ` (${e})` : ''}${d ? `: ${mdEsc(d)}` : ''}`);
+      const m = more(n);
+      md.push(`- **${mdEsc(dramaName(n))}**${e ? ` (${e})` : ''}${d ? `: ${mdEsc(d)}` : ''}${m ? ` ${m}` : ''}`);
     }
     md.push('');
   };
-  sheet('Characters', [...cast.values()], (c) => (c.params.actor ? `played by ${mdEsc(String(c.params.actor))}` : ''));
+  sheet('Characters', [...cast.values()], (c) => (c.params.actor ? `played by ${mdEsc(String(c.params.actor))}` : ''), (c) => {
+    const look = oneLine(String(c.params.appearance ?? ''));
+    return look ? `Appearance: ${mdEsc(look)}` : '';
+  });
   sheet('Locations', [...places.values()], (l) => (l.params.setting === 'EXT' ? 'exterior' : 'interior'));
   sheet('Props', [...props.values()], () => '');
 
@@ -341,6 +361,8 @@ export function seedanceScript(graph: Graph, id?: string, opts: SeedanceOptions 
     const { shots: list, board } = perBlock.get(b)!;
     md.push(`### Scene ${s.number}. ${mdEsc(s.slug)}`, '');
     if (s.description) md.push(mdEsc(s.description), '');
+    if (s.costumes.length)
+      md.push(`**Costumes:** ${s.costumes.map((c) => `${mdEsc(c.character ? dramaName(c.character) : '?')}: ${mdEsc(oneLine(String(c.costume.params.description ?? '')) || dramaName(c.costume))}`).join('; ')}`, '');
     if (board.length) md.push('**Storyboard**', '', board.map((a) => `![${mdEsc(a.label)}](${a.path})`).join(' '), '');
     if (!list.length) {
       md.push('_No shots yet._', '');
