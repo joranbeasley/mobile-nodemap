@@ -77,6 +77,8 @@ Every param has `name`, `label?`, `description?` and `advanced?` (fold it behind
 | `'select'` | `default`, `options: string[]` |
 | any other string | A registered `ParamKind`; any extra fields are passed through |
 
+An `images` param can take `prompt: (node, graph) => ({ prompt, aspect })`: what ✨ Generate suggests when an image generator is set (see [graph types](graph-types.md#image-generation--generate)).
+
 Any param can take `when: (params) => boolean`, which shows it only when it applies to the node's other params. A hidden param keeps its value. The card and the Edit sheet update as those params change.
 
 ```ts

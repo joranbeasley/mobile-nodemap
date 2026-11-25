@@ -2,6 +2,7 @@ import { defineNode, definePack, type GraphEngine } from '../core/registry.js';
 import type { Graph } from '../core/graph.js';
 import type { NodeInstance, NodeResult, NodeType, ParamKind, PortTypeDef } from '../core/types.js';
 import { saveDramaFile, seedancePack, seedanceScript } from './drama-seedance.js';
+import { getImageGenerator } from './image-generation.js';
 
 /**
  * Drama productions: a cast of characters, locations and props feed shots; shots make up
@@ -141,6 +142,100 @@ export const imagesParam: ParamKind = {
       }
       if (added.length) commit([...list, ...added]);
     });
+    // ✨ Generate (when an image generator is set): a small panel with a prompt written
+    // from the card, sent to the generator; results are copied in like added photos.
+    const gen = getImageGenerator();
+    const p = ctx.param as { prompt?: (node: NodeInstance, graph: Graph) => { prompt: string; aspect?: string } | undefined };
+    let panel: HTMLElement | undefined;
+    let note = '';
+    const closePanel = () => {
+      panel?.remove();
+      panel = undefined;
+    };
+    const openPanel = () => {
+      if (!gen) return;
+      if (panel) return closePanel();
+      const suggestion = (() => {
+        try {
+          return p.prompt?.(ctx.node, ctx.graph);
+        } catch {
+          return undefined;
+        }
+      })();
+      const el = (tag: string, attrs: Record<string, string> = {}, text = '') => {
+        const x = document.createElement(tag);
+        for (const [k, v] of Object.entries(attrs)) x.setAttribute(k, v);
+        if (text) x.textContent = text;
+        return x;
+      };
+      panel = el('div', { class: 'dr-gen-panel', role: 'group', 'aria-label': `Generate an image with ${gen.name}` });
+      const prompt = el('textarea', { rows: '4', 'aria-label': 'Image prompt', placeholder: 'Describe the picture' }) as HTMLTextAreaElement;
+      prompt.value = suggestion?.prompt ?? '';
+      const row = el('div', { class: 'dr-gen-row' });
+      const model = el('select', { 'aria-label': 'Model' }) as HTMLSelectElement;
+      for (const m of gen.models ?? []) model.append(Object.assign(document.createElement('option'), { value: m.id, textContent: m.label }));
+      model.value = gen.defaultModel ?? model.value;
+      const aspect = el('select', { 'aria-label': 'Aspect ratio' }) as HTMLSelectElement;
+      for (const a of ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3']) aspect.append(Object.assign(document.createElement('option'), { value: a, textContent: a }));
+      aspect.value = suggestion?.aspect ?? '1:1';
+      if (gen.models?.length) row.append(model);
+      row.append(aspect);
+      const keyRow = el('div', { class: 'dr-gen-key' });
+      const keyInput = el('input', { type: 'password', autocomplete: 'off', 'aria-label': gen.key?.label ?? 'API key', placeholder: gen.key?.label ?? 'API key' }) as HTMLInputElement;
+      if (gen.key && !gen.key.get()) keyRow.append(keyInput, ...(gen.key.help ? [el('small', {}, gen.key.help)] : []));
+      const status = el('div', { class: 'dr-gen-status', role: 'status' });
+      const go = el('button', { type: 'button', class: 'dr-gen-go' }, `✨ Generate with ${gen.name}`) as HTMLButtonElement;
+      const cancel = el('button', { type: 'button', class: 'dr-gen-cancel' }, 'Cancel') as HTMLButtonElement;
+      let abort: AbortController | undefined;
+      cancel.addEventListener('click', () => {
+        abort?.abort();
+        closePanel();
+      });
+      go.addEventListener('click', async () => {
+        if (gen.key && keyInput.value.trim()) gen.key.set(keyInput.value.trim());
+        if (gen.key && !gen.key.get()) return void (status.textContent = `Add your ${gen.key.label} first.`);
+        if (!prompt.value.trim()) return void (status.textContent = 'Write a prompt first.');
+        abort = new AbortController();
+        go.disabled = true;
+        status.textContent = `Asking ${gen.name}…`;
+        try {
+          const result = await gen.generate({
+            prompt: prompt.value.trim(),
+            aspect: aspect.value,
+            model: gen.models?.length ? model.value : undefined,
+            signal: abort.signal,
+            onProgress: (pc) => (status.textContent = `Generating with ${gen.name}… ${Math.round(pc)}%`),
+          });
+          status.textContent = 'Copying the picture in…';
+          // The service's links expire: keep a copy, shrunk like added photos.
+          let kept = 0;
+          const added: string[] = [];
+          for (const url of result.images.slice(0, Math.max(0, max - list.length))) {
+            try {
+              const res = await fetch(url, { signal: abort.signal });
+              if (!res.ok) throw new Error(String(res.status));
+              added.push(await imageFileToDataUrl(await res.blob()));
+              kept++;
+            } catch {
+              added.push(url);
+            }
+          }
+          if (!added.length) throw new Error(`${gen.name} returned no picture`);
+          note = `Added ${added.length} from ${gen.name}${result.credits != null ? ` · ${result.credits} credits` : ''}${kept < added.length ? ' · linked, not copied: the link expires' : ''}`;
+          closePanel();
+          commit([...list, ...added]);
+        } catch (err) {
+          if ((err as Error).name === 'AbortError') return;
+          status.textContent = (err as Error).message || 'Something went wrong';
+          go.disabled = false;
+        }
+      });
+      const buttons = el('div', { class: 'dr-gen-row' });
+      buttons.append(go, cancel);
+      panel.append(prompt, row, keyRow, buttons, status);
+      wrap.append(panel);
+      prompt.focus({ preventScroll: true });
+    };
     const draw = () => {
       wrap.replaceChildren();
       list.forEach((src, i) => {
@@ -184,7 +279,19 @@ export const imagesParam: ParamKind = {
         add.className = 'dr-add';
         add.append(list.length ? '+' : '+ Add images', file);
         wrap.append(add);
+        if (gen) {
+          const g = document.createElement('button');
+          g.type = 'button';
+          g.className = 'dr-gen';
+          g.textContent = '✨';
+          g.title = `Generate with ${gen.name}`;
+          g.setAttribute('aria-label', `Generate an image with ${gen.name}`);
+          g.addEventListener('click', openPanel);
+          wrap.append(g);
+        }
       }
+      if (note) wrap.append(Object.assign(document.createElement('small'), { className: 'dr-gen-note', textContent: note }));
+      if (panel) wrap.append(panel);
     };
     // Inside a <label>, a tap on a thumbnail's gap would "click" the first button: don't.
     wrap.addEventListener('click', (e) => {
@@ -216,7 +323,15 @@ const T = {
 } as const;
 
 const description = (advanced = false, placeholder = '') => ({ name: 'description', label: 'description', kind: 'text' as const, multiline: true, default: '', placeholder, advanced });
-const images = (name = 'images', label = 'images', advanced = false) => ({ name, label, kind: 'images', default: [], advanced });
+const images = (name = 'images', label = 'images', advanced = false) => ({
+  name,
+  label,
+  kind: 'images',
+  default: [],
+  advanced,
+  // What ✨ Generate suggests for this field (see dramaImagePrompt).
+  prompt: (node: NodeInstance, graph: Graph) => dramaImagePrompt(graph, node, name),
+});
 /** Look and feel for video prompts (Seedance export); an episode's beats its season's. */
 const look = () => [
   { name: 'style', label: 'video style', kind: 'text' as const, multiline: true, default: '', placeholder: 'e.g. 16mm film, warm stage lighting, coming-of-age drama', advanced: true },
@@ -547,6 +662,72 @@ export function appearances(graph: Graph, id: string): { shot: ShotInfo; scene?:
     });
 }
 
+/**
+ * A prompt for generating a picture for a drama node's image field: a reference portrait for
+ * a character, an establishing shot for a location, a product shot for a prop, a costume on
+ * a mannequin, a storyboard frame for a shot or scene, a poster for an episode. Works on the
+ * wired drama model (drama boards convert first).
+ */
+export function dramaImagePrompt(graph: Graph, n: NodeInstance, param = 'images'): { prompt: string; aspect: string } | undefined {
+  const t = (v: unknown) => String(v ?? '').replace(/\s+/g, ' ').trim();
+  const end = (v: string) => (v && !/[.!?]$/.test(v) ? `${v}.` : v);
+  const name = dramaName(n);
+  const who = (c: NodeInstance) => [dramaName(c), t(c.params.appearance)].filter(Boolean).join(': ');
+  const sceneOfShot = (id: string) => into(graph, id).find((x) => x.type === T.scene);
+  const styleFor = (sceneNode?: NodeInstance) => {
+    const ep = sceneNode && into(graph, sceneNode.id).find((x) => x.type === T.episode);
+    const season = ep && into(graph, ep.id).find((x) => x.type === T.season);
+    return t(ep?.params.style) || t(season?.params.style) || 'Cinematic live-action drama, natural light';
+  };
+  switch (n.type) {
+    case T.character:
+      return {
+        prompt: `Character reference portrait of ${name}. ${end(t(n.params.appearance))} ${end(t(n.params.description))} Head to mid-thigh, facing the camera, neutral grey studio background, soft even light, photorealistic. No text.`.replace(/\s+/g, ' '),
+        aspect: '3:4',
+      };
+    case T.location:
+      return {
+        prompt: `Establishing reference photo of ${name}, ${n.params.setting === 'EXT' ? 'exterior' : 'interior'}. ${end(t(n.params.description))} Wide shot, no people, natural light, photorealistic. No text.`.replace(/\s+/g, ' '),
+        aspect: '16:9',
+      };
+    case T.prop:
+      return { prompt: `Product-style reference photo of ${name}. ${end(t(n.params.description))} Plain light background, soft light, photorealistic. No text.`.replace(/\s+/g, ' '), aspect: '1:1' };
+    case T.costume: {
+      const wearer = from(graph, n.id, 'character')[0];
+      return {
+        prompt: `Costume reference: ${end(t(n.params.description) || name)}${wearer ? ` Worn by ${who(wearer)}.` : ''} Full outfit on a plain mannequin, front view, neutral background, photorealistic. No text.`.replace(/\s+/g, ' '),
+        aspect: '3:4',
+      };
+    }
+    case T.shot: {
+      const s = shotInfo(graph, n);
+      const sc = sceneOfShot(n.id);
+      const time = sc ? String(sc.params.time ?? 'DAY').toLowerCase() : 'day';
+      const where = s.location ? `Setting: ${dramaName(s.location)}, ${s.location.params.setting === 'EXT' ? 'exterior' : 'interior'}, ${time}. ${end(t(s.location.params.description))}` : '';
+      const cast = s.characters.length ? `On screen: ${s.characters.map(who).join('; ')}.` : '';
+      return {
+        prompt: `Storyboard frame, ${s.framing.toLowerCase()} shot. ${end(s.description)} ${cast} ${where} ${end(styleFor(sc))} Single film still, no text, no captions.`.replace(/\s+/g, ' ').trim(),
+        aspect: '16:9',
+      };
+    }
+    case T.scene: {
+      const info = sceneInfo(graph, n);
+      const cast = info.characters.length ? `Characters: ${info.characters.map(who).join('; ')}.` : '';
+      return {
+        prompt: `Storyboard frame for a scene set in ${info.slug}. ${end(info.description)} ${cast} ${end(styleFor(n))} Single film still, no text.`.replace(/\s+/g, ' ').trim(),
+        aspect: '16:9',
+      };
+    }
+    case T.episode:
+      return {
+        prompt: `Poster artwork for the episode "${name}". ${end(t(n.params.description))} ${end(t(n.params.style) || 'Cinematic drama')} No text or lettering.`.replace(/\s+/g, ' ').trim(),
+        aspect: param === 'images' ? '2:3' : '16:9',
+      };
+    default:
+      return undefined;
+  }
+}
+
 /** The costume each character wears in a scene (the first wired in, if there are two). */
 export function sceneCostumes(graph: Graph, sceneId: string): Map<string, NodeInstance> {
   const out = new Map<string, NodeInstance>();
@@ -816,6 +997,24 @@ const css = `
   color: var(--_muted); font: 500 12px/1 var(--_font); display: grid; place-items: center; cursor: pointer; }
 .dr-add:hover, .dr-add:focus-within { border-color: var(--_accent); color: var(--_accent); }
 .dr-add { position: relative; overflow: hidden; }
+.dr-gen { all: unset; box-sizing: border-box; width: 44px; height: 44px; border-radius: 6px; border: 1.5px dashed var(--_border); display: grid; place-items: center;
+  cursor: pointer; font-size: 18px; }
+.dr-gen:hover, .dr-gen:focus-visible { border-color: var(--_accent); }
+.nm-node:not(.nm-selected) .dr-gen { display: none; }
+.dr-gen-note { flex-basis: 100%; color: var(--_muted); font-size: 11px; }
+.dr-gen-panel { flex-basis: 100%; display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px dashed var(--_accent); border-radius: 8px;
+  background: color-mix(in srgb, var(--_accent) 6%, var(--_node)); }
+.dr-gen-panel textarea { font: 12px/1.4 var(--_font); resize: vertical; min-height: 64px; }
+.dr-gen-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.dr-gen-row select { font: 12px var(--_font); min-height: 28px; }
+.dr-gen-key { display: flex; flex-direction: column; gap: 3px; }
+.dr-gen-key:empty { display: none; }
+.dr-gen-key input { font: 12px var(--_font); min-height: 28px; }
+.dr-gen-key small { color: var(--_muted); font-size: 11px; }
+.dr-gen-go { font: 600 12px var(--_font); padding: 6px 12px; border-radius: 999px; border: 0; background: var(--_accent); color: #fff; cursor: pointer; }
+.dr-gen-go:disabled { opacity: .6; cursor: progress; }
+.dr-gen-cancel { font: 12px var(--_font); padding: 6px 12px; border-radius: 999px; border: 1px solid var(--_border); background: transparent; color: var(--_text); cursor: pointer; }
+.dr-gen-status { font-size: 11.5px; color: var(--_muted); min-height: 1em; }
 .dr-file { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 0; }
 .dr-status { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--_text); }
 .dr-status b { font-weight: 600; }

@@ -37,6 +37,7 @@ The library needs proof that the extension model handles very different domains:
 - A shot has exactly one location and any number of characters and props, plus a number, framing, camera movement, length, description and storyboard frames. Its header reads "Shot 2 · Close-up".
 - Numbered scenes are made of shots and have a time of day, a description and an optional storyboard. With no storyboard, the scene shows a filmstrip of its shots' first frames.
 - Episodes (title, number, optional description) are made of scenes, and seasons of episodes. Each piece belongs to one parent; characters and locations are reused freely.
+- Generated pictures: with an image generator set (the demo uses Meshy with your own key), ✨ next to + opens a prompt written from the card and adds the picture it makes.
 - Pictures: tap + on a selected node to add photos from the camera or library (shrunk before they are stored), tap a picture to view it full screen, × to remove it, ‹ › to reorder. Order matters: a character's first picture and a shot's first frame lead its video prompt.
 - The engine shows on each node where it is used ("3 scenes · 5 shots"), scene sluglines ("INT. SCHOOL HALL — DAY"), cast lists and running times, and flags shots with no location or scene, empty scenes and duplicate scene numbers.
 - Tapping a character, location or prop lists every shot they are in.

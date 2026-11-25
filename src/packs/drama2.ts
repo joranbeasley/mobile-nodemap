@@ -1,7 +1,7 @@
 import { defineNode, definePack, type GraphEngine } from '../core/registry.js';
 import { Graph } from '../core/graph.js';
 import type { GraphJSON, NodeInstance, NodeResult, NodeType, ParamKind } from '../core/types.js';
-import { DRAMA_DETAILS, FRAMINGS, MOVES, TIMES, appearances, dramaEngine, dramaPack, dramaView, imagesParam, sceneInfo, episodeInfo } from './drama.js';
+import { DRAMA_DETAILS, dramaImagePrompt, FRAMINGS, MOVES, TIMES, appearances, dramaEngine, dramaPack, dramaView, imagesParam, sceneInfo, episodeInfo } from './drama.js';
 
 /**
  * Drama 2: the same production model as the drama graph type, edited as boards instead of
@@ -247,7 +247,19 @@ const text = (name: string, label: string, placeholder = '', advanced = false, d
   advanced,
   ...(description ? { description } : {}),
 });
-const images = (name = 'images', label = 'images', advanced = false) => ({ name, label, kind: 'images', default: [], advanced });
+const images = (name = 'images', label = 'images', advanced = false) => ({
+  name,
+  label,
+  kind: 'images',
+  default: [],
+  advanced,
+  // ✨ Generate suggestions come from the drama model (same ids after toDrama).
+  prompt: (node: NodeInstance, graph: Graph) => {
+    const wired = toDrama(graph);
+    const w = wired.nodes.get(node.id);
+    return w ? dramaImagePrompt(wired, w, name) : undefined;
+  },
+});
 const ref = (name: string, label: string, of: string) => ({ name, label, kind: 'ref', of, default: '' });
 const refs = (name: string, label: string, of: string, exclusive = false) => ({ name, label, kind: 'refs', of, exclusive, default: [] });
 const number = () => ({ name: 'number', label: 'number', kind: 'number' as const, default: 1, min: 1, step: 1 });

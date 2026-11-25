@@ -157,3 +157,37 @@ Each shot zip inside a pack is the same as that shot's own download. SVG picture
 **Settings.** `style`, `aspect`, `maxImages` ("reference images", default 9) and `maxClip` ("clip seconds", default 15) come from the shot's episode (under More), else its season, else `opts`. Set `maxImages` above 9 only for a model or platform that accepts more images per generation; Seedance 2.0 takes 9.
 
 Files reach the person through `saveDramaFile`, a browser download by default. A host can replace it with `setDramaFileSaver(fn)`; the demo uses the claude.ai artifact `downloads` capability when it is available.
+
+### Image generation (✨ Generate)
+
+`setImageGenerator(generator)` turns on **✨** next to + in every `images` field (on a selected card and in the Edit sheet). It opens a panel with:
+- a prompt, written by the field's `prompt(node, graph)` option when it has one;
+- a model picker and an aspect ratio picker;
+- the generator's API key field, until a key is given.
+
+The pictures are copied into the field (shrunk to 1024 px JPEG), because generators' links expire. If a picture can't be downloaded, its link is kept and the field says so. Pass `null` to turn it off.
+
+```ts
+interface ImageGenerator {
+  id: string; name: string;
+  models?: { id; label }[]; defaultModel?: string;
+  key?: { label; help?; get(): string | null; set(v: string): void };   // the host decides where it's kept
+  generate({ prompt, aspect?, model?, signal?, onProgress? }): Promise<{ images: string[]; credits?: number }>;
+}
+```
+
+`meshyImageGenerator({ key | apiKey, model?, baseUrl?, pollMs?, timeoutMs?, fetch? })` calls Meshy's text-to-image API straight from the browser (`POST /openapi/v1/text-to-image` with `ai_model`, `prompt` and `aspect_ratio`, then polls the task). Models: `MESHY_IMAGE_MODELS` (Nano Banana, Nano Banana 2 / 2 Lite / Pro, GPT Image 2; default `nano-banana`). Aspect ratios Meshy doesn't take are mapped to the nearest of 1:1, 16:9, 9:16, 4:3, 3:4, 3:2 and 2:3. Errors explain themselves: no key, a bad key, no credits, a failed task. The credits a picture used are shown after it's added.
+
+`dramaImagePrompt(graph, node, param?)` writes the drama prompts, and every drama and drama-board image field uses it:
+
+| Card | Prompt | Aspect |
+| --- | --- | --- |
+| Character | Reference portrait from their appearance and description | 3:4 |
+| Location | Establishing shot, interior or exterior, no people | 16:9 |
+| Object | Product-style reference photo | 1:1 |
+| Outfit | The costume on a mannequin, with who wears it | 3:4 |
+| Shot frames | Storyboard frame: framing, action, who is on screen (with their appearance), setting and time, and the episode's or season's style | 16:9 |
+| Scene storyboard | The same, for the scene | 16:9 |
+| Episode poster | Poster artwork | 2:3 |
+
+The demo uses Meshy with the visitor's own API key, kept in that browser only.

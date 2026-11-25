@@ -16,6 +16,8 @@ import {
   dramaGraph,
   drama2Graph,
   setDramaFileSaver,
+  setImageGenerator,
+  meshyImageGenerator,
   functionGraph,
   NodeLibrary,
   localStorageStore,
@@ -144,6 +146,34 @@ const demoFunction = registerGraphType(
     examples: functionGraph.examples,
     setup(registry) {
       registry.use(library.toPack());
+    },
+  }),
+);
+
+const safeStorage = {
+  get: (k: string) => {
+    try {
+      return localStorage.getItem(k);
+    } catch {
+      return null;
+    }
+  },
+  set: (k: string, v: string) => {
+    try {
+      localStorage.setItem(k, v);
+    } catch {
+      /* private mode: the key lasts until reload */
+    }
+  },
+};
+// ✨ Generate in image fields: Meshy text-to-image with the visitor's own API key, kept in this
+// browser only and sent only to Meshy.
+setImageGenerator(
+  meshyImageGenerator({
+    key: {
+      label: 'Meshy API key',
+      get: () => safeStorage.get('nodemap-demo:meshy-key'),
+      set: (v) => safeStorage.set('nodemap-demo:meshy-key', v),
     },
   }),
 );
@@ -703,6 +733,7 @@ function renderHelp() {
     <li><b>Tabs</b> some graph types (Drama boards) are tabs of cards instead of one canvas. Grids open zoomed out: tap a card to zoom in. Name chips and list entries jump to their card, even on another tab; <b>← Back</b> returns</li>
     <li><b>Pickers</b> a card's “+ …” picker adds a reference; past 8 choices it opens a searchable list. On scenes and episodes, ‹ › reorder shots or scenes and the numbers follow</li>
     <li><b>Open a node</b> nodes made of a map (like Hypotenuse) have a <b>↘</b> button: it opens the map inside, running on the node's live inputs. Back (or <kbd>Esc</kbd>) returns</li>
+    <li><b>Generate pictures</b> on a selected card, ✨ next to + opens a prompt written from the card (a character's appearance, a shot's framing and cast) and makes the picture with Meshy, using your own Meshy API key (kept in this browser only)</li>
     <li><b>Video</b> tap a drama shot, scene or episode twice for its Seedance script, and download it as a zip: one pack per shot with its numbered reference images</li>
     <li><b>Build your own node</b> in the λ Function builder: Inputs become arguments and the one Output is the result. <b>Build</b> adds it to your library and shows it as one TypeScript function</li>
   </ul>
