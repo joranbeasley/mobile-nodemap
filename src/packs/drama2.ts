@@ -43,7 +43,25 @@ export const refsOf = (graph: Graph, n: NodeInstance | undefined, param: string)
 export const referrers = (graph: Graph, id: string, type: string, param: string): NodeInstance[] =>
   [...graph.nodes.values()].filter((n) => n.type === type && idList(n.params[param]).includes(id));
 
-type RefParam = { name: string; label?: string; of: string; exclusive?: boolean; searchAbove?: number };
+type RefParam = {
+  name: string;
+  label?: string;
+  of: string;
+  /** A node can be held by only one node through this param (a shot belongs to one scene). */
+  exclusive?: boolean;
+  /** Use the searchable chooser past this many choices. Default 8. */
+  searchAbove?: number;
+  /** Offer "+ New …", which creates a node of type `of` and adds it. */
+  create?: boolean;
+  /** With exclusive: also offer nodes other nodes hold; picking one moves it here. */
+  movable?: boolean;
+  /** ‹ › buttons on the chips to reorder them. */
+  sortable?: boolean;
+  /** Keep this param of the listed nodes in step with the order: 1, 2, 3… */
+  renumber?: string;
+};
+const NEW = '\u0000new';
+const MOVE = '\u0000move:';
 
 /** A second line for a node in a picker, to tell similar names apart. */
 function refHint(graph: Graph, n: NodeInstance): string {
@@ -89,70 +107,109 @@ function refControl(single: boolean): ParamKind {
       const wrap = document.createElement('div');
       wrap.className = 'dr2-refs';
       let value = idList(ctx.value);
+      // With `renumber`, the list order is the numbering: positions become numbers 1, 2, 3…
+      const renumber = (ids: string[]) => {
+        if (!p.renumber) return;
+        ids.forEach((id, i) => {
+          const n = graph.nodes.get(id);
+          if (!n) return;
+          const cur = n.params[p.renumber!];
+          const next = typeof cur === 'number' ? i + 1 : String(i + 1);
+          if (cur !== next) graph.setParam(id, p.renumber!, next);
+        });
+      };
       const commit = (next: string[]) => {
         value = next;
-        draw();
         ctx.set(single ? next[0] ?? '' : next);
+        renumber(next);
+        draw();
+      };
+      // The other node (of this node's type) that holds `id` through this param, for exclusive refs.
+      const holderOf = (id: string) =>
+        [...graph.nodes.values()].find((x) => x.type === ctx.node.type && x.id !== ctx.node.id && idList(x.params[p.name]).includes(id));
+      /** Add an id: a new node, a free one, or (movable) one taken from another holder. */
+      const add = (choice: string) => {
+        let id = choice;
+        if (choice === NEW) id = graph.addNode(p.of).id;
+        else if (choice.startsWith(MOVE)) {
+          id = choice.slice(MOVE.length);
+          const holder = holderOf(id);
+          if (holder) {
+            const rest = idList(holder.params[p.name]).filter((x) => x !== id);
+            graph.setParam(holder.id, p.name, rest);
+            renumber(rest);
+          }
+        }
+        commit(single ? [id] : [...value, id]);
       };
       const typeTitle = (graph.registry?.get(p.of)?.title ?? 'item').toLowerCase();
+      const button = (cls: string, text: string, aria: string, fn: () => void, disabled = false) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = cls;
+        b.textContent = text;
+        b.setAttribute('aria-label', aria);
+        b.disabled = disabled;
+        b.addEventListener('click', fn);
+        return b;
+      };
       const draw = () => {
         wrap.textContent = '';
-        for (const id of value) {
-          const n = graph.nodes.get(id);
-          if (!n) continue;
+        const shown = value.filter((id) => graph.nodes.has(id));
+        shown.forEach((id, i) => {
+          const n = graph.nodes.get(id)!;
+          const name = nodeTitle(graph, n);
           const chip = document.createElement('span');
           chip.className = 'dr2-chip';
-          const open = document.createElement('button');
-          open.type = 'button';
+          const open = button('', name, `Open ${name}`, () => {});
           open.dataset.nmOpen = id;
-          open.textContent = nodeTitle(graph, n);
-          open.title = `Open ${open.textContent}`;
-          const rm = document.createElement('button');
-          rm.type = 'button';
-          rm.className = 'dr2-x';
-          rm.textContent = '×';
-          rm.setAttribute('aria-label', `Remove ${open.textContent}`);
-          rm.addEventListener('click', () => commit(value.filter((x) => x !== id)));
-          chip.append(open, rm);
+          open.title = `Open ${name}`;
+          const move = (d: number) => () => {
+            const next = [...shown];
+            [next[i], next[i + d]] = [next[i + d], next[i]];
+            commit(next);
+          };
+          if (p.sortable && shown.length > 1) chip.append(button('dr2-mv', '‹', `Move ${name} earlier`, move(-1), i === 0));
+          chip.append(open);
+          if (p.sortable && shown.length > 1) chip.append(button('dr2-mv', '›', `Move ${name} later`, move(1), i === shown.length - 1));
+          chip.append(button('dr2-x', '×', `Remove ${name}`, () => commit(value.filter((x) => x !== id))));
           wrap.append(chip);
+        });
+        // What can be added: free nodes, and (movable) ones another node holds.
+        const free: NodeInstance[] = [];
+        const taken: { n: NodeInstance; holder: NodeInstance }[] = [];
+        for (const x of graph.nodes.values()) {
+          if (x.type !== p.of || value.includes(x.id)) continue;
+          const holder = p.exclusive ? holderOf(x.id) : undefined;
+          if (!holder) free.push(x);
+          else if (p.movable) taken.push({ n: x, holder });
         }
-        // Who else holds which nodes, for exclusive refs.
-        const taken = new Set(
-          p.exclusive
-            ? [...graph.nodes.values()].filter((x) => x.type === ctx.node.type && x.id !== ctx.node.id).flatMap((x) => idList(x.params[p.name]))
-            : [],
-        );
-        const options = [...graph.nodes.values()].filter((x) => x.type === p.of && !value.includes(x.id) && !taken.has(x.id));
-        if (!options.length && (!single || value.length)) return;
+        if (!free.length && !taken.length && !p.create && (!single || value.length)) return;
         const label = single && value.length ? 'Change…' : `+ ${typeTitle}…`;
+        const aria = single && value.length ? `Change ${p.label ?? p.name}` : `Add ${typeTitle}`;
+        const choices = [
+          ...(p.create ? [{ id: NEW, label: `+ New ${typeTitle}`, hint: 'Create one here' }] : []),
+          ...free.map((x) => ({ id: x.id, label: nodeTitle(graph, x), hint: refHint(graph, x) })),
+          ...taken.map(({ n, holder }) => ({ id: MOVE + n.id, label: `${nodeTitle(graph, n)} (in ${nodeTitle(graph, holder)})`, hint: `Moves it from ${nodeTitle(graph, holder)}` })),
+        ];
         // Long lists get a searchable sheet instead of a plain select.
-        if (ctx.choose && options.length > (p.searchAbove ?? 8)) {
-          const btn = document.createElement('button');
-          btn.type = 'button';
-          btn.className = 'dr2-pick dr2-search';
-          btn.textContent = label;
-          btn.setAttribute('aria-label', single && value.length ? `Change ${p.label ?? p.name}` : `Add ${typeTitle}`);
-          btn.addEventListener('click', async () => {
-            const id = await ctx.choose!({
-              title: single && value.length ? `Change ${p.label ?? p.name}` : `Add ${typeTitle}`,
-              placeholder: `Search ${options.length} ${typeTitle}s`,
-              items: options.map((x) => ({ id: x.id, label: nodeTitle(graph, x), hint: refHint(graph, x) })),
-            });
-            if (id) commit(single ? [id] : [...value, id]);
+        if (ctx.choose && free.length + taken.length > (p.searchAbove ?? 8)) {
+          const btn = button('dr2-pick dr2-search', label, aria, async () => {
+            const id = await ctx.choose!({ title: aria, placeholder: `Search ${free.length + taken.length} ${typeTitle}s`, items: choices });
+            if (id) add(id);
           });
           wrap.append(btn);
           return;
         }
         const pick = document.createElement('select');
         pick.className = 'dr2-pick';
-        pick.setAttribute('aria-label', single && value.length ? `Change ${p.label ?? p.name}` : `Add ${typeTitle}`);
-        const option = (label: string, v: string) => Object.assign(document.createElement('option'), { textContent: label, value: v });
+        pick.setAttribute('aria-label', aria);
+        const option = (text: string, v: string) => Object.assign(document.createElement('option'), { textContent: text, value: v });
         pick.append(option(label, ''));
-        for (const x of options) pick.append(option(nodeTitle(graph, x), x.id));
-        if (!options.length) pick.disabled = true;
+        for (const c of choices) pick.append(option(c.label, c.id));
+        if (!choices.length) pick.disabled = true;
         pick.addEventListener('change', () => {
-          if (!pick.value) return;
-          commit(single ? [pick.value] : [...value, pick.value]);
+          if (pick.value) add(pick.value);
         });
         wrap.append(pick);
       };
@@ -284,7 +341,7 @@ const sceneNode = defineNode({
   params: [
     number(),
     { name: 'time', label: 'time', kind: 'select', options: TIMES, default: 'DAY' },
-    refs('shots', 'shots', D2.shot, true),
+    { ...refs('shots', 'shots', D2.shot, true), create: true, movable: true, sortable: true, renumber: 'number' },
     text('description', 'description', 'What happens'),
     images('storyboard', 'storyboard', true),
   ],
@@ -306,7 +363,7 @@ const episodeNode = defineNode({
   flavor: 'sink',
   width: 440,
   description: 'A titled, numbered episode: a set of scenes',
-  params: [number(), refs('scenes', 'scenes', D2.scene, true), text('description', 'description', 'Optional synopsis'), images('images', 'poster', true), ...look],
+  params: [number(), { ...refs('scenes', 'scenes', D2.scene, true), create: true, movable: true, sortable: true, renumber: 'number' }, text('description', 'description', 'Optional synopsis'), images('images', 'poster', true), ...look],
   onCreate: (n) => void (n.label ??= 'Untitled episode'),
 });
 
@@ -579,6 +636,9 @@ const css = `
 .dr2-chip button[data-nm-open]:hover, .dr2-chip button[data-nm-open]:focus-visible { color: var(--_accent); text-decoration: underline; }
 .dr2-chip .dr2-x { padding: 6px 8px 6px 2px; color: var(--_muted); }
 .nm-node:not(.nm-selected) .dr2-chip .dr2-x { display: none; }
+.dr2-chip .dr2-mv { padding: 6px 9px; min-width: 14px; text-align: center; color: var(--_muted); font-weight: 700; font-size: 14px; }
+.dr2-chip .dr2-mv:disabled { opacity: .3; cursor: default; }
+.nm-node:not(.nm-selected) .dr2-chip .dr2-mv { display: none; }
 .dr2-pick { font: 12px var(--_font); max-width: 100%; min-height: 28px; }
 .nm-node:not(.nm-selected) .dr2-pick { display: none; }
 .dr2-search { font: 500 12px/1 var(--_font); min-height: 30px; padding: 0 12px; border-radius: 999px; border: 1px dashed var(--_border);

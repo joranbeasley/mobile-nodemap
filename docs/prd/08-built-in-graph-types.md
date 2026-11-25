@@ -55,6 +55,7 @@ A production isn't really a flow, and wiring many characters into many shots get
   - Shots: their scene and episodes.
   - Scenes: their episode, characters, locations and props.
   - Episodes: their actors and locations.
+- **Ordering.** A scene card's shots and an episode card's scenes have a picker that is always there: "+ New shot" creates one in place, free shots are listed, and shots in other scenes can be moved over. ‹ › on the chips reorder them, and the order is the numbering, so shots (or scenes) renumber 1, 2, 3… after any change.
 - **Adding.** + adds a type the current tab shows. On the Shots tab, with a shot selected, a new shot joins that shot's scene, numbered next. On the Scenes tab, with a scene selected, a new scene joins that scene's episode, numbered next. With a prop selected, a new prop has the same type and wearer.
 - **Same engine.** Underneath it's the drama model: the same checks, details cards and Seedance export. A shot's prompt is identical to the wired version's.
 

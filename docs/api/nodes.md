@@ -107,7 +107,15 @@ Drama boards add two kinds for references to other nodes (`refParam`, `refsParam
 { name: 'shots', kind: 'refs', of: 'drama2/shot', exclusive: true }          // a list of ids
 ```
 
-Each referenced node shows as a chip: tap it to jump to that node (`data-nm-open`) and tap × to remove it. A picker adds one: a plain select up to `searchAbove` choices (default 8), and beyond that a button that opens the editor's searchable chooser (`ctx.choose`). The chooser shows a hint under each name (who plays a character, a shot's episode and scene, a prop's type and wearer). With `exclusive`, a node can be referred to by only one node through that param, so the picker offers only free ones (a shot belongs to one scene).
+Each referenced node shows as a chip: tap it to jump to that node (`data-nm-open`) and tap × to remove it. A picker adds one: a plain select up to `searchAbove` choices (default 8), and beyond that a button that opens the editor's searchable chooser (`ctx.choose`). The chooser shows a hint under each name (who plays a character, a shot's episode and scene, a prop's type and wearer). With `exclusive`, a node can be referred to by only one node through that param, so the picker offers only free ones (a shot belongs to one scene). More options:
+
+| Option | |
+| --- | --- |
+| `create` | The picker starts with "+ New …", which creates a node of type `of` and adds it. |
+| `movable` | With `exclusive`: also offer nodes that other nodes hold, labelled "(in Scene 2)". Picking one moves it here. |
+| `sortable` | ‹ › buttons on each chip (on the selected card) to reorder the list. |
+| `renumber: 'number'` | Keep that param of the listed nodes in step with the order (1, 2, 3…; text or number, as it was) after any add, remove, move or reorder. A node moved away renumbers its old holder too. |
+| `searchAbove` | Use the searchable chooser past this many choices (default 8). |
 
 ## `PortTypeDef`: custom value types
 

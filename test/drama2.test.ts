@@ -250,16 +250,63 @@ describe('Editor views', () => {
     editor.destroy();
   });
 
-  it('offers only free shots when adding to a scene', () => {
+  it('adds, moves, creates and sorts shots from a scene card', async () => {
     const { g, el, editor } = mount();
-    void editor.setView('scenes');
-    const loose = g.addNode('drama2/shot', { id: 'loose' });
-    void loose;
-    const pick = el.querySelector<HTMLSelectElement>('.nm-node[data-id="sc1"] .dr2-pick')!;
-    expect([...pick.options].map((o) => o.value)).toEqual(['', 'loose']);
-    pick.value = 'loose';
-    pick.dispatchEvent(new Event('change'));
-    expect(g.nodes.get('sc1')!.params.shots).toEqual(['s1a', 's1b', 's1c', 'loose']);
+    await editor.setView('scenes');
+    editor.select({ node: 'sc1' });
+    g.addNode('drama2/shot', { id: 'loose', params: { number: '9' } });
+    const pick = () => el.querySelector<HTMLSelectElement>('.nm-node[data-id="sc1"] [data-param="shots"] .dr2-pick')!;
+    const choose = (match: (o: HTMLOptionElement) => boolean) => {
+      const sel = pick();
+      sel.value = [...sel.options].find(match)!.value;
+      sel.dispatchEvent(new Event('change'));
+    };
+    const labels = [...pick().options].map((o) => o.textContent);
+    expect(labels[0]).toBe('+ shot…');
+    expect(labels[1]).toBe('+ New shot');
+    expect(labels).toContain('Shot 9 · Medium');
+    expect(labels).toContain('Shot 1 · Medium (in Scene 2 · NIGHT)');
+    const shots = (id: string) => g.nodes.get(id)!.params.shots as string[];
+    const numbers = (id: string) => shots(id).map((x) => g.nodes.get(x)!.params.number);
+
+    // A free shot joins, numbered after the others.
+    choose((o) => o.value === 'loose');
+    expect(shots('sc1')).toEqual(['s1a', 's1b', 's1c', 'loose']);
+    expect(numbers('sc1')).toEqual(['1', '2', '3', '4']);
+
+    // A shot from another scene moves here; both scenes renumber.
+    choose((o) => o.textContent!.startsWith('Shot 1 · Medium (in Scene 2'));
+    expect(shots('sc2')).toEqual(['s2b']);
+    expect(numbers('sc2')).toEqual(['1']);
+    expect(shots('sc1').at(-1)).toBe('s2a');
+    expect(numbers('sc1')).toEqual(['1', '2', '3', '4', '5']);
+
+    // "+ New shot" creates one in place.
+    choose((o) => o.textContent === '+ New shot');
+    const created = shots('sc1').at(-1)!;
+    expect(g.nodes.get(created)!.type).toBe('drama2/shot');
+    expect(g.nodes.get(created)!.params.number).toBe('6');
+
+    // ‹ moves a shot earlier, and the numbers follow.
+    const earlier = el.querySelector<HTMLButtonElement>('.nm-node[data-id="sc1"] [data-param="shots"] .dr2-chip:nth-child(3) .dr2-mv')!;
+    expect(earlier.getAttribute('aria-label')).toMatch(/earlier/);
+    earlier.click();
+    expect(shots('sc1').slice(0, 3)).toEqual(['s1a', 's1c', 's1b']);
+    expect(g.nodes.get('s1c')!.params.number).toBe('2');
+    expect(g.nodes.get('s1b')!.params.number).toBe('3');
+    editor.destroy();
+  });
+
+  it('adds, moves and sorts scenes from an episode card', async () => {
+    const { g, el, editor } = mount();
+    await editor.setView('episodes');
+    editor.select({ node: 'ep2' });
+    const sel = el.querySelector<HTMLSelectElement>('.nm-node[data-id="ep2"] [data-param="scenes"] .dr2-pick')!;
+    sel.value = [...sel.options].find((o) => o.textContent!.startsWith('Scene 3 · EVENING (in'))!.value;
+    sel.dispatchEvent(new Event('change'));
+    expect(g.nodes.get('ep1')!.params.scenes).toEqual(['sc1', 'sc2']);
+    expect(g.nodes.get('ep2')!.params.scenes).toEqual(['sc4', 'sc3']);
+    expect(g.nodes.get('sc3')!.params.number).toBe(2); // scene numbers stay numbers
     editor.destroy();
   });
 });
