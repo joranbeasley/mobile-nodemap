@@ -12,6 +12,7 @@ import { layered } from '../layout/layered.js';
 import { findFreeSpot } from '../layout/place.js';
 import { bezierPath, overlaps, roundedPath } from '../layout/geometry.js';
 import type { LayoutEngine, LayoutInput, Positions, Rect } from '../layout/types.js';
+import type { EditorView } from '../core/graph-type.js';
 
 type Dir = 'in' | 'out';
 export interface Anchor extends PortRef {
@@ -42,6 +43,12 @@ export interface EditorOptions {
    * narrow portrait screens, left to right otherwise. Tidy, placement and wires follow it.
    */
   direction?: 'auto' | 'LR' | 'TB';
+  /**
+   * Tabs, each showing some node types as a grid, in rows or as a flow (see EditorView).
+   * Elements with `data-nm-open="<node id>"` (in node views and param controls) jump to that
+   * node, switching tab when needed; a Back button returns.
+   */
+  views?: EditorView[];
   /**
    * Below this zoom the map is an overview: tapping a node zooms in on it instead of
    * touching its fields or ports. Default 0.6 (the readable zoom phones open at). 0 turns it off.
@@ -168,6 +175,11 @@ export class NodeEditor extends Emitter<EditorEvents> {
   private routeAll = false;
   private routeOnly = new Set<string>();
   private routeFrame = 0;
+  private views: EditorView[] = [];
+  private view?: EditorView;
+  private viewBar?: HTMLElement;
+  private viewHistory: { view: string; node?: string }[] = [];
+  private viewTimer?: ReturnType<typeof setTimeout>;
 
   constructor(container: HTMLElement, options: EditorOptions) {
     super();
@@ -204,6 +216,14 @@ export class NodeEditor extends Emitter<EditorEvents> {
     this.ghostLayer = h('div', { class: 'nm-ghosts', 'aria-label': 'Connected nodes off screen' });
     container.append(this.viewportEl, this.ghostLayer, this.hud, this.toast);
     if (options.toolbar !== false) this.buildToolbar();
+    this.views = options.views ?? [];
+    if (this.views.length) {
+      this.view = this.views[0];
+      this.root.dataset.view = this.view.id;
+      this.buildViewBar();
+    }
+    container.addEventListener('click', this.onOpenLink);
+    this.disposers.push(() => container.removeEventListener('click', this.onOpenLink));
 
     if (typeof ResizeObserver !== 'undefined') {
       this.resizeObs = new ResizeObserver((entries) => {
@@ -212,7 +232,9 @@ export class NodeEditor extends Emitter<EditorEvents> {
           if (id && this.records.has(id)) {
             const before = this.records.get(id)!.h;
             this.measure(id);
-            if (this.opts.placement && this.records.get(id)!.h > before + 1) {
+            if (this.gridded) {
+              if (Math.abs(this.records.get(id)!.h - before) > 1) this.scheduleViewLayout();
+            } else if (this.opts.placement && this.records.get(id)!.h > before + 1) {
               if (this.flowNow === 'TB') this.reflowBelow(id, before);
               else this.pushAway(id);
             }
@@ -234,7 +256,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
     this.root.dataset.flow = this.flowNow;
     this.renderAll();
     requestAnimationFrame(() => {
-      if (!this.relayoutForFlow()) this.fit();
+      if (this.gridded) void this.layoutView({ animate: false, home: true });
+      else if (!this.relayoutForFlow()) this.fit();
     });
     // Turning the phone (auto direction) switches the flow.
     if (typeof ResizeObserver !== 'undefined') {
@@ -364,9 +387,10 @@ export class NodeEditor extends Emitter<EditorEvents> {
     const padding = opts.padding ?? 32;
     const minScale = Math.max(this.opts.minZoom, opts.minScale ?? 0.6);
     const r = this.root.getBoundingClientRect();
-    if (!this.graph.nodes.size || !r.width) return this.setViewport({ x: r.width / 2, y: r.height / 2, k: 1 });
+    const shown = [...this.graph.nodes.values()].filter((n) => this.inView(n));
+    if (!shown.length || !r.width) return this.setViewport({ x: r.width / 2, y: r.height / 2, k: 1 });
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const n of this.graph.nodes.values()) {
+    for (const n of shown) {
       const el = this.records.get(n.id)?.el;
       x0 = Math.min(x0, n.x);
       y0 = Math.min(y0, n.y);
@@ -374,13 +398,14 @@ export class NodeEditor extends Emitter<EditorEvents> {
       y1 = Math.max(y1, n.y + (el?.offsetHeight || 100));
     }
     const bottomUi = this.toolbar ? 64 : 0;
+    const topUi = this.viewBar ? 48 : 0;
     const w = r.width - padding * 2;
-    const hgt = r.height - padding * 2 - bottomUi;
+    const hgt = r.height - padding * 2 - bottomUi - topUi;
     const ideal = Math.min(w / (x1 - x0), hgt / (y1 - y0), 1.15);
     const k = Math.min(this.opts.maxZoom, Math.max(minScale, ideal));
     const cx = (x1 - x0) * k <= w ? (w - (x1 - x0) * k) / 2 : 0;
     const cy = (y1 - y0) * k <= hgt ? (hgt - (y1 - y0) * k) / 2 : 0;
-    this.setViewport({ k, x: padding + cx - x0 * k, y: padding + cy - y0 * k });
+    this.setViewport({ k, x: padding + cx - x0 * k, y: padding + topUi + cy - y0 * k });
   }
 
   select(sel: { node?: string; edge?: string }): void {
@@ -419,6 +444,15 @@ export class NodeEditor extends Emitter<EditorEvents> {
    * With `connectFrom` it is wired to that port and placed beside it, in free space.
    */
   addNode(type: string, at?: { x: number; y: number }, connectFrom?: Anchor): NodeInstance {
+    if (this.gridded && !connectFrom) {
+      // Boards lay themselves out: the view decides where (and to what) the new node belongs.
+      const before = this.selected.node ? this.graph.nodes.get(this.selected.node) : undefined;
+      const node = this.graph.addNode(type, { x: 0, y: 1e5 });
+      this.view!.onAdd?.(node, { graph: this.graph, selected: before });
+      this.select({ node: node.id });
+      void this.layoutView().then(() => this.ensureVisible(node.id));
+      return node;
+    }
     const r = this.root.getBoundingClientRect();
     const p = at ?? this.screenToWorld(r.left + r.width / 2, r.top + r.height / 2);
     const node = this.graph.addNode(type, { x: Math.round(p.x - 90), y: Math.round(p.y - 30) });
@@ -472,6 +506,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
    * pass `maxWidth`. Afterwards the view fits at a readable zoom; pan to see the rest.
    */
   async autoLayout(opts: { animate?: boolean; fit?: boolean; maxWidth?: number } = {}): Promise<void> {
+    if (this.gridded) return this.layoutView({ animate: opts.animate, home: opts.fit !== false });
     if (!this.graph.nodes.size) return;
     const input = this.layoutInput();
     input.direction = this.flowNow;
@@ -485,7 +520,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
   /** The snapshot a layout engine works on: node boxes and port offsets as currently rendered. */
   layoutInput(): LayoutInput {
     return {
-      nodes: [...this.graph.nodes.values()].map((n) => {
+      nodes: [...this.graph.nodes.values()].filter((n) => this.inView(n)).map((n) => {
         const rec = this.records.get(n.id);
         return {
           id: n.id,
@@ -499,7 +534,9 @@ export class NodeEditor extends Emitter<EditorEvents> {
           }),
         };
       }),
-      edges: [...this.graph.edges.values()].map((e) => ({ id: e.id, from: { ...e.from }, to: { ...e.to } })),
+      edges: [...this.graph.edges.values()]
+        .filter((e) => this.inView(this.graph.nodes.get(e.from.node)) && this.inView(this.graph.nodes.get(e.to.node)))
+        .map((e) => ({ id: e.id, from: { ...e.from }, to: { ...e.to } })),
     };
   }
 
@@ -527,6 +564,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
    * (upstream or downstream, whichever that node needs next); otherwise it adds a free node.
    */
   openAddSheet(): void {
+    // Boards have no wires: the view's onAdd links the new node to the selection instead.
+    if (this.gridded) return this.openPalette();
     // A tapped port wins: add a node on that port (downstream of an output, upstream of an input).
     if (this.pending) {
       const p = this.pending;
@@ -783,7 +822,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       list.textContent = '';
       for (const [cat, types] of this.registry.categories()) {
         const items = types.filter(
-          (t) => compatible(t) && !this.registry.rules.canAddNode?.(t.type, this.graph) && (!q || `${t.title} ${t.type} ${cat} ${t.description ?? ''} ${(t.tags ?? []).join(' ')}`.toLowerCase().includes(q)),
+          (t) => compatible(t) && (!this.view || this.view.types.includes(t.type)) && !this.registry.rules.canAddNode?.(t.type, this.graph) && (!q || `${t.title} ${t.type} ${cat} ${t.description ?? ''} ${(t.tags ?? []).join(' ')}`.toLowerCase().includes(q)),
         );
         if (!items.length) continue;
         list.append(h('div', { class: 'nm-sheet-cat' }, cat));
@@ -841,9 +880,22 @@ export class NodeEditor extends Emitter<EditorEvents> {
    * to near the top of the screen. It copies the editor's resolved colours and fonts, so
    * themes and page variables still apply.
    */
+  /** Anything marked data-nm-open (a link in a node view, a reference chip) jumps to that node. */
+  private onOpenLink = (e: Event): void => {
+    const t = (e.target as Element | null)?.closest?.<HTMLElement>('[data-nm-open]');
+    if (!t) return;
+    e.preventDefault();
+    e.stopPropagation();
+    this.closePalette();
+    this.hideDetails();
+    void this.openNode(t.dataset.nmOpen!);
+  };
+
   private overlay(): HTMLElement {
     if (this.overlayEl) return this.overlayEl;
     const el = h('div', { class: 'nm-root nm-overlay' });
+    // Links in sheets (reference chips in the edit sheet) jump too.
+    el.addEventListener('click', this.onOpenLink);
     const cs = getComputedStyle(this.root);
     for (const v of PRIVATE_VARS) {
       const value = cs.getPropertyValue(v);
@@ -948,6 +1000,163 @@ export class NodeEditor extends Emitter<EditorEvents> {
       chip.addEventListener('click', () => this.goToNode(id));
       layer.append(chip);
     }
+  }
+
+  // ---------------------------------------------------------------- views
+
+  /** The id of the view (tab) being shown, if the editor has views. */
+  get currentView(): string | undefined {
+    return this.view?.id;
+  }
+
+  private inView(n: NodeInstance | undefined): boolean {
+    return !!n && (!this.view || this.view.types.includes(n.type));
+  }
+
+  /** A view that lays itself out (grid or rows) rather than a free canvas. */
+  private get gridded(): boolean {
+    return !!this.view && (this.view.layout === 'grid' || this.view.layout === 'rows');
+  }
+
+  /** Show another view (tab): its nodes, its layout and its + menu. */
+  async setView(id: string, opts: { home?: boolean } = {}): Promise<void> {
+    const v = this.views.find((x) => x.id === id);
+    if (!v) return;
+    const changed = v !== this.view;
+    this.view = v;
+    this.root.dataset.view = v.id;
+    this.closePalette();
+    this.hideDetails();
+    for (const [nid, rec] of this.records) rec.el.hidden = !this.inView(this.graph.nodes.get(nid));
+    if (this.selected.node && !this.inView(this.graph.nodes.get(this.selected.node))) this.select({});
+    this.updateViewBar();
+    if (changed) this.emit('view', { id: v.id });
+    if (this.gridded) await this.layoutView({ animate: false, home: opts.home !== false });
+    else {
+      this.scheduleRoute();
+      if (opts.home !== false) this.fit();
+    }
+  }
+
+  /**
+   * Jump to a node: switch to a view that shows it (the current one when it can), centre it
+   * and select it. The Back button returns to where you were.
+   */
+  async openNode(id: string): Promise<void> {
+    const n = this.graph.nodes.get(id);
+    if (!n) return;
+    if (this.view) this.viewHistory.push({ view: this.view.id, node: this.selected.node });
+    const target = this.inView(n) ? this.view : this.views.find((v) => v.types.includes(n.type));
+    if (target && target !== this.view) await this.setView(target.id, { home: false });
+    this.updateViewBar();
+    this.zoomToNode(id, { zoom: Math.max(this.vp.k, Math.min(1, this.opts.overviewZoom + 0.25)) });
+    this.select({ node: id });
+  }
+
+  /** Go back to the view and node before the last jump. */
+  async back(): Promise<void> {
+    const last = this.viewHistory.pop();
+    if (!last) return;
+    await this.setView(last.view, { home: !last.node });
+    this.updateViewBar();
+    if (last.node && this.graph.nodes.has(last.node)) {
+      this.zoomToNode(last.node, { zoom: this.vp.k });
+      this.select({ node: last.node });
+    }
+  }
+
+  private buildViewBar(): void {
+    this.viewBar = h('div', { class: 'nm-views', role: 'tablist', 'aria-label': 'Views' });
+    this.viewBar.addEventListener('pointerdown', (e) => e.stopPropagation());
+    this.root.append(this.viewBar);
+    this.updateViewBar();
+  }
+
+  private updateViewBar(): void {
+    const bar = this.viewBar;
+    if (!bar) return;
+    bar.textContent = '';
+    if (this.viewHistory.length) {
+      const back = h('button', { type: 'button', class: 'nm-view-back', 'aria-label': 'Back' }, '← Back');
+      back.addEventListener('click', () => void this.back());
+      bar.append(back);
+    }
+    for (const v of this.views) {
+      const count = [...this.graph.nodes.values()].filter((n) => v.types.includes(n.type)).length;
+      const b = h('button', { type: 'button', role: 'tab', class: 'nm-view-tab', 'aria-selected': String(v === this.view), 'data-view': v.id }, v.title, h('span', {}, String(count)));
+      b.addEventListener('click', () => {
+        if (v === this.view) return void this.layoutView({ home: true });
+        this.viewHistory = [];
+        void this.setView(v.id);
+      });
+      bar.append(b);
+    }
+  }
+
+  private scheduleViewLayout(): void {
+    clearTimeout(this.viewTimer);
+    this.viewTimer = setTimeout(() => void this.layoutView(), 180);
+  }
+
+  /** Lay the current view out as a grid or in rows (see EditorView). */
+  async layoutView(opts: { animate?: boolean; home?: boolean } = {}): Promise<void> {
+    const v = this.view;
+    if (!v || !this.gridded) return;
+    clearTimeout(this.viewTimer);
+    const shown = [...this.graph.nodes.values()].filter((n) => this.inView(n));
+    for (const n of shown) this.measure(n.id);
+    const size = (id: string) => this.records.get(id) ?? { w: 180, h: 80 };
+    const typeRank = (n: NodeInstance) => v.types.indexOf(n.type);
+    const byDefault = () => [...shown].sort((a, b) => typeRank(a) - typeRank(b)).map((n) => n.id);
+    const shownIds = new Set(shown.map((n) => n.id));
+    const pos: Positions = {};
+    const GAP = 24;
+    if (v.layout === 'grid') {
+      const seen = new Set<string>();
+      const order = [...(v.order?.(this.graph) ?? []), ...byDefault()].filter((id) => shownIds.has(id) && !seen.has(id) && seen.add(id));
+      const colW = Math.max(160, ...order.map((id) => size(id).w));
+      const r = this.root.getBoundingClientRect();
+      const cols = Math.max(1, Math.floor((Math.max(r.width, colW) - 32 + GAP) / (colW + GAP)));
+      let y = 0;
+      for (let i = 0; i < order.length; i += cols) {
+        const row = order.slice(i, i + cols);
+        row.forEach((id, c) => (pos[id] = { x: c * (colW + GAP), y }));
+        y += Math.max(...row.map((id) => size(id).h)) + GAP;
+      }
+    } else {
+      const placed = new Set<string>();
+      const rows = (v.rows?.(this.graph) ?? []).map((row) => row.filter((id) => shownIds.has(id) && !placed.has(id) && placed.add(id))).filter((row) => row.length);
+      const rest = byDefault().filter((id) => !placed.has(id));
+      if (rest.length) rows.push(rest);
+      let y = 0;
+      for (const row of rows) {
+        let x = 0;
+        row.forEach((id, i) => {
+          pos[id] = { x, y };
+          // A little extra room after the row's first card, which heads the row.
+          x += size(id).w + (i === 0 && row.length > 1 ? GAP * 2 : GAP);
+        });
+        y += Math.max(...row.map((id) => size(id).h)) + GAP * 2;
+      }
+    }
+    const moved = Object.entries(pos).some(([id, p]) => {
+      const n = this.graph.nodes.get(id)!;
+      return n.x !== p.x || n.y !== p.y;
+    });
+    if (moved) await this.animateTo(pos, opts.animate === false ? 0 : 220);
+    if (opts.home) this.viewHome();
+  }
+
+  /** Top-left of the current view at a readable zoom. */
+  private viewHome(): void {
+    const r = this.root.getBoundingClientRect();
+    const shown = [...this.graph.nodes.values()].filter((n) => this.inView(n));
+    if (!r.width || !shown.length) return this.setViewport({ x: 16, y: (this.viewBar ? 56 : 16), k: 1 });
+    const x0 = Math.min(...shown.map((n) => n.x));
+    const y0 = Math.min(...shown.map((n) => n.y));
+    const x1 = Math.max(...shown.map((n) => n.x + (this.records.get(n.id)?.w ?? 180)));
+    const k = Math.min(1, Math.max(this.opts.overviewZoom + 0.15, (r.width - 32) / Math.max(1, x1 - x0)));
+    this.setViewport({ k, x: 16 - x0 * k, y: (this.viewBar ? 60 : 16) - y0 * k });
   }
 
   /** Pan (keeping the zoom) so a node is centred, and select it. */
@@ -1172,7 +1381,9 @@ export class NodeEditor extends Emitter<EditorEvents> {
     this.disposers.forEach((d) => d());
     this.history?.dispose();
     this.resizeObs?.disconnect();
+    clearTimeout(this.viewTimer);
     this.root.textContent = '';
+    delete this.root.dataset.view;
     this.root.classList.remove('nm-root');
   }
 
@@ -1199,7 +1410,9 @@ export class NodeEditor extends Emitter<EditorEvents> {
     switch (c.kind) {
       case 'load':
         this.renderAll();
-        requestAnimationFrame(() => this.relayoutForFlow());
+        this.viewHistory = [];
+        this.updateViewBar();
+        requestAnimationFrame(() => (this.gridded ? void this.layoutView({ animate: false, home: true }) : this.relayoutForFlow()));
         break;
       case 'node:add':
         this.buildNode(c.node);
@@ -1252,6 +1465,10 @@ export class NodeEditor extends Emitter<EditorEvents> {
     }
     this.updateToolbar();
     this.scheduleGhosts();
+    if (this.views.length && c.kind !== 'node:move' && c.kind !== 'load') {
+      this.updateViewBar();
+      if (this.gridded) this.scheduleViewLayout();
+    }
   }
 
   private portsKey(node: NodeInstance): string {
@@ -1341,6 +1558,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       if (this.selected.node === node.id) el.classList.add('nm-selected');
     } else this.viewportEl.append(el);
     this.records.set(node.id, { el, w: 180, h: 80, portsKey: this.portsKey(node), offsets: new Map() });
+    el.hidden = !this.inView(node);
     this.place(node);
     this.resizeObs?.observe(el);
 
@@ -1422,7 +1640,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
   }
 
   private customControl(kind: ParamKind, node: NodeInstance, param: ParamDef, value: unknown, key: string): HTMLElement {
-    const el = kind.render({ param, node, value, key, set: (v) => this.graph.setParam(node.id, param.name, v) });
+    const el = kind.render({ param, node, graph: this.graph, value, key, set: (v) => this.graph.setParam(node.id, param.name, v) });
     el.dataset.paramKind = kind.kind;
     el.dataset.param = param.name;
     return el;
@@ -1550,7 +1768,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
     const rects: Rect[] = [];
     for (const [id, rec] of this.records) {
       const n = this.graph.nodes.get(id);
-      if (n) rects.push({ x: n.x, y: n.y, w: rec.w, h: rec.h });
+      if (n && this.inView(n)) rects.push({ x: n.x, y: n.y, w: rec.w, h: rec.h });
     }
     const router = new Router(rects);
     const ends = edges.map((e) => ({ e, a: this.portPos(e.from, 'out'), b: this.portPos(e.to, 'in') }));
@@ -1641,7 +1859,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
     const out: Rect[] = [];
     for (const [oid, rec] of this.records) {
       const o = this.graph.nodes.get(oid);
-      if (o && oid !== id) out.push({ x: o.x, y: o.y, w: rec.w, h: rec.h });
+      if (o && oid !== id && this.inView(o)) out.push({ x: o.x, y: o.y, w: rec.w, h: rec.h });
     }
     return out;
   }
@@ -1900,6 +2118,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
 
   private onDown(e: PointerEvent): void {
     let t = e.target as Element;
+    // Links and expanders marked live work even before their node is selected.
+    if (!this.isOverview && t.closest?.('[data-nm-open], [data-nm-live]')) return;
     // In the overview a node is one big target: its fields and ports don't respond.
     const nodeOf = t.closest<HTMLElement>('.nm-node');
     // A node's fields only respond once it is selected (and never in the overview): until
@@ -2026,6 +2246,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
         break;
       case 'node':
         this.records.get(g.id)?.el.classList.remove('nm-dragging');
+        if (g.moved && this.gridded) this.scheduleViewLayout();
         if (g.moved) {
           this.scheduleRoute();
           const n = this.graph.nodes.get(g.id);

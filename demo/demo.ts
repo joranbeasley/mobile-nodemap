@@ -14,6 +14,7 @@ import {
   networkGraph,
   umlGraph,
   dramaGraph,
+  drama2Graph,
   setDramaFileSaver,
   functionGraph,
   NodeLibrary,
@@ -154,7 +155,7 @@ type Downloads = { save(f: { filename: string; data: Blob | string }): Promise<u
   .then((d) => d && setDramaFileSaver((f) => d.save(f)))
   .catch(() => undefined);
 
-const graphTypes: GraphType[] = [demoMath, demoFunction, networkGraph, umlGraph, dramaGraph, paletteGraph];
+const graphTypes: GraphType[] = [demoMath, demoFunction, networkGraph, umlGraph, dramaGraph, drama2Graph, paletteGraph];
 type Example = GraphExample;
 
 // ------------------------------------------------------------------ app
@@ -227,7 +228,7 @@ function startSession(type: GraphType) {
   registry = type.createRegistry();
   graph = new Graph(registry);
   evaluator = new Evaluator(graph, registry);
-  editor = new NodeEditor($('#canvas'), { graph, registry, evaluator, wires: wiresSel.value as 'smart' | 'curved', layout: layoutEngine, direction: type.editor?.direction });
+  editor = new NodeEditor($('#canvas'), { graph, registry, evaluator, wires: wiresSel.value as 'smart' | 'curved', layout: layoutEngine, direction: type.editor?.direction, views: type.editor?.views });
   applyTheme();
   const building = type === demoFunction;
   ($('[data-panel="build"]') as HTMLElement).hidden = !building;

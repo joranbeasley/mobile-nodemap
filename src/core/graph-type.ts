@@ -1,5 +1,6 @@
 import { Registry, type GraphEngine, type GraphRules, type NodeInput, type NodePack } from './registry.js';
-import type { GraphJSON, ParamKind, PortTypeDef } from './types.js';
+import type { GraphJSON, NodeInstance, ParamKind, PortTypeDef } from './types.js';
+import type { Graph } from './graph.js';
 
 export interface GraphExample {
   id: string;
@@ -15,6 +16,32 @@ export interface GraphTypeEditorDefaults {
   autoLayout?: boolean;
   /** Which way maps of this type flow (see the editor's `direction`). UML uses 'TB': parents on top. */
   direction?: 'auto' | 'LR' | 'TB';
+  /** Tabs that each show some node types, laid out as a grid, in rows or as a flow. */
+  views?: EditorView[];
+}
+
+/**
+ * A tab in the editor: which node types it shows (and its + button adds) and how they are
+ * laid out. With views, the map is a set of boards rather than one canvas.
+ *
+ *   { id: 'cast', title: 'Cast', types: ['drama2/character'], layout: 'grid' }
+ */
+export interface EditorView {
+  id: string;
+  title: string;
+  /** Node types shown in this view and offered by its + button. */
+  types: string[];
+  /**
+   * 'grid': cards in as many columns as fit the screen. 'rows': one row per group (see
+   * `rows`). 'flow' (default): the usual layered layout.
+   */
+  layout?: 'grid' | 'rows' | 'flow';
+  /** Rows layout: node ids per row, in order. Nodes left out go in a last row. */
+  rows?: (graph: Graph) => string[][];
+  /** Grid layout: node ids in order. Default: by `types` order, then as added. */
+  order?: (graph: Graph) => string[];
+  /** After a node is added in this view: link it to what was selected, number it, etc. */
+  onAdd?: (node: NodeInstance, ctx: { graph: Graph; selected?: NodeInstance }) => void;
 }
 
 export interface GraphTypeDef {

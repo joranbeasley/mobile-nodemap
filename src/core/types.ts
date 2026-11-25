@@ -81,6 +81,8 @@ export type ParamDef = BuiltinParamDef | CustomParamDef;
 export interface ParamControlContext {
   param: ParamDef;
   node: NodeInstance;
+  /** The map the node is in (for controls that refer to other nodes). */
+  graph: import('./graph.js').Graph;
   value: unknown;
   /** Commit a new value (updates the graph and re-runs). */
   set(value: unknown): void;

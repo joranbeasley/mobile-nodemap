@@ -4,7 +4,7 @@ A small, dependency-free TypeScript library for building **node maps** (node gra
 
 - **`mobile-nodemap/core`**: the data model and the extension API. `Graph`, `History`, plus `defineGraphType`, `definePack`, `defineNode`, `extendNode` and `Registry`. No DOM.
 - **`mobile-nodemap/runtime`**: the evaluator. Memoised, async, cancellable execution; `compile()` turns a map into a plain async function; `graphNode()` turns a map into a reusable node. No DOM.
-- **Built-in graph types and packs**: `mathGraph` / `mathPack` (about 35 nodes), `networkGraph` / `networkPack` (devices plus a reachability engine) `umlGraph` / `umlPack` (class diagrams with UML arrows, checks and TypeScript export) `dramaGraph` / `dramaPack` (plan a production: characters, locations, shots, scenes, episodes, with pictures and shot lists) and `functionGraph` (build your own nodes).
+- **Built-in graph types and packs**: `mathGraph` / `mathPack` (about 35 nodes), `networkGraph` / `networkPack` (devices plus a reachability engine) `umlGraph` / `umlPack` (class diagrams with UML arrows, checks and TypeScript export) `drama2Graph` (Drama boards: the drama model as tabs of linked cards, no wires), `dramaGraph` / `dramaPack` (plan a production: characters, locations, shots, scenes, episodes, with pictures and shot lists) and `functionGraph` (build your own nodes).
 - **Themes**: six built-in themes (three light, three dark) and node flavors. See [Themes and flavors](#themes-and-flavors).
 - **Ports and adapters**: standard interfaces (`GraphPort`, `NodeDefinition`, `EnginePort`, `StoragePort`, `RenderPort`, `NodeRunner`, …) with swappable adapters. See [Architecture](#architecture).
 

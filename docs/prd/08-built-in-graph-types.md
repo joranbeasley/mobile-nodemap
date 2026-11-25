@@ -1,4 +1,4 @@
-# 08. Built-in graph types: math, network, UML and drama
+# 08. Built-in graph types: math, network, UML, drama and drama boards
 
 ## Problem
 
@@ -41,6 +41,22 @@ The library needs proof that the extension model handles very different domains:
 - The engine shows on each node where it is used ("3 scenes · 5 shots"), scene sluglines ("INT. SCHOOL HALL — DAY"), cast lists and running times, and flags shots with no location or scene, empty scenes and duplicate scene numbers.
 - Tapping a character, location or prop lists every shot they are in.
 - **Video generation.** Every shot is one Seedance generation. Tapping a shot shows its `shot.md`: duration, the reference images to upload, numbered in upload order (`images/01-maya.jpg` becomes @Image1), and a ready-to-paste prompt. **Download shot (.zip)** saves `shot.md` with those images. A scene downloads as `scene.md`, one zip per shot and its optional storyboard. An episode or season downloads as `script.md`, the shot zips in story order and the storyboards. The root file lists every shot's pack, length and prompt. Each Seedance generation starts from nothing, so consistency comes from repeating the same evidence: the character's picture, their appearance text word for word, and in costume scenes the costume's description and pictures. A video style, aspect ratio, images per clip (default 9) and clip length (default 15 s) can be set per episode or season.
+
+## Drama boards (`drama2Graph`, id `drama2`)
+
+A production isn't really a flow, and wiring many characters into many shots gets busy, so Drama boards edit the same model as tabs of cards with no wires.
+
+- **Tabs.** Cast (characters and their outfits) and Locations are grids. Scenes (a row per scene: the scene, then its shots) and Episodes (a row per episode: the episode, then its scenes) are rows. On a phone, grids are one column and rows scroll sideways.
+- **No wires.** Cards can't be connected. A shot picks one location and any characters, a scene picks its shots, an episode picks its scenes, and an outfit picks who wears it and in which scenes. The pickers only offer valid choices: a shot already in another scene isn't offered.
+- **Jumping around.** Every reference is a chip and every list entry a link. Tapping one switches to the tab that shows it, centres it and selects it; ← Back returns. They work without selecting the card first.
+- **What each card lists.**
+  - Characters and locations: the scenes and episodes they appear in (characters also their outfits).
+  - Shots: their scene and episodes.
+  - Scenes: their episode, characters, locations and outfits.
+  - Episodes: their actors and locations.
+  - Lists expand and stay open while you edit.
+- **Adding.** + adds a type the current tab shows. With a scene selected, a new shot joins it, numbered next. With an episode selected, a new scene joins it. With a character selected, a new outfit is theirs.
+- **Same engine.** Underneath it's the drama model: the same checks, details cards and Seedance export (per shot, per scene, per episode). Props are names on a shot rather than cards, so they carry no pictures.
 
 ## Function builder (`functionGraph`, id `function`)
 

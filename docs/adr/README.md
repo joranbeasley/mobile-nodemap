@@ -14,5 +14,6 @@ Each record explains one significant decision: the context, what we chose, and w
 | [0008](0008-function-builder.md) | Function builder: Input leaves, exactly one Output | Accepted |
 | [0009](0009-themes-and-flavors.md) | Themes as data; node flavors | Accepted |
 | [0010](0010-no-runtime-dependencies.md) | No runtime dependencies | Accepted |
+| [0011](0011-views-boards-without-wires.md) | Views: boards without wires | Accepted |
 
 New records copy [template.md](template.md).

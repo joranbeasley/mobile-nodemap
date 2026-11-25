@@ -184,6 +184,7 @@ export class NodeMapElement extends Base {
       wires: this.getAttribute('wires') === 'curved' ? 'curved' : 'smart',
       direction: this.hasAttribute('direction') || !this._registry?.id ? dirAttr(this.getAttribute('direction')) : (getGraphType(this._registry.id)?.editor?.direction ?? 'auto'),
       layout: this._layout,
+      views: this._registry?.id ? getGraphType(this._registry.id)?.editor?.views : undefined,
     }));
     this.applyTheme(this.getAttribute('theme'));
     const fire = (type: string, detail: unknown) => this.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true }));

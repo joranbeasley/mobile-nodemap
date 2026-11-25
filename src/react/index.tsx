@@ -73,6 +73,7 @@ export const NodeMap = forwardRef<NodeEditor | null, NodeMapProps>(function Node
       placement,
       wires: latest.current.wires ?? latest.current.graphType?.editor?.wires,
       direction: latest.current.direction ?? latest.current.graphType?.editor?.direction,
+      views: latest.current.graphType?.editor?.views,
       layout: latest.current.layout,
     });
     const offs = [

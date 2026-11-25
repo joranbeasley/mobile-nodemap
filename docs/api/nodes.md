@@ -80,7 +80,7 @@ Every param has `name`, `label?`, `description?` and `advanced?` (fold it behind
 ```ts
 registry.defineParamKind({
   kind: 'color',
-  render({ param, node, value, set, key }) {   // return an element; call set(v) on change
+  render({ param, node, graph, value, set, key }) {   // return an element; call set(v) on change; graph: the map
     const input = document.createElement('input');
     input.type = 'color';
     input.dataset.key = key;                    // keeps focus across re-renders
@@ -91,6 +91,15 @@ registry.defineParamKind({
   update(el, value) { (el as HTMLInputElement).value = String(value); },   // optional: undo / API changes
 });
 ```
+
+Drama boards add two kinds for references to other nodes (`refParam`, `refsParam`):
+
+```ts
+{ name: 'location', kind: 'ref', of: 'drama2/location' }                     // one id
+{ name: 'shots', kind: 'refs', of: 'drama2/shot', exclusive: true }          // a list of ids
+```
+
+Each referenced node shows as a chip: tap it to jump to that node (`data-nm-open`) and tap × to remove it. A picker adds one. With `exclusive`, a node can be referred to by only one node through that param, so the picker offers only free ones (a shot belongs to one scene).
 
 ## `PortTypeDef`: custom value types
 

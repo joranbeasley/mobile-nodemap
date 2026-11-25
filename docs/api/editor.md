@@ -31,6 +31,7 @@ Bottom sheets (the add menu and the Edit sheet) open in an overlay layer over th
 | `wires` | `'smart'` | `'smart'` (routed around nodes) or `'curved'`. |
 | `direction` | `'auto'` | `'LR'` (left to right), `'TB'` (top to bottom: inputs on the top edge, outputs on the bottom, wires run down) or `'auto'` (top to bottom on narrow portrait screens, else left to right; follows rotation). A graph type can set it with `editor.direction`. Top to bottom, ports with no editor or value lose their row (their label sits beside the dot), and nodes with four or more ports on an edge label only linked ports until selected. |
 | `layout` | `layered()` | Engine used by `autoLayout()`. |
+| `views` | none | Tabs, each showing some node types as a grid, in rows or as a flow. See [Views](#views). A graph type sets them with `editor.views`. |
 | `placement` | `true` | Place new and dropped nodes in free space; push nodes aside. |
 | `theme` | page colours | A theme id or object, or `{ light, dark }`. See [themes](themes.md). |
 
@@ -70,7 +71,43 @@ Bottom sheets (the add menu and the Edit sheet) open in an overlay layer over th
 - `viewport` `{ x, y, k }`;
 - `error` (the message shown in the toast);
 - `theme` (the `Theme`);
-- `details` `{ node }`.
+- `details` `{ node }`;
+- `view` `{ id }` (the shown view changed).
+
+## Views
+
+With `views`, the editor is a set of boards instead of one canvas. A tab bar runs across the top, one tab per view with a count of its nodes, and each view shows only its node types. Graph types set views in `editor.views`:
+
+```ts
+views: [
+  { id: 'cast', title: 'Cast', types: ['drama2/character', 'drama2/outfit'], layout: 'grid', order: (g) => [...] },
+  { id: 'scenes', title: 'Scenes', types: ['drama2/scene', 'drama2/shot'], layout: 'rows', rows: (g) => [[sceneId, ...shotIds], ...] },
+]
+```
+
+| `EditorView` field | |
+| --- | --- |
+| `id`, `title` | The tab. |
+| `types` | Node types shown in the view and offered by its + button. |
+| `layout` | `'grid'`: cards in as many columns as fit the screen (one on a phone). `'rows'`: one row per group, its first card heading the row. `'flow'` (default): the usual layered layout. |
+| `rows(graph)` | Rows layout: node ids per row, in order. Nodes left out go in a last row. |
+| `order(graph)` | Grid layout: node ids in order (default: by `types`, then as added). |
+| `onAdd(node, { graph, selected })` | After + adds a node in this view, link it to what was selected (a shot to the selected scene), number it, and so on. |
+
+Grid and rows views lay themselves out:
+- after nodes are added or removed, params change or cards change size;
+- after a node is dragged, which snaps it back into place.
+
+Tidy re-runs the layout and returns to the top-left. Fit fits the view's own nodes.
+
+**Links.** Any element inside a node or a sheet with `data-nm-open="<node id>"` jumps to that node. The editor switches to a view that shows it (the current one when it can), centres it and selects it, and a **← Back** button appears in the tab bar. Such links, and elements marked `data-nm-live`, work before their node is selected. All other controls in an unselected node stay inert.
+
+| Method | |
+| --- | --- |
+| `setView(id, { home? })` / `currentView` | Show a view, or read which one is shown. |
+| `openNode(id)` | Jump to a node, switching view when needed (what links do). |
+| `back()` | Return to the view and node before the last jump. |
+| `layoutView({ animate?, home? })` | Lay the current grid or rows view out now. |
 
 ## Gestures and keys
 

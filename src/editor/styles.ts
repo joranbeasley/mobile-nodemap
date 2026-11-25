@@ -174,6 +174,19 @@ export const css = /* css */ `
 .nm-toast { position: absolute; left: 50%; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--_danger); color: #fff;
   padding: 8px 14px; border-radius: 8px; font-size: 13px; z-index: 6; pointer-events: none; transition: opacity .2s; max-width: calc(100% - 32px); }
 
+/* Views: tabs across the top; each shows some node types as a grid, in rows or as a flow. */
+.nm-views { position: absolute; top: 8px; left: max(8px, env(safe-area-inset-left, 0px)); right: max(8px, env(safe-area-inset-right, 0px)); z-index: 4;
+  display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 2px; }
+.nm-views::-webkit-scrollbar { display: none; }
+.nm-views button { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 14px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--_border); background: var(--_node); color: var(--_text); font: 500 13px/1 var(--_font); box-shadow: var(--_shadow); }
+.nm-views button span { font-size: 11px; color: var(--_muted); font-variant-numeric: tabular-nums; }
+.nm-views button[aria-selected="true"] { background: var(--_accent); border-color: var(--_accent); color: #fff; }
+.nm-views button[aria-selected="true"] span { color: rgba(255,255,255,.8); }
+.nm-views .nm-view-back { font-weight: 600; }
+.nm-views button:focus-visible { outline: 2px solid var(--_accent); outline-offset: 2px; }
+/* Links to other nodes, and expanders marked live, work before their node is selected. */
+.nm-node [data-nm-open], .nm-node [data-nm-live], .nm-node [data-nm-live] summary { pointer-events: auto !important; cursor: pointer; }
 .nm-toolbar { position: absolute; right: max(12px, env(safe-area-inset-right, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; gap: 6px; z-index: 4;
   background: var(--_node); border: 1px solid var(--_border); border-radius: 14px; padding: 5px; box-shadow: var(--_shadow); }
 .nm-btn { appearance: none; border: 0; background: transparent; color: var(--_text); min-width: 44px; height: 44px; border-radius: 10px;

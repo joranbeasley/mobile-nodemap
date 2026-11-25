@@ -652,6 +652,9 @@ const details = (node: NodeInstance, ctx: { graph: Graph }) => {
   return { title: dramaName(node), subtitle: 'Appearances', code: { lang: 'text', text: castText(g, node) } };
 };
 
+/** The details card drama nodes show (Seedance script, appearances): reused by drama boards. */
+export const DRAMA_DETAILS = details;
+
 // ------------------------------------------------------------------ engine
 
 export interface DramaStatus {
