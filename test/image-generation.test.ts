@@ -176,3 +176,34 @@ describe('When the page cannot reach Meshy', () => {
     expect(gen.site).toBe('https://www.meshy.ai/');
   });
 });
+
+describe('Entering the API key', () => {
+  it('cleans pasted keys, saves them straight away and offers to change them later', async () => {
+    let key = '';
+    setImageGenerator({ id: 'f', name: 'Fakeshy', key: { label: 'Fake key', get: () => key, set: (v) => (key = v) }, generate: async () => ({ images: [] }) });
+    const g = Graph.fromJSON(drama2Graph.examples![0].graph, drama2Graph.createRegistry());
+    const el = document.createElement('div');
+    document.body.append(el);
+    const editor = new NodeEditor(el, { graph: g, registry: g.registry!, views: drama2Graph.editor!.views });
+    const field = () => el.querySelector<HTMLElement>('.nm-node[data-id="maya"] [data-param="images"]')!;
+    field().querySelector<HTMLButtonElement>('.dr-gen')!.click();
+    const input = field().querySelector<HTMLInputElement>('.dr-gen-key input')!;
+    expect(input.type).toBe('text'); // not a password field: keyboards offer paste
+    expect(input.classList.contains('dr-key-masked')).toBe(true);
+    input.value = '  Bearer "msy_abc123"\n';
+    input.dispatchEvent(new Event('input'));
+    expect(key).toBe('msy_abc123');
+    expect(input.value).toBe('msy_abc123');
+    expect(field().querySelector('.dr-gen-status')!.textContent).toMatch(/saved in this browser/);
+    // Show / Hide
+    const show = [...field().querySelectorAll<HTMLButtonElement>('.dr-gen-key button')].find((b) => b.textContent === 'Show')!;
+    show.click();
+    expect(input.classList.contains('dr-key-masked')).toBe(false);
+    // Reopened later: the key is saved, so it offers to change it instead of asking.
+    [...field().querySelectorAll<HTMLButtonElement>('.dr-gen-cancel')].find((b) => b.textContent === 'Cancel')!.click();
+    field().querySelector<HTMLButtonElement>('.dr-gen')!.click();
+    expect(field().querySelector('.dr-gen-key input')).toBeNull();
+    expect(field().querySelector('.dr-gen-link-btn')!.textContent).toBe('Change Fake key');
+    editor.destroy();
+  });
+});

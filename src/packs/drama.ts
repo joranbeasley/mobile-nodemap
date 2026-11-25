@@ -192,10 +192,59 @@ export const imagesParam: ParamKind = {
       aspect.value = suggestion?.aspect ?? '1:1';
       if (gen.models?.length) row.append(model);
       row.append(aspect);
+      // The key: a plain text field, masked (not type=password, so phone keyboards offer their
+      // clipboard and paste behaves), with Paste and Show buttons. Saved as soon as it's entered.
       const keyRow = el('div', { class: 'dr-gen-key' });
-      const keyInput = el('input', { type: 'password', autocomplete: 'off', 'aria-label': gen.key?.label ?? 'API key', placeholder: gen.key?.label ?? 'API key' }) as HTMLInputElement;
-      if (gen.key && !gen.key.get()) keyRow.append(keyInput, ...(gen.key.help ? [el('small', {}, gen.key.help)] : []));
+      const keyInput = el('input', {
+        type: 'text',
+        class: 'dr-key-masked',
+        autocomplete: 'off',
+        autocapitalize: 'off',
+        autocorrect: 'off',
+        spellcheck: 'false',
+        inputmode: 'text',
+        'aria-label': gen.key?.label ?? 'API key',
+        placeholder: `Paste your ${gen.key?.label ?? 'API key'}`,
+      }) as HTMLInputElement;
       const status = el('div', { class: 'dr-gen-status', role: 'status' });
+      /** Keys arrive with spaces, line breaks, quotes or "Bearer " stuck to them: drop those. */
+      const cleanKey = (v: string) => v.replace(/^\s*(?:bearer\s+)?/i, '').replace(/[\s"'`]/g, '');
+      const saveKey = () => {
+        const k = cleanKey(keyInput.value);
+        if (keyInput.value !== k) keyInput.value = k;
+        if (!gen.key || !k) return;
+        gen.key.set(k);
+        status.textContent = `${gen.key.label} saved in this browser.`;
+      };
+      keyInput.addEventListener('input', saveKey);
+      keyInput.addEventListener('paste', () => setTimeout(saveKey, 0));
+      const paste = el('button', { type: 'button', class: 'dr-gen-cancel' }, 'Paste') as HTMLButtonElement;
+      paste.addEventListener('click', async () => {
+        try {
+          keyInput.value = await navigator.clipboard.readText();
+          saveKey();
+        } catch {
+          keyInput.focus();
+          status.textContent = 'This page can’t read the clipboard: long-press the field and choose Paste.';
+        }
+      });
+      const show = el('button', { type: 'button', class: 'dr-gen-cancel', 'aria-pressed': 'false' }, 'Show') as HTMLButtonElement;
+      show.addEventListener('click', () => {
+        const on = keyInput.classList.toggle('dr-key-masked');
+        show.textContent = on ? 'Show' : 'Hide';
+        show.setAttribute('aria-pressed', String(!on));
+      });
+      const keyTools = el('div', { class: 'dr-gen-row' });
+      keyTools.append(keyInput, paste, show);
+      const changeKey = el('button', { type: 'button', class: 'dr-gen-link-btn' }, `Change ${gen.key?.label ?? 'API key'}`);
+      if (gen.key && !gen.key.get()) keyRow.append(keyTools, ...(gen.key.help ? [el('small', {}, gen.key.help)] : []));
+      else if (gen.key) {
+        keyRow.append(changeKey);
+        changeKey.addEventListener('click', () => {
+          keyRow.replaceChildren(keyTools, ...(gen.key!.help ? [el('small', {}, gen.key!.help)] : []));
+          keyInput.focus();
+        });
+      }
       const go = el('button', { type: 'button', class: 'dr-gen-go' }, `✨ Generate with ${gen.name}`) as HTMLButtonElement;
       const cancel = el('button', { type: 'button', class: 'dr-gen-cancel' }, 'Cancel') as HTMLButtonElement;
       let abort: AbortController | undefined;
@@ -204,7 +253,7 @@ export const imagesParam: ParamKind = {
         closePanel();
       });
       go.addEventListener('click', async () => {
-        if (gen.key && keyInput.value.trim()) gen.key.set(keyInput.value.trim());
+        if (gen.key && keyInput.value.trim()) gen.key.set(cleanKey(keyInput.value));
         if (gen.key && !gen.key.get()) return void (status.textContent = `Add your ${gen.key.label} first.`);
         if (!prompt.value.trim()) return void (status.textContent = 'Write a prompt first.');
         abort = new AbortController();
@@ -1076,7 +1125,9 @@ const css = `
 .dr-gen-row select { font: 12px var(--_font); min-height: 28px; }
 .dr-gen-key { display: flex; flex-direction: column; gap: 3px; }
 .dr-gen-key:empty { display: none; }
-.dr-gen-key input { font: 12px var(--_font); min-height: 28px; }
+.dr-gen-key input { font: 12px var(--_mono, monospace); min-height: 32px; flex: 1 1 140px; min-width: 0; }
+.dr-key-masked { -webkit-text-security: disc; }
+.dr-gen-link-btn { all: unset; cursor: pointer; font-size: 11.5px; color: var(--_accent); text-decoration: underline; align-self: flex-start; }
 .dr-gen-key small { color: var(--_muted); font-size: 11px; }
 .dr-gen-go { font: 600 12px var(--_font); padding: 6px 12px; border-radius: 999px; border: 0; background: var(--_accent); color: #fff; cursor: pointer; }
 .dr-gen-go:disabled { opacity: .6; cursor: progress; }
