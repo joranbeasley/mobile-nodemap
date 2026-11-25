@@ -59,6 +59,11 @@ interface ParamBase {
   description?: string;
   /** Tuck this param behind the node's "More" toggle to keep nodes small on phones. */
   advanced?: boolean;
+  /**
+   * Show this param only when it applies, given the node's params. Hidden params keep their
+   * value. `when: (p) => p.kind === 'Outfit'`
+   */
+  when?: (params: Record<string, unknown>) => boolean;
 }
 
 export type BuiltinParamDef =

@@ -182,7 +182,7 @@ const propNode = defineNode({
   description: 'An object or an outfit that shots need',
   params: [
     { name: 'kind', label: 'type', kind: 'select', options: PROP_TYPES, default: 'Object' },
-    { ...ref('wornBy', 'worn by', D2.character), description: 'Outfits: who wears it. In the shots it is in, it replaces their usual clothes.' },
+    { ...ref('wornBy', 'worn by', D2.character), description: 'Who wears it. In the shots it is in, it replaces their usual clothes.', when: (p: Record<string, unknown>) => p.kind === 'Outfit' },
     text('description', 'description', 'What it is: material, colour, details'),
     images(),
   ],

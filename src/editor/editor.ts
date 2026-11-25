@@ -95,6 +95,14 @@ interface NodeRecord {
 }
 
 const SVGNS = 'http://www.w3.org/2000/svg';
+/** Whether a param applies to a node right now (see ParamBase.when). */
+const shows = (p: ParamDef, node: NodeInstance) => {
+  try {
+    return !p.when || p.when(node.params);
+  } catch {
+    return true;
+  }
+};
 const TAP = 8;
 
 const icons = {
@@ -1399,9 +1407,18 @@ export class NodeEditor extends Emitter<EditorEvents> {
     form.append(field('Name', name, `Leave empty to show “${typeTitle}”`));
 
     const params = def?.params ?? [];
+    // Params with `when` come and go as the node's other params change.
+    const conditional: [ParamDef, HTMLElement][] = [];
     if (params.length) {
       form.append(h('div', { class: 'nm-sheet-cat' }, 'Settings'));
-      for (const p of params) form.append(field(p.label ?? p.name, this.paramControl(node, p), p.description));
+      for (const p of params) {
+        const f = field(p.label ?? p.name, this.paramControl(node, p), p.description);
+        if (p.when) {
+          f.hidden = !shows(p, node);
+          conditional.push([p, f]);
+        }
+        form.append(f);
+      }
     }
     const linked = new Set(this.graph.incoming(id).map((e) => e.to.port));
     const inputs = this.registry.inputsOf(node).filter((p) => {
@@ -1452,6 +1469,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
     // Drop the sheet if its node disappears (undo, delete elsewhere).
     const off = this.graph.on('change', (c) => {
       if ((c.kind === 'node:remove' && c.node.id === id) || c.kind === 'load') this.closePalette();
+      else if (c.kind === 'node:params' && c.node.id === id) for (const [p, f] of conditional) f.hidden = !shows(p, c.node);
     });
     (sheet as any)._off = off;
     this.overlay().append(backdrop, sheet);
@@ -1672,7 +1690,9 @@ export class NodeEditor extends Emitter<EditorEvents> {
 
   private portsKey(node: NodeInstance): string {
     const f = (ps: PortDef[]) => ps.map((p) => `${p.name}:${p.type}`).join(',');
-    return f(this.registry.inputsOf(node)) + '|' + f(this.registry.outputsOf(node));
+    // Which conditional params show is part of the node's shape too: a change rebuilds it.
+    const shown = (this.registry.get(node.type)?.params ?? []).filter((p) => p.when && shows(p, node)).map((p) => p.name);
+    return f(this.registry.inputsOf(node)) + '|' + f(this.registry.outputsOf(node)) + '|' + shown.join(',');
   }
 
   private place(node: NodeInstance): void {
@@ -1706,7 +1726,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
     const body = h('div', { class: 'nm-body' });
     if (!def) body.append(h('div', { class: 'nm-error' }, `Unknown node type "${node.type}"`));
     const field = (p: ParamDef) => h('label', { class: 'nm-field' }, h('span', {}, p.label ?? p.name), this.paramControl(node, p));
-    const params = def?.params ?? [];
+    const params = (def?.params ?? []).filter((p) => shows(p, node));
     params.filter((p) => !p.advanced).forEach((p) => body.append(field(p)));
     const advanced = params.filter((p) => p.advanced);
     if (advanced.length) {

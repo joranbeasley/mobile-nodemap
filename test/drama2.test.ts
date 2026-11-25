@@ -140,6 +140,26 @@ describe('Editor views', () => {
     editor.destroy();
   });
 
+  it('shows “worn by” only on outfits', async () => {
+    const { g, el, editor } = mount();
+    await editor.setView('props');
+    const wornBy = (id: string) => !!el.querySelector(`.nm-node[data-id="${id}"] [data-param="wornBy"]`);
+    expect(wornBy('jules-lead')).toBe(true);
+    expect(wornBy('script')).toBe(false);
+    g.setParam('script', 'kind', 'Outfit');
+    expect(wornBy('script')).toBe(true);
+    g.setParam('script', 'kind', 'Object');
+    expect(wornBy('script')).toBe(false);
+    // The edit sheet follows the type too.
+    editor.openNodeEditor('script');
+    const sheetField = () => document.querySelector('.nm-edit [data-param="wornBy"]')!.closest('label')!;
+    expect(sheetField().hidden).toBe(true);
+    g.setParam('script', 'kind', 'Outfit');
+    expect(sheetField().hidden).toBe(false);
+    editor.closePalette();
+    editor.destroy();
+  });
+
   it('jumps to a linked node in its view, and back', async () => {
     const { el, editor } = mount();
     await editor.setView('scenes');

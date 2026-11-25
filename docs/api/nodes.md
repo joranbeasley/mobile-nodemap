@@ -76,6 +76,12 @@ Every param has `name`, `label?`, `description?` and `advanced?` (fold it behind
 | `'select'` | `default`, `options: string[]` |
 | any other string | A registered `ParamKind`; any extra fields are passed through |
 
+Any param can take `when: (params) => boolean`, which shows it only when it applies to the node's other params. A hidden param keeps its value. The card and the Edit sheet update as those params change.
+
+```ts
+{ name: 'wornBy', kind: 'ref', of: 'drama2/character', when: (p) => p.kind === 'Outfit' }
+```
+
 ## `ParamKind`: custom param editors
 
 ```ts
