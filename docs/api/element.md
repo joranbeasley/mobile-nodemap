@@ -18,6 +18,7 @@ The editor renders in a shadow root. `--nm-*` variables set on the element or it
 | `theme` | `light` or `dark` (the default palette), or a theme id. |
 | `wires` | `smart` or `curved`. |
 | `direction` | `auto` (default), `LR` or `TB`. |
+| `readonly` | View only (see the editor's `readOnly`). Adding or removing the attribute switches it. |
 | `auto-layout` | Tidy on load (also on when the graph type asks for it). |
 | `no-toolbar` | Hide the toolbar. |
 | `no-eval` | Edit only; don't run nodes. |

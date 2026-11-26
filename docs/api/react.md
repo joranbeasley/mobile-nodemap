@@ -12,7 +12,8 @@ React 18 and 19, as optional peer dependencies.
   graph={graph}                    // optional: one you own (useGraph); otherwise seeded from defaultValue
   defaultValue={json}
   evaluator={evaluator}            // optional: yours (useEvaluator), or false to not run nodes
-  wires="smart" direction="auto" layout={layered()} toolbar placement   // the graph type's direction, views (tabs) and plugins apply by default
+  wires="smart" direction="auto" layout={layered()} toolbar placement   // the graph type's direction, views (tabs), plugins and edgeStyle apply by default
+  readOnly={false}                 // view only; can change while mounted
   theme="midnight"                 // 'light' | 'dark' | a theme id or object | { light, dark }
   autoLayout                       // tidy once on mount (defaults to the graph type's editor.autoLayout)
   onChange={(json, change) => {}}

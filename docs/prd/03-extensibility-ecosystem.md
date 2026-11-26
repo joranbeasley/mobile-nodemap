@@ -26,6 +26,8 @@ Every domain needs its own nodes, value types, editors, rules and sometimes its 
 | X10 | Graph types declare views (tabs with grid, rows, flow or custom layouts) and navigation links (`data-nm-open`) | Shipped |
 | X11 | Node types made of maps (`subgraph`) open in place on live inputs; edits recompile the type | Shipped |
 | X12 | Param kinds receive the graph, so controls can refer to other nodes | Shipped |
+| X13 | Plugins draw on the map through public API: wire geometry (`edgePath`, `edgePointAt`), layers (`addLayer`), a `route` event, `pulse`, and per-wire styles (`edgeStyle`) with labels | Shipped |
+| X14 | A view-only mode (`readOnly`), for share viewers | Shipped |
 
 ## Ecosystem conventions
 

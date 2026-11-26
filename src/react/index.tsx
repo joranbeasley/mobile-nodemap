@@ -32,6 +32,8 @@ export interface NodeMapProps {
   wires?: 'smart' | 'curved';
   /** 'auto' (default): top to bottom on narrow portrait screens, left to right otherwise. */
   direction?: 'auto' | 'LR' | 'TB';
+  /** View only (see EditorOptions.readOnly). Can change while mounted. */
+  readOnly?: boolean;
   layout?: LayoutEngine;
   toolbar?: boolean;
   placement?: boolean;
@@ -75,6 +77,8 @@ export const NodeMap = forwardRef<NodeEditor | null, NodeMapProps>(function Node
       direction: latest.current.direction ?? latest.current.graphType?.editor?.direction,
       views: latest.current.graphType?.editor?.views,
       plugins: latest.current.graphType?.editor?.plugins,
+      edgeStyle: latest.current.graphType?.editor?.edgeStyle,
+      readOnly: latest.current.readOnly,
       layout: latest.current.layout,
     });
     const offs = [
@@ -102,6 +106,9 @@ export const NodeMap = forwardRef<NodeEditor | null, NodeMapProps>(function Node
   useEffect(() => {
     if (editor && props.direction) editor.setDirection(props.direction);
   }, [editor, props.direction]);
+  useEffect(() => {
+    editor?.setReadOnly(!!props.readOnly);
+  }, [editor, props.readOnly]);
   const themeKey = typeof props.theme === 'object' ? JSON.stringify(props.theme) : props.theme;
   useEffect(() => {
     if (!editor) return;

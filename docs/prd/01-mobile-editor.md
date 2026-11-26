@@ -37,6 +37,8 @@ Wiring nodes on a phone with desktop editors means mis-taps, accidental zooms an
 | E21 | Nodes made of maps open in place (↘) on their live inputs, with Back and Escape; edits can recompile the node type | Shipped |
 | E22 | Long reference lists open a searchable chooser (a bottom sheet above any other sheet) | Shipped |
 | E23 | Params can show only when they apply (`when`); the card and the Edit sheet follow | Shipped |
+| E24 | The Edit sheet stays in step with changes made elsewhere (the card, undo, the API), custom controls included | Shipped |
+| E25 | View-only mode: everything can be looked at and nothing changed | Shipped |
 
 ## UX notes
 

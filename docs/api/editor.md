@@ -31,6 +31,8 @@ Bottom sheets (the add menu and the Edit sheet) open in an overlay layer over th
 | `wires` | `'smart'` | `'smart'` (routed around nodes) or `'curved'`. |
 | `direction` | `'auto'` | `'LR'` (left to right), `'TB'` (top to bottom: inputs on the top edge, outputs on the bottom, wires run down) or `'auto'` (top to bottom on narrow portrait screens, else left to right; follows rotation). A graph type can set it with `editor.direction`. Top to bottom, ports with no editor or value lose their row (their label sits beside the dot), and nodes with four or more ports on an edge label only linked ports until selected. |
 | `layout` | `layered()` | Engine used by `autoLayout()`. |
+| `edgeStyle` | none | `(edge, graph) => EdgeStyle`: per-wire arrows, dash, colour, class and label, on top of the port type's style. A graph type sets it with `editor.edgeStyle`. See [Wires](#wires-layers-and-pulses). |
+| `readOnly` | `false` | View only: no adding, deleting, wiring, moving or editing, and the toolbar keeps only Tidy and Fit. Panning, zooming, selecting, details cards, links (`data-nm-open`) and expanders still work. Image viewers marked `data-nm-view` still open. Dragging a node pans. |
 | `plugins` | none | `EditorPlugin`s to install, as well as those from the registry's packs. See [graph types](graph-types.md#editorplugin). |
 | `views` | none | Tabs, each showing some node types as a grid, in rows or as a flow. See [Views](#views). A graph type sets them with `editor.views`. |
 | `placement` | `true` | Place new and dropped nodes in free space; push nodes aside. |
@@ -75,7 +77,23 @@ Bottom sheets (the add menu and the Edit sheet) open in an overlay layer over th
 - `theme` (the `Theme`);
 - `details` `{ node }`;
 - `view` `{ id }` (the shown view changed);
-- `enter` / `leave` `{ node }` (a node's inner map opened or closed).
+- `enter` / `leave` `{ node }` (a node's inner map opened or closed);
+- `route` `{ edges }` (these wires were redrawn or re-routed: redraw anything tied to their shape).
+
+## Wires, layers and pulses
+
+For plugins that draw on or along the map. Use these rather than the editor's internal elements.
+
+| Method | |
+| --- | --- |
+| `edgePath(id)` | A wire's SVG path (`d`) in map coordinates, as last drawn. |
+| `edgePointAt(id, t)` | The point a fraction `t` (0–1) of the way along a wire, in map coordinates. |
+| `addLayer({ position?, svg?, className? })` | An element (a `div`, or an `svg` with `svg: true`) that pans and zooms with the map. `below` puts it under the wires and nodes; `above` (the default) puts it over them. It ignores taps unless you set `pointer-events` on what you put in it. Remove it with `.remove()`. |
+| `pulse(id, { color?, reverse?, ms?, size? })` | Send a dot along a wire (default 900 ms, in the wire's colour). `reverse` runs it from the input end back. Resolves when the dot arrives. |
+| `refreshEdges(ids?)` | Re-apply wire styles after the data an `edgeStyle` reads changes. A node's wires restyle by themselves when its params change. |
+| `setReadOnly(on)` / `readOnly` | Switch view-only mode, or read it. |
+
+`EdgeStyle` is `{ start?, end?, dash?, color?, className?, label? }`. Markers are the port types' (`arrow`, `triangle`, `triangle-filled`, `diamond`, `diamond-filled`, `circle`), and `'none'` removes one the port type would draw. `className` goes on the wire's group. `label` is drawn by the editor at the wire's midpoint, in the wire's colour, and follows it as it re-routes. The `route` event tells you when wires change shape.
 
 ## Plugins and nested maps
 

@@ -1,5 +1,5 @@
 import { Registry, type EditorPlugin, type GraphEngine, type GraphRules, type NodeInput, type NodePack } from './registry.js';
-import type { GraphJSON, NodeInstance, ParamKind, PortTypeDef } from './types.js';
+import type { Edge, GraphJSON, NodeInstance, ParamKind, PortTypeDef, WireMarker } from './types.js';
 import type { Graph } from './graph.js';
 
 export interface GraphExample {
@@ -20,7 +20,24 @@ export interface GraphTypeEditorDefaults {
   views?: EditorView[];
   /** Editor plugins for maps of this type (packs can contribute their own too). */
   plugins?: EditorPlugin[];
+  /** Style one wire (arrows, dash, colour, class, label), on top of its port type's style. */
+  edgeStyle?: EdgeStyler;
 }
+
+/**
+ * How one wire looks, beyond its port type's `wire` style: markers at the output end (`start`)
+ * or input end (`end`), `'none'` to remove one, a dash, a colour, a CSS class and a label the
+ * editor draws at the wire's middle.
+ */
+export interface EdgeStyle {
+  start?: WireMarker | 'none';
+  end?: WireMarker | 'none';
+  dash?: boolean | string;
+  color?: string;
+  className?: string;
+  label?: string;
+}
+export type EdgeStyler = (edge: Edge, graph: Graph) => EdgeStyle | undefined | void;
 
 /**
  * A view's own layout: positions for the cards it shows, given their sizes and the width

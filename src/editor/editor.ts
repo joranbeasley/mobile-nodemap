@@ -12,7 +12,7 @@ import { layered } from '../layout/layered.js';
 import { findFreeSpot } from '../layout/place.js';
 import { bezierPath, overlaps, roundedPath } from '../layout/geometry.js';
 import type { LayoutEngine, LayoutInput, Positions, Rect } from '../layout/types.js';
-import type { EditorView } from '../core/graph-type.js';
+import type { EdgeStyle, EdgeStyler, EditorView } from '../core/graph-type.js';
 import type { EditorPlugin } from '../core/registry.js';
 import { Evaluator as EvaluatorImpl } from '../runtime/evaluator.js';
 
@@ -51,6 +51,10 @@ export interface EditorOptions {
    * node, switching tab when needed; a Back button returns.
    */
   views?: EditorView[];
+  /** Style individual wires (arrows, dash, colour, class, label). A graph type sets it with `editor.edgeStyle`. */
+  edgeStyle?: EdgeStyler;
+  /** View only: no adding, deleting, wiring, moving or editing; links, details and panning still work. */
+  readOnly?: boolean;
   /** Plugins to install (as well as those the registry's packs contribute). See EditorPlugin. */
   plugins?: EditorPlugin<NodeEditor>[];
   /**
@@ -77,6 +81,8 @@ export interface EditorEvents extends Record<string, unknown> {
   error: string;
   theme: Theme;
   details: { node: string };
+  /** Wires whose routes changed (by id). */
+  route: { edges: string[] };
 }
 
 type Gesture =
@@ -95,6 +101,73 @@ interface NodeRecord {
 }
 
 const SVGNS = 'http://www.w3.org/2000/svg';
+/** Points along an SVG path (absolute M, L, H, V, C, Q, Z; curves sampled), for measuring it. */
+function pathPoints(d: string): { x: number; y: number }[] {
+  const out: { x: number; y: number }[] = [];
+  const tokens = d.match(/[MLHVCQZmlhvcqz]|-?\d*\.?\d+(?:e-?\d+)?/g) ?? [];
+  let i = 0;
+  let cmd = '';
+  let x = 0;
+  let y = 0;
+  let sx = 0;
+  let sy = 0;
+  const num = () => Number(tokens[i++]);
+  while (i < tokens.length) {
+    if (/[A-Za-z]/.test(tokens[i])) cmd = tokens[i++].toUpperCase();
+    if (cmd === 'M') {
+      x = num();
+      y = num();
+      sx = x;
+      sy = y;
+      out.push({ x, y });
+      cmd = 'L';
+    } else if (cmd === 'L') {
+      x = num();
+      y = num();
+      out.push({ x, y });
+    } else if (cmd === 'H') {
+      x = num();
+      out.push({ x, y });
+    } else if (cmd === 'V') {
+      y = num();
+      out.push({ x, y });
+    } else if (cmd === 'C' || cmd === 'Q') {
+      const c = cmd === 'C' ? [num(), num(), num(), num()] : [num(), num()];
+      const ex = num();
+      const ey = num();
+      for (let k = 1; k <= 8; k++) {
+        const t = k / 8;
+        const u = 1 - t;
+        if (cmd === 'C') out.push({ x: u * u * u * x + 3 * u * u * t * c[0] + 3 * u * t * t * c[2] + t * t * t * ex, y: u * u * u * y + 3 * u * u * t * c[1] + 3 * u * t * t * c[3] + t * t * t * ey });
+        else out.push({ x: u * u * x + 2 * u * t * c[0] + t * t * ex, y: u * u * y + 2 * u * t * c[1] + t * t * ey });
+      }
+      x = ex;
+      y = ey;
+    } else if (cmd === 'Z') {
+      x = sx;
+      y = sy;
+      out.push({ x, y });
+      cmd = '';
+    } else i++;
+  }
+  return out;
+}
+
+function pointAlong(pts: { x: number; y: number }[], t: number): { x: number; y: number } | undefined {
+  if (!pts.length) return undefined;
+  const seg = pts.slice(1).map((p, k) => Math.hypot(p.x - pts[k].x, p.y - pts[k].y));
+  const total = seg.reduce((a, b) => a + b, 0);
+  let left = total * t;
+  for (let k = 0; k < seg.length; k++) {
+    if (left <= seg[k] || k === seg.length - 1) {
+      const f = seg[k] ? Math.min(1, left / seg[k]) : 0;
+      return { x: pts[k].x + (pts[k + 1].x - pts[k].x) * f, y: pts[k].y + (pts[k + 1].y - pts[k].y) * f };
+    }
+    left -= seg[k];
+  }
+  return pts[0];
+}
+
 /** Whether a param applies to a node right now (see ParamBase.when). */
 const shows = (p: ParamDef, node: NodeInstance) => {
   try {
@@ -195,6 +268,11 @@ export class NodeEditor extends Emitter<EditorEvents> {
   /** The editor open on a node's inner map (see enterNode), if any. */
   private inner?: { editor: NodeEditor; layer: HTMLElement; close: () => void };
   private extraButtons = new Map<string, HTMLElement>();
+  private edgeStyler?: EdgeStyler;
+  private edgeD = new Map<string, string>();
+  private labelLayer?: HTMLElement;
+  private pulseLayer?: SVGSVGElement;
+  private ro = false;
   /** Column counts chosen per grid view, kept steady while cards are edited. */
   private gridCols = new Map<string, { cols: number; n: number }>();
   private gridReshape = false;
@@ -234,6 +312,9 @@ export class NodeEditor extends Emitter<EditorEvents> {
     this.ghostLayer = h('div', { class: 'nm-ghosts', 'aria-label': 'Connected nodes off screen' });
     container.append(this.viewportEl, this.ghostLayer, this.hud, this.toast);
     if (options.toolbar !== false) this.buildToolbar();
+    this.edgeStyler = options.edgeStyle;
+    this.ro = !!options.readOnly;
+    if (this.ro) container.dataset.readonly = '';
     this.views = options.views ?? [];
     if (this.views.length) {
       this.view = this.views[0];
@@ -460,12 +541,14 @@ export class NodeEditor extends Emitter<EditorEvents> {
   }
 
   deleteSelection(): void {
+    if (this.ro) return;
     if (this.selected.node) this.graph.removeNode(this.selected.node);
     else if (this.selected.edge) this.graph.disconnect(this.selected.edge);
     this.select({});
   }
 
   duplicateSelection(): void {
+    if (this.ro) return;
     const n = this.selected.node && this.graph.nodes.get(this.selected.node);
     if (!n) return;
     const copy = this.graph.addNode(n.type, { x: n.x + 30, y: n.y + 30, params: structuredClone(n.params) });
@@ -636,6 +719,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
    * (upstream or downstream, whichever that node needs next); otherwise it adds a free node.
    */
   openAddSheet(): void {
+    if (this.ro) return;
     // Boards have no wires: the view's onAdd links the new node to the selection instead.
     if (this.gridded) return this.openPalette();
     // A tapped port wins: add a node on that port (downstream of an output, upstream of an input).
@@ -766,6 +850,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
    * With `around`, the sheet lets the person choose to add before or after that node (or unconnected).
    */
   openPalette(at?: { x: number; y: number }, connectFrom?: Anchor, opts: { around?: string; splice?: string } = {}): void {
+    if (this.ro) return;
     this.closePalette();
     this.sheetGuard = this.pointers.size ? Infinity : performance.now() + 350;
     const backdrop = h('div', { class: 'nm-sheet-backdrop' });
@@ -1491,6 +1576,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
    * toolbar, or E / Enter.
    */
   openNodeEditor(id: string): void {
+    if (this.ro) return;
     const node = this.graph.nodes.get(id);
     if (!node) return;
     const def = this.registry.get(node.type);
@@ -1584,7 +1670,11 @@ export class NodeEditor extends Emitter<EditorEvents> {
     // Drop the sheet if its node disappears (undo, delete elsewhere).
     const off = this.graph.on('change', (c) => {
       if ((c.kind === 'node:remove' && c.node.id === id) || c.kind === 'load') this.closePalette();
-      else if (c.kind === 'node:params' && c.node.id === id) for (const [p, f] of conditional) f.hidden = !shows(p, c.node);
+      else if (c.kind === 'node:params' && c.node.id === id) {
+        for (const [p, f] of conditional) f.hidden = !shows(p, c.node);
+        // Changes made elsewhere (the card, undo, the API) show up in the sheet too.
+        this.syncControlsIn(sheet, c.node);
+      }
     });
     (sheet as any)._off = off;
     this.overlay().append(backdrop, sheet);
@@ -1730,6 +1820,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
     this.records.clear();
     this.edgeEls.forEach((g) => g.remove());
     this.edgeEls.clear();
+    this.edgeD.clear();
+    this.labelLayer?.replaceChildren();
     for (const n of this.graph.nodes.values()) this.buildNode(n);
     for (const n of this.graph.nodes.values()) this.measure(n.id);
     for (const e of this.graph.edges.values()) this.buildEdge(e);
@@ -1773,6 +1865,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
         break;
       }
       case 'node:params': {
+        if (this.edgeStyler) for (const e of this.graph.edges.values()) if (e.from.node === c.node.id || e.to.node === c.node.id) this.styleEdge(e);
         const rec = this.records.get(c.node.id);
         const titleEl = rec?.el.querySelector('.nm-title');
         if (titleEl && !c.node.label) titleEl.textContent = this.titleOf(c.node);
@@ -1789,6 +1882,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
         this.refreshLinks();
         break;
       case 'edge:remove':
+        this.edgeD.delete(c.edge.id);
+        this.labelLayer?.querySelector(`[data-edge="${CSS.escape(c.edge.id)}"]`)?.remove();
         this.edgeEls.get(c.edge.id)?.remove();
         this.edgeEls.delete(c.edge.id);
         this.scheduleRoute();
@@ -1902,6 +1997,12 @@ export class NodeEditor extends Emitter<EditorEvents> {
     } else this.viewportEl.append(el);
     this.records.set(node.id, { el, w: 180, h: 80, portsKey: this.portsKey(node), offsets: new Map() });
     el.hidden = !this.inView(node);
+    if (this.ro) {
+      // View only: fields can't change. Links, expanders and image viewers keep working.
+      el.querySelectorAll<HTMLInputElement>('input, select, textarea, button').forEach((x) => {
+        if (!x.closest('[data-nm-open], [data-nm-live], [data-nm-view]')) x.disabled = true;
+      });
+    }
     this.place(node);
     this.resizeObs?.observe(el);
 
@@ -2037,7 +2138,11 @@ export class NodeEditor extends Emitter<EditorEvents> {
   /** Push param values changed elsewhere (undo, API) into the node's controls without rebuilding. */
   private syncControls(node: NodeInstance): void {
     const el = this.records.get(node.id)?.el;
-    if (!el) return;
+    if (el) this.syncControlsIn(el, node);
+  }
+
+  /** Bring the controls inside `el` (a node card or its Edit sheet) up to date with the node's params. */
+  private syncControlsIn(el: HTMLElement, node: NodeInstance): void {
     el.querySelectorAll<HTMLInputElement>('[data-key]').forEach((input) => {
       if (input === this.activeElement()) return;
       const name = input.dataset.key!.replace(/^[pi]:/, '').replace(/:n$/, '');
@@ -2107,7 +2212,11 @@ export class NodeEditor extends Emitter<EditorEvents> {
 
   private routeNow(only?: Set<string>): void {
     const edges = [...this.graph.edges.values()].filter((e) => !only || only.has(e.from.node) || only.has(e.to.node));
-    if (!this.smart) return edges.forEach((e) => this.setEdgePath(e, this.curve(this.portPos(e.from, 'out'), this.portPos(e.to, 'in'))));
+    if (!this.smart) {
+      edges.forEach((e) => this.setEdgePath(e, this.curve(this.portPos(e.from, 'out'), this.portPos(e.to, 'in'))));
+      if (edges.length) this.emit('route', { edges: edges.map((e) => e.id) });
+      return;
+    }
     const rects: Rect[] = [];
     for (const [id, rec] of this.records) {
       const n = this.graph.nodes.get(id);
@@ -2121,10 +2230,13 @@ export class NodeEditor extends Emitter<EditorEvents> {
       const pts = router.route(a, b, `${e.from.node}:${e.from.port}`, this.flowNow);
       this.setEdgePath(e, pts ? roundedPath(pts, 12) : this.curve(a, b));
     }
+    if (edges.length) this.emit('route', { edges: edges.map((x) => x.id) });
   }
 
   private setEdgePath(e: Edge, d: string): void {
+    this.edgeD.set(e.id, d);
     this.edgeEls.get(e.id)?.querySelectorAll('path').forEach((p) => p.setAttribute('d', d));
+    this.placeLabel(e.id);
   }
 
   /** Move a node to the nearest spot where it does not overlap others. */
@@ -2249,19 +2361,163 @@ export class NodeEditor extends Emitter<EditorEvents> {
     const pt = this.registry.portType(type);
     const color = pt?.color;
     if (color) line.style.setProperty('--nm-port-color', color);
-    if (pt?.wire) {
-      const w = pt.wire;
-      if (w.dash) line.style.strokeDasharray = w.dash === true ? '7 5' : w.dash;
-      if (w.start) line.setAttribute('marker-start', `url(#${this.marker(w.start, color ?? 'currentColor')})`);
-      if (w.end) line.setAttribute('marker-end', `url(#${this.marker(w.end, color ?? 'currentColor')})`);
-    }
     const hit = document.createElementNS(SVGNS, 'path');
     hit.classList.add('nm-edge-hit');
     hit.dataset.edge = e.id;
     g.append(line, hit);
     this.wires.insertBefore(g, this.tempWire);
     this.edgeEls.set(e.id, g);
+    this.styleEdge(e);
     this.drawEdge(e);
+  }
+
+  /** Apply the port type's wire style, then the per-wire style (EdgeStyler), to a wire. */
+  private styleEdge(e: Edge): void {
+    const g = this.edgeEls.get(e.id);
+    const line = g?.querySelector<SVGPathElement>('.nm-edge');
+    if (!g || !line) return;
+    const type = line.getAttribute('data-type') ?? undefined;
+    const pt = this.registry.portType(type);
+    let own: EdgeStyle | undefined;
+    try {
+      own = this.edgeStyler?.(e, this.graph) ?? undefined;
+    } catch (err) {
+      console.error('edgeStyle failed', err);
+    }
+    const color = own?.color ?? pt?.color;
+    if (color) line.style.setProperty('--nm-port-color', color);
+    else line.style.removeProperty('--nm-port-color');
+    const dash = own?.dash ?? pt?.wire?.dash;
+    line.style.strokeDasharray = dash ? (dash === true ? '7 5' : dash) : '';
+    const marker = (which: 'start' | 'end') => {
+      const m = own?.[which] ?? pt?.wire?.[which];
+      if (m && m !== 'none') line.setAttribute(`marker-${which}`, `url(#${this.marker(m, color ?? 'currentColor')})`);
+      else line.removeAttribute(`marker-${which}`);
+    };
+    marker('start');
+    marker('end');
+    // Swap the custom classes from the last styling for this one's.
+    for (const c of (g.dataset.cls ?? '').split(' ').filter(Boolean)) g.classList.remove(c);
+    const cls = (own?.className ?? '').split(/\s+/).filter(Boolean);
+    g.classList.add(...cls);
+    g.dataset.cls = cls.join(' ');
+    // A label at the wire's middle, in a layer above the wires.
+    let label = this.labelLayer?.querySelector<HTMLElement>(`[data-edge="${CSS.escape(e.id)}"]`);
+    if (own?.label) {
+      this.labelLayer ??= this.addLayer({ position: 'above', className: 'nm-edge-labels' });
+      if (!label) {
+        label = h('span', { class: 'nm-edge-label', 'data-edge': e.id });
+        this.labelLayer.append(label);
+      }
+      label.textContent = own.label;
+      if (color) label.style.setProperty('--nm-port-color', color);
+      this.placeLabel(e.id);
+    } else label?.remove();
+  }
+
+  private placeLabel(id: string): void {
+    const label = this.labelLayer?.querySelector<HTMLElement>(`[data-edge="${CSS.escape(id)}"]`);
+    if (!label) return;
+    const p = this.edgePointAt(id, 0.5);
+    if (p) label.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -50%)`;
+  }
+
+  /** Re-apply wire styles (after the data an `edgeStyle` reads has changed). All wires by default. */
+  refreshEdges(ids?: string[]): void {
+    for (const e of this.graph.edges.values()) if (!ids || ids.includes(e.id)) this.styleEdge(e);
+  }
+
+  /** A wire's SVG path (`d`) in map coordinates, as last drawn. */
+  edgePath(id: string): string | undefined {
+    return this.edgeD.get(id);
+  }
+
+  /** The point a fraction `t` (0–1) of the way along a wire, in map coordinates. */
+  edgePointAt(id: string, t: number): { x: number; y: number } | undefined {
+    const d = this.edgeD.get(id);
+    if (!d) return undefined;
+    const f = Math.min(1, Math.max(0, t));
+    const path = this.edgeEls.get(id)?.querySelector<SVGPathElement>('.nm-edge');
+    try {
+      const len = path?.getTotalLength?.();
+      if (path && len && len > 0) {
+        const p = path.getPointAtLength(len * f);
+        return { x: p.x, y: p.y };
+      }
+    } catch {
+      /* not laid out (tests, hidden): measure the path ourselves */
+    }
+    return pointAlong(pathPoints(d), f);
+  }
+
+  /**
+   * A layer that pans and zooms with the map, for drawings tied to it (zones, labels, effects).
+   * `below` sits under wires and nodes, `above` over them. It doesn't catch taps unless you
+   * set pointer-events on what you put in it. Remove it with `.remove()`.
+   */
+  addLayer(opts: { position?: 'below' | 'above'; svg: true; className?: string }): SVGSVGElement;
+  addLayer(opts?: { position?: 'below' | 'above'; svg?: false; className?: string }): HTMLDivElement;
+  addLayer(opts: { position?: 'below' | 'above'; svg?: boolean; className?: string } = {}): HTMLDivElement | SVGSVGElement {
+    const el = opts.svg ? document.createElementNS(SVGNS, 'svg') : document.createElement('div');
+    el.classList.add('nm-layer', opts.position === 'below' ? 'nm-layer-below' : 'nm-layer-above');
+    if (opts.className) el.classList.add(...opts.className.split(/\s+/).filter(Boolean));
+    if (opts.position === 'below') this.viewportEl.prepend(el);
+    else this.viewportEl.append(el);
+    return el as HTMLDivElement | SVGSVGElement;
+  }
+
+  /**
+   * Send a dot along a wire (traffic, a signal, a step). Resolves when it arrives.
+   * `reverse` runs it from the input end back to the output end.
+   */
+  pulse(id: string, opts: { color?: string; reverse?: boolean; ms?: number; size?: number } = {}): Promise<void> {
+    if (!this.edgeD.has(id)) return Promise.resolve();
+    this.pulseLayer ??= this.addLayer({ position: 'above', svg: true, className: 'nm-pulses' });
+    const dot = document.createElementNS(SVGNS, 'circle');
+    dot.setAttribute('r', String(opts.size ?? 5));
+    dot.classList.add('nm-pulse');
+    const color = opts.color ?? this.edgeEls.get(id)?.querySelector<SVGPathElement>('.nm-edge')?.style.getPropertyValue('--nm-port-color');
+    if (color) dot.style.fill = color;
+    this.pulseLayer.append(dot);
+    const ms = opts.ms ?? 900;
+    const t0 = performance.now();
+    return new Promise((resolve) => {
+      const step = (now: number) => {
+        const t = Math.min(1, (now - t0) / ms);
+        const p = this.edgePointAt(id, opts.reverse ? 1 - t : t);
+        if (!p || !dot.isConnected) {
+          dot.remove();
+          return resolve();
+        }
+        dot.setAttribute('cx', String(p.x));
+        dot.setAttribute('cy', String(p.y));
+        if (t < 1 && typeof requestAnimationFrame !== 'undefined') requestAnimationFrame(step);
+        else {
+          dot.remove();
+          resolve();
+        }
+      };
+      if (typeof requestAnimationFrame === 'undefined') step(t0 + ms);
+      else requestAnimationFrame(step);
+    });
+  }
+
+  /** Whether the editor is view only. */
+  get readOnly(): boolean {
+    return this.ro;
+  }
+
+  /** Turn view-only mode on or off (see EditorOptions.readOnly). */
+  setReadOnly(on: boolean): void {
+    if (on === this.ro) return;
+    this.ro = on;
+    if (on) {
+      this.root.dataset.readonly = '';
+      this.closePalette();
+      this.cancelPending();
+    } else delete this.root.dataset.readonly;
+    this.renderAll();
+    this.updateToolbar();
   }
 
   /** An SVG marker for a wire end (created once per shape and colour). Returns its id. */
@@ -2309,6 +2565,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
   private drawEdge(e: Edge): void {
     if (this.smart) return this.scheduleRoute();
     this.setEdgePath(e, this.curve(this.portPos(e.from, 'out'), this.portPos(e.to, 'in')));
+    this.emit('route', { edges: [e.id] });
   }
 
   private drawEdgesOf(nodeId: string): void {
@@ -2438,8 +2695,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
       const mod = e.metaKey || e.ctrlKey;
       if (e.key === 'Delete' || e.key === 'Backspace') this.deleteSelection();
       else if (e.key === 'Escape') this.cancelPending(), this.closePalette(), this.hideDetails(), this.select({});
-      else if (mod && e.key.toLowerCase() === 'z') e.shiftKey ? this.history?.redo() : this.history?.undo();
-      else if (mod && e.key.toLowerCase() === 'y') this.history?.redo();
+      else if (mod && e.key.toLowerCase() === 'z' && !this.ro) e.shiftKey ? this.history?.redo() : this.history?.undo();
+      else if (mod && e.key.toLowerCase() === 'y' && !this.ro) this.history?.redo();
       else if (mod && e.key.toLowerCase() === 'd') this.duplicateSelection();
       else if ((e.key === 'e' || e.key === 'Enter') && this.selected.node) this.openNodeEditor(this.selected.node);
       else if (e.key === 'a' || e.key === 'A' || e.key === ' ') this.openAddSheet();
@@ -2500,11 +2757,16 @@ export class NodeEditor extends Emitter<EditorEvents> {
 
     if (port) {
       const anchor: Anchor = { node: port.dataset.node!, port: port.dataset.port!, dir: port.dataset.dir as Dir };
-      this.gesture = { kind: 'wire', anchor, ...base };
+      if (this.ro) {
+        // View only: a port is just part of its node, which pans.
+        const id = port.dataset.node!;
+        const n = this.graph.nodes.get(id)!;
+        this.gesture = { kind: 'node', id, nx: n.x, ny: n.y, vx: this.vp.x, vy: this.vp.y, ...base };
+      } else this.gesture = { kind: 'wire', anchor, ...base };
     } else if (nodeEl) {
       const n = this.graph.nodes.get(nodeEl.dataset.id!)!;
       // On boards (grid and rows views) cards don't move: dragging one pans, so the map is easy to grab.
-      this.gesture = { kind: 'node', id: n.id, nx: n.x, ny: n.y, ...(this.gridded ? { vx: this.vp.x, vy: this.vp.y } : {}), ...base };
+      this.gesture = { kind: 'node', id: n.id, nx: n.x, ny: n.y, ...(this.gridded || this.ro ? { vx: this.vp.x, vy: this.vp.y } : {}), ...base };
     } else if (edgeHit) {
       this.gesture = { kind: 'edge', id: (edgeHit as SVGElement).dataset.edge!, vx: this.vp.x, vy: this.vp.y, ...base };
     } else {
