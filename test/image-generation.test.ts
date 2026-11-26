@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach } from 'vitest';
-import { Graph, NodeEditor, dramaGraph, drama2Graph, dramaImagePrompt, meshyImageGenerator, setImageGenerator, type ImageGenerator } from '../src/index';
+import { Graph, NodeEditor, dramaGraph, drama2Graph, dramaImagePrompt, dramaImageReferences, meshyImageGenerator, setImageGenerator, type ImageGenerator } from '../src/index';
 
 afterEach(() => setImageGenerator(null));
 const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
@@ -25,6 +25,26 @@ describe('Meshy image generator', () => {
     expect((calls[0].init!.headers as Record<string, string>).Authorization).toBe('Bearer k-123');
     expect(calls[1].url).toBe('https://api.meshy.ai/openapi/v1/text-to-image/task-1');
     expect(progress).toEqual([40, 100]);
+  });
+
+  it('sends reference pictures to image-to-image (up to 5) and polls that task', async () => {
+    const calls: { url: string; init?: RequestInit }[] = [];
+    const fakeFetch = (async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      const json = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as Response;
+      return init?.method === 'POST' ? json({ result: 'task-2' }) : json({ status: 'SUCCEEDED', progress: 100, image_urls: ['https://assets.example/y.png'], consumed_credits: 3 });
+    }) as unknown as typeof fetch;
+    const gen = meshyImageGenerator({ apiKey: 'k', fetch: fakeFetch, pollMs: 1 });
+    expect(gen.maxReferences).toBe(5);
+    const refs = ['https://a/1.png', 'data:image/jpeg;base64,AAA', 'https://a/3.png', 'https://a/4.png', 'https://a/5.png', 'https://a/6.png'];
+    const res = await gen.generate({ prompt: 'Theo on stage', aspect: '16:9', references: refs });
+    expect(res).toEqual({ images: ['https://assets.example/y.png'], credits: 3 });
+    expect(calls[0].url).toBe('https://api.meshy.ai/openapi/v1/image-to-image');
+    expect(JSON.parse(String(calls[0].init!.body))).toEqual({ ai_model: 'nano-banana', prompt: 'Theo on stage', aspect_ratio: '16:9', reference_image_urls: refs.slice(0, 5) });
+    expect(calls[1].url).toBe('https://api.meshy.ai/openapi/v1/image-to-image/task-2');
+    // No references: plain text-to-image.
+    await gen.generate({ prompt: 'x', references: [] });
+    expect(calls[2].url).toBe('https://api.meshy.ai/openapi/v1/text-to-image');
   });
 
   it('explains failures', async () => {
@@ -55,6 +75,21 @@ describe('Image prompts from drama cards', () => {
     expect(shot.prompt).toContain('Setting: School hall, interior, day.');
     expect(shot.prompt).toContain('35mm film look'); // the season's style
     expect(dramaImagePrompt(g, g.nodes.get('jules-lead')!)!.prompt).toMatch(/^Costume reference: Deep green velvet.* Worn by Jules: 16/);
+  });
+
+  it('suggests reference pictures: who is in a shot, where, and what they wear', () => {
+    const g = Graph.fromJSON(dramaGraph.examples![0].graph, dramaGraph.createRegistry());
+    const first = (id: string) => (g.nodes.get(id)!.params.images as string[])[0];
+    const shot = dramaImageReferences(g, g.nodes.get('s1b')!);
+    expect(shot[0]).toEqual({ src: first('theo'), label: 'Theo' });
+    expect(shot.map((r) => r.label)).toContain('School hall (location)');
+    expect(dramaImagePrompt(g, g.nodes.get('s1b')!)!.references).toEqual(shot);
+    // A costume: its wearer. A character: nothing to match yet.
+    expect(dramaImageReferences(g, g.nodes.get('jules-lead')!)).toEqual([{ src: first('jules'), label: 'Jules' }]);
+    expect(dramaImageReferences(g, g.nodes.get('maya')!)).toEqual([]);
+    // Scenes: their cast and places, each picture once.
+    const scene = dramaImageReferences(g, g.nodes.get('sc1')!);
+    expect(new Set(scene.map((r) => r.src)).size).toBe(scene.length);
   });
 });
 
@@ -98,6 +133,46 @@ describe('✨ Generate in image fields', () => {
     expect(images).toHaveLength(2);
     expect(field().querySelector('.dr-gen-panel')).toBeNull();
     expect(field().querySelector('.dr-gen-note')!.textContent).toMatch(/Added 1 from Fakeshy · 4 credits/);
+    editor.destroy();
+  });
+
+  it('sends the chosen reference pictures, in order, and names them in the prompt', async () => {
+    let asked: { prompt: string; references?: string[] } | undefined;
+    setImageGenerator({
+      id: 'fake',
+      name: 'Fakeshy',
+      maxReferences: 2,
+      async generate(req) {
+        asked = req;
+        return { images: ['data:image/png;base64,QUJD'] };
+      },
+    });
+    const g = Graph.fromJSON(drama2Graph.examples![0].graph, drama2Graph.createRegistry());
+    // Photos (PNG) on every card, so they go as they are.
+    for (const n of g.nodes.values()) if (Array.isArray(n.params.images) && n.params.images.length) g.setParam(n.id, 'images', [`data:image/png;base64,${btoa(n.id)}`]);
+    const el = document.createElement('div');
+    document.body.append(el);
+    const editor = new NodeEditor(el, { graph: g, registry: g.registry!, views: drama2Graph.editor!.views });
+    const field = () => el.querySelector<HTMLElement>('.nm-node[data-id="s1b"] [data-param="images"]')!;
+    field().querySelector<HTMLButtonElement>('.dr-gen')!.click();
+    const panel = field().querySelector<HTMLElement>('.dr-gen-panel')!;
+    const refs = [...panel.querySelectorAll<HTMLButtonElement>('.dr-gen-ref')];
+    expect(refs[0].getAttribute('aria-label')).toBe('Theo');
+    // The limit (2) are on; the rest, and the card's own picture, are off.
+    expect(refs.map((r) => r.getAttribute('aria-pressed'))).toEqual(refs.map((_, i) => String(i < 2)));
+    expect(refs.at(-1)!.getAttribute('aria-label')).toBe('This card’s picture 1');
+    expect(panel.querySelector('.dr-gen-refs-note')!.textContent).toMatch(/^2 reference pictures/);
+    // A third can't go on until one is off.
+    refs[2].click();
+    expect(refs[2].getAttribute('aria-pressed')).toBe('false');
+    expect(panel.querySelector('.dr-gen-status')!.textContent).toMatch(/up to 2 reference pictures/);
+    refs[1].click();
+    refs[2].click();
+    panel.querySelector<HTMLButtonElement>('.dr-gen-go')!.click();
+    await tick(30);
+    const label = (b: HTMLButtonElement) => b.getAttribute('aria-label');
+    expect(asked!.references).toEqual([refs[0], refs[2]].map((b) => b.querySelector('img')!.getAttribute('src')));
+    expect(asked!.prompt).toMatch(new RegExp(`Reference pictures, in order: 1\\. ${label(refs[0])}; 2\\. ${label(refs[2])!.replace(/[()]/g, '\\$&')}\\.`));
     editor.destroy();
   });
 

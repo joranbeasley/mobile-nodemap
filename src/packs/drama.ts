@@ -61,6 +61,31 @@ export async function imageFileToDataUrl(file: Blob, max = 1024, quality = 0.8):
   }
 }
 
+/**
+ * A picture ready to send to an image generator as a reference: PNG, JPEG and WebP data URLs
+ * and web links go as they are; anything else (SVG drawings, very large pictures) is drawn
+ * onto a canvas and sent as a JPEG, at most `max` px on its long side.
+ */
+export async function referencePicture(src: string, max = 1024): Promise<string> {
+  if (/^https?:/i.test(src)) return src;
+  if (/^data:image\/(png|jpe?g|webp)[;,]/i.test(src) && src.length < 1_500_000) return src;
+  const img = new Image();
+  img.src = src;
+  await img.decode();
+  // SVGs without a size report 0 (or a small default): scale them up to the full size.
+  const w = img.naturalWidth || max;
+  const h = img.naturalHeight || Math.round(max * 0.75);
+  const k = /^data:image\/svg/i.test(src) ? max / Math.max(w, h) : Math.min(1, max / Math.max(w, h));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(w * k));
+  c.height = Math.max(1, Math.round(h * k));
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#fff'; // SVGs and PNGs may be transparent; JPEG isn't
+  g.fillRect(0, 0, c.width, c.height);
+  g.drawImage(img, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.85);
+}
+
 /** A full-screen viewer: tap the sides to step through, anywhere else (or Escape) to close. */
 export function openLightbox(images: string[], start = 0, caption?: string): void {
   if (!images.length) return;
@@ -145,7 +170,10 @@ export const imagesParam: ParamKind = {
     // ✨ Generate (when an image generator is set): a small panel with a prompt written
     // from the card, sent to the generator; results are copied in like added photos.
     const gen = getImageGenerator();
-    const p = ctx.param as { prompt?: (node: NodeInstance, graph: Graph) => { prompt: string; aspect?: string } | undefined; browse?: boolean };
+    const p = ctx.param as {
+      prompt?: (node: NodeInstance, graph: Graph) => { prompt: string; aspect?: string; references?: { src: string; label: string }[] } | undefined;
+      browse?: boolean;
+    };
     /** Copy a picture in from a service (its links expire); keep the link if it can't be fetched. */
     const keep = async (url: string, signal?: AbortSignal): Promise<{ src: string; copied: boolean }> => {
       if (url.startsWith('data:')) return { src: url, copied: true }; // already the picture itself
@@ -192,6 +220,35 @@ export const imagesParam: ParamKind = {
       aspect.value = suggestion?.aspect ?? '1:1';
       if (gen.models?.length) row.append(model);
       row.append(aspect);
+      // Reference pictures (for generators that take them): the cards' pictures of who and what
+      // is in it, then this card's own, as toggles. The suggested ones start on, up to the limit.
+      const maxRefs = gen.maxReferences ?? 0;
+      const refChoices = maxRefs
+        ? [...(suggestion?.references ?? []), ...list.map((src, i) => ({ src, label: `This card’s picture ${i + 1}`, own: true }))].filter(
+            (r, i, all) => all.findIndex((x) => x.src === r.src) === i,
+          )
+        : [];
+      const chosen = new Set(refChoices.filter((r) => !('own' in r)).slice(0, maxRefs).map((r) => r.src));
+      const refs = el('div', { class: 'dr-gen-refs', role: 'group', 'aria-label': 'Reference pictures' });
+      const refNote = el('small', { class: 'dr-gen-refs-note' });
+      const noteRefs = () =>
+        (refNote.textContent = chosen.size
+          ? `${chosen.size} reference picture${chosen.size > 1 ? 's' : ''} sent with the prompt (up to ${maxRefs}). Tap to switch one off or on.`
+          : `No reference pictures: text only. Tap one to send it (up to ${maxRefs}).`);
+      for (const r of refChoices) {
+        const b = el('button', { type: 'button', class: 'dr-gen-ref', title: r.label, 'aria-label': r.label, 'aria-pressed': String(chosen.has(r.src)) }) as HTMLButtonElement;
+        const im = el('img', { src: r.src, alt: '' });
+        b.append(im, el('span', {}, r.label));
+        b.addEventListener('click', () => {
+          if (chosen.has(r.src)) chosen.delete(r.src);
+          else if (chosen.size >= maxRefs) return void (status.textContent = `${gen.name} takes up to ${maxRefs} reference pictures: switch one off first.`);
+          else chosen.add(r.src);
+          b.setAttribute('aria-pressed', String(chosen.has(r.src)));
+          noteRefs();
+        });
+        refs.append(b);
+      }
+      noteRefs();
       // The key: a plain text field, masked (not type=password, so phone keyboards offer their
       // clipboard and paste behaves), with Paste and Show buttons. Saved as soon as it's entered.
       const keyRow = el('div', { class: 'dr-gen-key' });
@@ -260,8 +317,14 @@ export const imagesParam: ParamKind = {
         go.disabled = true;
         status.textContent = `Asking ${gen.name}…`;
         try {
+          // Chosen references in their order, made readable for the service; the prompt says
+          // which is which, so the model knows whose face and which room it is looking at.
+          const picked = refChoices.filter((r) => chosen.has(r.src));
+          const references = picked.length ? await Promise.all(picked.map((r) => referencePicture(r.src))) : undefined;
+          const legend = picked.length ? ` Reference pictures, in order: ${picked.map((r, i) => `${i + 1}. ${r.label}`).join('; ')}. Keep the people, costumes, places and objects looking as they do in them.` : '';
           const result = await gen.generate({
-            prompt: prompt.value.trim(),
+            references,
+            prompt: prompt.value.trim() + legend,
             aspect: aspect.value,
             model: gen.models?.length ? model.value : undefined,
             signal: abort.signal,
@@ -305,7 +368,7 @@ export const imagesParam: ParamKind = {
         const open = el('a', { href: gen.site, target: '_blank', rel: 'noopener', class: 'dr-gen-cancel dr-gen-link' }, `Open ${gen.name}`);
         buttons.append(open);
       }
-      panel.append(prompt, row, keyRow, buttons, status);
+      panel.append(prompt, row, ...(refChoices.length ? [refs, refNote] : []), keyRow, buttons, status);
       wrap.append(panel);
       prompt.focus({ preventScroll: true });
     };
@@ -784,7 +847,52 @@ export function appearances(graph: Graph, id: string): { shot: ShotInfo; scene?:
  * a mannequin, a storyboard frame for a shot or scene, a poster for an episode. Works on the
  * wired drama model (drama boards convert first).
  */
-export function dramaImagePrompt(graph: Graph, n: NodeInstance, param = 'images'): { prompt: string; aspect: string } | undefined {
+export function dramaImagePrompt(graph: Graph, n: NodeInstance, param = 'images'): DramaImagePrompt | undefined {
+  const base = basePrompt(graph, n, param);
+  return base && { ...base, references: dramaImageReferences(graph, n) };
+}
+
+/** A suggested picture to generate from, and the reference pictures to send with it. */
+export interface DramaImagePrompt {
+  prompt: string;
+  aspect: string;
+  /** Pictures of what is in it (most important first): who is on screen, where, what they wear and hold. */
+  references: { src: string; label: string }[];
+}
+
+/**
+ * The pictures already on the cards a new picture should match, so a generator that takes
+ * references draws the actual cast: for a shot, each character's portrait, the location, the
+ * costumes they wear in that scene and the props; for a scene, its cast and locations; for a
+ * costume, whoever wears it. The first picture of each card is used.
+ */
+export function dramaImageReferences(graph: Graph, n: NodeInstance): { src: string; label: string }[] {
+  const out: { src: string; label: string }[] = [];
+  const add = (node: NodeInstance | undefined, label: string) => {
+    const src = node && imageList(node.params.images)[0];
+    if (src && !out.some((r) => r.src === src)) out.push({ src, label });
+  };
+  const castAndPlaces = (characters: NodeInstance[], locations: NodeInstance[], costumes: Map<string, NodeInstance>, props: NodeInstance[] = []) => {
+    characters.forEach((c) => add(c, dramaName(c)));
+    locations.forEach((l) => add(l, `${dramaName(l)} (location)`));
+    characters.forEach((c) => add(costumes.get(c.id), `${dramaName(c)}’s costume`));
+    props.forEach((p) => add(p, `${dramaName(p)} (prop)`));
+  };
+  if (n.type === T.shot) {
+    const s = shotInfo(graph, n);
+    const sc = into(graph, n.id).find((x) => x.type === T.scene);
+    castAndPlaces(s.characters, s.location ? [s.location] : [], sc ? sceneCostumes(graph, sc.id) : new Map(), s.props);
+  } else if (n.type === T.scene) {
+    const info = sceneInfo(graph, n);
+    castAndPlaces(info.characters, info.locations, sceneCostumes(graph, n.id));
+  } else if (n.type === T.costume) {
+    const wearer = from(graph, n.id, 'character')[0];
+    add(wearer, wearer ? dramaName(wearer) : '');
+  }
+  return out;
+}
+
+function basePrompt(graph: Graph, n: NodeInstance, param: string): { prompt: string; aspect: string } | undefined {
   const t = (v: unknown) => String(v ?? '').replace(/\s+/g, ' ').trim();
   const end = (v: string) => (v && !/[.!?]$/.test(v) ? `${v}.` : v);
   const name = dramaName(n);
@@ -1122,6 +1230,13 @@ const css = `
   background: color-mix(in srgb, var(--_accent) 6%, var(--_node)); }
 .dr-gen-panel textarea { font: 12px/1.4 var(--_font); resize: vertical; min-height: 64px; }
 .dr-gen-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.dr-gen-refs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
+.dr-gen-ref { flex: none; width: 64px; display: flex; flex-direction: column; gap: 2px; padding: 3px; border: 2px solid transparent; border-radius: 8px;
+  background: none; color: inherit; font: 10px/1.2 var(--_font); cursor: pointer; opacity: .45; }
+.dr-gen-ref[aria-pressed="true"] { border-color: var(--_accent); opacity: 1; }
+.dr-gen-ref img { width: 54px; height: 54px; object-fit: cover; border-radius: 5px; display: block; }
+.dr-gen-ref span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+.dr-gen-refs-note { opacity: .75; font-size: 11px; }
 .dr-gen-row select { font: 12px var(--_font); min-height: 28px; }
 .dr-gen-key { display: flex; flex-direction: column; gap: 3px; }
 .dr-gen-key:empty { display: none; }

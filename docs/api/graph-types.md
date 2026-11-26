@@ -163,6 +163,7 @@ Files reach the person through `saveDramaFile`, a browser download by default. A
 `setImageGenerator(generator)` turns on **✨** next to + in every `images` field (on a selected card and in the Edit sheet). It opens a panel with:
 - a prompt, written by the field's `prompt(node, graph)` option when it has one;
 - a model picker and an aspect ratio picker;
+- for generators that take reference pictures, the pictures to send, as toggles (see below);
 - the generator's API key field, until a key is given.
 
 The pictures are copied into the field (shrunk to 1024 px JPEG), because generators' links expire. If a picture can't be downloaded, its link is kept and the field says so. Pass `null` to turn it off.
@@ -171,12 +172,13 @@ The pictures are copied into the field (shrunk to 1024 px JPEG), because generat
 interface ImageGenerator {
   id: string; name: string;
   models?: { id; label }[]; defaultModel?: string;
+  maxReferences?: number;                                               // reference pictures per request (0: text only)
   key?: { label; help?; get(): string | null; set(v: string): void };   // the host decides where it's kept
-  generate({ prompt, aspect?, model?, signal?, onProgress? }): Promise<{ images: string[]; credits?: number }>;
+  generate({ prompt, aspect?, model?, references?, signal?, onProgress? }): Promise<{ images: string[]; credits?: number }>;
 }
 ```
 
-`meshyImageGenerator({ key | apiKey, model?, baseUrl?, pollMs?, timeoutMs?, fetch? })` calls Meshy's text-to-image API straight from the browser (`POST /openapi/v1/text-to-image` with `ai_model`, `prompt` and `aspect_ratio`, then polls the task). Models: `MESHY_IMAGE_MODELS` (Nano Banana, Nano Banana 2 / 2 Lite / Pro, GPT Image 2; default `nano-banana`). Aspect ratios Meshy doesn't take are mapped to the nearest of 1:1, 16:9, 9:16, 4:3, 3:4, 3:2 and 2:3. Errors explain themselves: no key, a bad key, no credits, a failed task. The credits a picture used are shown after it's added.
+`meshyImageGenerator({ key | apiKey, model?, baseUrl?, pollMs?, timeoutMs?, fetch? })` calls Meshy's text-to-image API straight from the browser (`POST /openapi/v1/text-to-image` with `ai_model`, `prompt` and `aspect_ratio`, then polls the task). With `references`, it uses image-to-image instead (`POST /openapi/v1/image-to-image` with `reference_image_urls`: up to 5 (`MESHY_MAX_REFERENCES`), https URLs or data: URIs of PNG, JPEG or WebP). Models: `MESHY_IMAGE_MODELS` (Nano Banana, Nano Banana 2 / 2 Lite / Pro, GPT Image 2; default `nano-banana`). Aspect ratios Meshy doesn't take are mapped to the nearest of 1:1, 16:9, 9:16, 4:3, 3:4, 3:2 and 2:3. Errors explain themselves: no key, a bad key, no credits, a failed task. The credits a picture used are shown after it's added.
 
 **Searching existing assets.** A generator can also offer `browse()`: the person's existing pictures on the service, newest first, as `{ id, label, hint, thumb, url }`. Image fields with `browse: true` then get a 🔍 button next to ✨. It opens the editor's searchable chooser (now with thumbnails), matching each asset's prompt or name, and copies the chosen picture in. For Meshy, `browse()` lists your text-to-image pictures and the thumbnails of your text-to-3D, image-to-3D and multi-image-to-3D models (the newest 50 of each that succeeded). In the drama types, props and costumes have it (on boards, objects and outfits).
 
@@ -191,5 +193,9 @@ interface ImageGenerator {
 | Shot frames | Storyboard frame: framing, action, who is on screen (with their appearance), setting and time, and the episode's or season's style | 16:9 |
 | Scene storyboard | The same, for the scene | 16:9 |
 | Episode poster | Poster artwork | 2:3 |
+
+It also suggests **reference pictures** (`references: { src, label }[]`, also `dramaImageReferences(graph, node)`): the first picture of each card the new picture should match. For a shot: each character on screen, the location, the costumes they wear in that scene, then the props. For a scene: its cast, locations and costumes. For an outfit: whoever wears it. Characters, locations, objects and episodes suggest none.
+
+In the ✨ panel the suggested pictures come first, then the card's own pictures. The suggested ones are switched on up to the generator's limit, and the card's own are off (switch one on for a variation of it). On Generate, the chosen pictures are sent in order, converted where needed by `referencePicture(src)` (SVG drawings and very large pictures become JPEGs of at most 1024 px). The prompt gets a line naming them, e.g. *Reference pictures, in order: 1. Theo; 2. School hall (location).*, so the model knows whose face and which room each one is.
 
 The demo uses Meshy with the visitor's own API key, kept in that browser only.

@@ -1,6 +1,6 @@
 /**
- * Image generation for `images` fields: a pluggable generator (text → pictures), and a Meshy
- * adapter. With a generator set, image fields offer ✨ Generate next to +, with a prompt
+ * Image generation for `images` fields: a pluggable generator (text, and optionally reference
+ * pictures → pictures), and a Meshy adapter. With a generator set, image fields offer ✨ Generate next to +, with a prompt
  * written from the card (see ImagesParamDef.prompt).
  *
  *   setImageGenerator(meshyImageGenerator({ key: { get: () => localStorage.getItem('k'), set: (v) => localStorage.setItem('k', v) } }));
@@ -11,6 +11,11 @@ export interface ImageRequest {
   /** '1:1', '16:9', '9:16', '4:3', '3:4', '3:2' or '2:3'. */
   aspect?: string;
   model?: string;
+  /**
+   * Pictures to work from, most important first: https URLs or data: URIs (PNG, JPEG or WebP).
+   * Only for generators with `maxReferences`; at most that many are sent.
+   */
+  references?: string[];
   signal?: AbortSignal;
   /** 0–100 while it works. */
   onProgress?: (percent: number) => void;
@@ -42,6 +47,8 @@ export interface ImageGenerator {
   name: string;
   models?: { id: string; label: string }[];
   defaultModel?: string;
+  /** How many reference pictures `generate` accepts (0 or unset: text only). */
+  maxReferences?: number;
   /** An API key the person gives once; the host decides where it is kept. */
   key?: { label: string; help?: string; get(): string | null | undefined; set(value: string): void };
   generate(req: ImageRequest): Promise<ImageResult>;
@@ -77,9 +84,14 @@ export const MESHY_IMAGE_MODELS = [
   { id: 'gpt-image-2', label: 'GPT Image 2' },
 ];
 
+/** Reference pictures Meshy's image-to-image takes per request. */
+export const MESHY_MAX_REFERENCES = 5;
+
 /**
- * Meshy text-to-image (POST /openapi/v1/text-to-image, then poll the task). Calls go from
- * the browser straight to Meshy with the person's own API key.
+ * Meshy text-to-image (POST /openapi/v1/text-to-image, then poll the task), or image-to-image
+ * when the request has reference pictures (POST /openapi/v1/image-to-image with
+ * `reference_image_urls`: up to 5 https URLs or data: URIs). Calls go from the browser
+ * straight to Meshy with the person's own API key.
  */
 export function meshyImageGenerator(
   opts: {
@@ -126,6 +138,7 @@ export function meshyImageGenerator(
     site: 'https://www.meshy.ai/',
     models: MESHY_IMAGE_MODELS,
     defaultModel: opts.model ?? 'nano-banana',
+    maxReferences: MESHY_MAX_REFERENCES,
     key: { help: 'From meshy.ai → API. Kept in this browser only and sent only to Meshy.', ...key },
     async browse({ signal } = {}) {
       // Pictures from text-to-image, and the thumbnails of 3D models (all newest first).
@@ -166,18 +179,25 @@ export function meshyImageGenerator(
           });
       return out.sort((a, b) => b.t - a.t).map(({ t, ...a }) => (void t, a));
     },
-    async generate({ prompt, aspect, model, signal, onProgress }) {
+    async generate({ prompt, aspect, model, references, signal, onProgress }) {
       const aspect_ratio = nearestAspect(aspect);
-      const created = await call('/openapi/v1/text-to-image', {
+      const refs = (references ?? []).filter(Boolean).slice(0, MESHY_MAX_REFERENCES);
+      const kind = refs.length ? 'image-to-image' : 'text-to-image';
+      const created = await call(`/openapi/v1/${kind}`, {
         method: 'POST',
         signal,
-        body: JSON.stringify({ ai_model: model ?? opts.model ?? 'nano-banana', prompt, ...(aspect_ratio ? { aspect_ratio } : {}) }),
+        body: JSON.stringify({
+          ai_model: model ?? opts.model ?? 'nano-banana',
+          prompt,
+          ...(aspect_ratio ? { aspect_ratio } : {}),
+          ...(refs.length ? { reference_image_urls: refs } : {}),
+        }),
       });
       const id = created.result ?? created.id;
       if (!id) throw new Error('Meshy did not return a task');
       const until = Date.now() + (opts.timeoutMs ?? 180_000);
       for (;;) {
-        const task = await call(`/openapi/v1/text-to-image/${encodeURIComponent(id)}`, { signal });
+        const task = await call(`/openapi/v1/${kind}/${encodeURIComponent(id)}`, { signal });
         onProgress?.(Number(task.progress ?? 0));
         if (task.status === 'SUCCEEDED') return { images: (task.image_urls ?? []) as string[], credits: task.consumed_credits };
         if (['FAILED', 'CANCELED', 'EXPIRED'].includes(task.status)) throw new Error(task.task_error?.message || `Meshy task ${String(task.status).toLowerCase()}`);
