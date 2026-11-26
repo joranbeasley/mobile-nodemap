@@ -43,6 +43,26 @@ export const refsOf = (graph: Graph, n: NodeInstance | undefined, param: string)
 export const referrers = (graph: Graph, id: string, type: string, param: string): NodeInstance[] =>
   [...graph.nodes.values()].filter((n) => n.type === type && idList(n.params[param]).includes(id));
 
+/**
+ * Who wears an outfit in a shot. Any character can wear any outfit: the shot's choice
+ * (`wearers`, outfit id → character id) if that character is in the shot; else the outfit's
+ * usual wearer if they are; else the shot's only character. Undefined when it isn't clear.
+ */
+export function wearerOf(graph: Graph, shot: NodeInstance, outfit: NodeInstance): NodeInstance | undefined {
+  const cast = refsOf(graph, shot, 'characters');
+  const chosen = (shot.params.wearers as Record<string, string> | undefined)?.[outfit.id];
+  return cast.find((c) => c.id === chosen) ?? cast.find((c) => c.id === idList(outfit.params.wornBy)[0]) ?? (cast.length === 1 ? cast[0] : undefined);
+}
+
+/** Every outfit a character wears: their usual ones, and any a shot puts on them. */
+export function outfitsOf(graph: Graph, characterId: string): NodeInstance[] {
+  const usual = referrers(graph, characterId, D2.prop, 'wornBy').filter(isOutfit);
+  const inShots = [...graph.nodes.values()]
+    .filter((s) => s.type === D2.shot)
+    .flatMap((s) => refsOf(graph, s, 'props').filter((o) => isOutfit(o) && wearerOf(graph, s, o)?.id === characterId));
+  return [...new Set([...usual, ...inShots])];
+}
+
 type RefParam = {
   name: string;
   label?: string;
@@ -59,6 +79,8 @@ type RefParam = {
   sortable?: boolean;
   /** Keep this param of the listed nodes in step with the order: 1, 2, 3… */
   renumber?: string;
+  /** Something extra on a chip (who wears an outfit in this shot). */
+  chip?: (graph: Graph, holder: NodeInstance, item: NodeInstance) => HTMLElement | undefined;
 };
 const NEW = '\u0000new';
 const MOVE = '\u0000move:';
@@ -74,7 +96,7 @@ function refHint(graph: Graph, n: NodeInstance): string {
       return [p.setting === 'EXT' ? 'Exterior' : 'Interior', words(p.description)].filter(Boolean).join(' · ');
     case D2.prop: {
       const who = p.kind === 'Outfit' ? refsOf(graph, n, 'wornBy')[0] : undefined;
-      return [p.kind === 'Outfit' ? `Outfit${who ? ` for ${nodeTitle(graph, who)}` : ''}` : 'Object', words(p.description, 6)].filter(Boolean).join(' · ');
+      return [p.kind === 'Outfit' ? `Outfit${who ? `, usually ${nodeTitle(graph, who)}` : ''}` : 'Object', words(p.description, 6)].filter(Boolean).join(' · ');
     }
     case D2.shot: {
       const sc = referrers(graph, n.id, D2.scene, 'shots')[0];
@@ -172,6 +194,8 @@ function refControl(single: boolean): ParamKind {
           if (p.sortable && shown.length > 1) chip.append(button('dr2-mv', '‹', `Move ${name} earlier`, move(-1), i === 0));
           chip.append(open);
           if (p.sortable && shown.length > 1) chip.append(button('dr2-mv', '›', `Move ${name} later`, move(1), i === shown.length - 1));
+          const extra = p.chip?.(graph, ctx.node, n);
+          if (extra) chip.append(extra);
           chip.append(button('dr2-x', '×', `Remove ${name}`, () => commit(value.filter((x) => x !== id))));
           wrap.append(chip);
         });
@@ -297,7 +321,11 @@ const propNode = defineNode({
   description: 'An object or an outfit that shots need',
   params: [
     { name: 'kind', label: 'type', kind: 'select', options: PROP_TYPES, default: 'Object' },
-    { ...ref('wornBy', 'worn by', D2.character), description: 'Who wears it. In the shots it is in, it replaces their usual clothes.', when: (p: Record<string, unknown>) => p.kind === 'Outfit' },
+    {
+      ...ref('wornBy', 'usually worn by', D2.character),
+      description: 'Optional. Anyone can wear it: in each shot, pick who wears it next to the outfit. There it replaces their usual clothes.',
+      when: (p: Record<string, unknown>) => p.kind === 'Outfit',
+    },
     text('description', 'description', 'What it is: material, colour, details'),
     { ...images(), browse: true },
   ],
@@ -317,6 +345,28 @@ const locationNode = defineNode({
   onCreate: (n) => void (n.label ??= 'New location'),
 });
 
+/** On an outfit's chip in a shot: who wears it here, from the shot's characters. */
+function wearerPicker(graph: Graph, shot: NodeInstance, item: NodeInstance): HTMLElement | undefined {
+  if (!isOutfit(item)) return undefined;
+  const cast = refsOf(graph, shot, 'characters');
+  const sel = document.createElement('select');
+  sel.className = 'dr2-wearer';
+  sel.setAttribute('aria-label', `Who wears ${nodeTitle(graph, item)} in this shot`);
+  const who = wearerOf(graph, shot, item);
+  const option = (text: string, v: string) => Object.assign(document.createElement('option'), { textContent: text, value: v });
+  if (!who) sel.append(option(cast.length ? 'on: who?' : 'on: add a character', ''));
+  for (const c of cast) sel.append(option(`on ${nodeTitle(graph, c)}`, c.id));
+  sel.value = who?.id ?? '';
+  sel.disabled = !cast.length;
+  sel.addEventListener('change', () => {
+    const wearers = { ...((shot.params.wearers as Record<string, string> | undefined) ?? {}) };
+    if (sel.value) wearers[item.id] = sel.value;
+    else delete wearers[item.id];
+    graph.setParam(shot.id, 'wearers', wearers);
+  });
+  return sel;
+}
+
 const shotNode = defineNode({
   type: D2.shot,
   title: 'Shot',
@@ -332,7 +382,7 @@ const shotNode = defineNode({
     { name: 'framing', label: 'framing', kind: 'select', options: FRAMINGS, default: 'Medium' },
     { ...ref('location', 'location', D2.location), create: true },
     { ...refs('characters', 'characters', D2.character), create: true },
-    { ...refs('props', 'props', D2.prop), create: true },
+    { ...refs('props', 'props', D2.prop), create: true, chip: wearerPicker },
     text('description', 'description', 'What we see and hear'),
     images('images', 'frames'),
     { name: 'movement', label: 'camera', kind: 'select', options: MOVES, default: 'Static', advanced: true },
@@ -404,8 +454,8 @@ export function toDrama(board: Graph): Graph {
     if (!type) continue;
     // An outfit is a prop to people, and a costume (worn by someone, scene by scene) to the drama model.
     if (isOutfit(n)) type = 'drama/costume';
-    const { location, characters, props, shots, scenes, wornBy, kind, ...params } = n.params as Record<string, unknown>;
-    void [location, characters, props, shots, scenes, wornBy, kind];
+    const { location, characters, props, shots, scenes, wornBy, kind, wearers, ...params } = n.params as Record<string, unknown>;
+    void [location, characters, props, shots, scenes, wornBy, kind, wearers];
     json.nodes.push({ id: n.id, type, x: n.x, y: n.y, params, ...(n.label ? { label: n.label } : {}) });
   }
   const sceneOfShot = new Map<string, string>();
@@ -417,13 +467,24 @@ export function toDrama(board: Graph): Graph {
       ids('location').filter((id) => has(id, D2.location)).slice(0, 1).forEach((id) => edge(id, 'shots', n.id, 'location'));
       ids('characters').filter((id) => has(id, D2.character)).forEach((id) => edge(id, 'appears', n.id, 'characters'));
       for (const id of ids('props').filter((x) => has(x, D2.prop))) {
-        if (!isOutfit(board.nodes.get(id))) edge(id, 'used', n.id, 'props');
+        const o = board.nodes.get(id)!;
+        if (!isOutfit(o)) edge(id, 'used', n.id, 'props');
         else {
-          // An outfit in a shot dresses its wearer for that shot's scene.
+          // An outfit in a shot dresses whoever wears it there for that shot's scene. Anyone can
+          // wear it: on its usual wearer it is the outfit's own costume node; on someone else, a
+          // copy of it worn by them (the drama model gives each costume one wearer).
           const sc = sceneOfShot.get(n.id);
-          if (sc && !worn.has(`${id}>${sc}`)) {
-            worn.add(`${id}>${sc}`);
-            edge(id, 'scenes', sc, 'costumes');
+          const who = wearerOf(board, n, o);
+          if (!sc || !who) continue;
+          const costume = who.id === idList(o.params.wornBy)[0] ? id : `${id}@${who.id}`;
+          if (costume !== id && !json.nodes.some((x) => x.id === costume)) {
+            const base = json.nodes.find((x) => x.id === id)!;
+            json.nodes.push({ ...base, id: costume, params: { ...base.params } });
+            edge(who.id, 'appears', costume, 'character');
+          }
+          if (!worn.has(`${costume}>${sc}`)) {
+            worn.add(`${costume}>${sc}`);
+            edge(costume, 'scenes', sc, 'costumes');
           }
         }
       }
@@ -548,7 +609,7 @@ export function drama2Lists(board: Graph, wired: Graph, id: string): Drama2List[
       { title: 'Scenes', items: sceneSort(scenesOf(apps)).map((x) => link(x, sceneLabel(board, wired, x))) },
       { title: 'Episodes', items: epSort(episodesOf(apps)).map((x) => link(x, episodeLabel(board, x))) },
     ];
-    if (n.type === D2.character) lists.push({ title: 'Outfits', items: referrers(board, id, D2.prop, 'wornBy').filter(isOutfit).map((o) => link(o.id, nodeTitle(board, o))) });
+    if (n.type === D2.character) lists.push({ title: 'Outfits', items: outfitsOf(board, id).map((o) => link(o.id, nodeTitle(board, o))) });
     return lists;
   }
   if (n.type === D2.prop) {
@@ -578,9 +639,17 @@ export function drama2Lists(board: Graph, wired: Graph, id: string): Drama2List[
       { title: 'Locations', items: (info?.locations ?? []).map((l) => link(l.id, nodeTitle(board, board.nodes.get(l.id) ?? l))) },
       {
         title: 'Props',
-        items: uniq(refsOf(board, n, 'shots').flatMap((s) => refsOf(board, s, 'props'))).map((o) => {
-          const who = isOutfit(o) ? refsOf(board, o, 'wornBy')[0] : undefined;
-          return link(o.id, `${nodeTitle(board, o)}${who ? ` (${nodeTitle(board, who)})` : ''}`);
+        // Each outfit with whoever wears it in this scene's shots (one entry per wearer).
+        items: uniq(
+          refsOf(board, n, 'shots').flatMap((s) =>
+            refsOf(board, s, 'props').map((o) => {
+              const who = isOutfit(o) ? wearerOf(board, s, o) : undefined;
+              return `${o.id}\u0000${who ? nodeTitle(board, who) : ''}`;
+            }),
+          ),
+        ).map((k) => {
+          const [oid, who] = k.split('\u0000');
+          return link(oid, `${nodeTitle(board, board.nodes.get(oid)!)}${who ? ` (${who})` : ''}`);
         }),
       },
     ];
@@ -645,6 +714,12 @@ const css = `
 .dr2-refs { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 .dr2-chip { display: inline-flex; align-items: stretch; border: 1px solid var(--_border); border-radius: 999px; overflow: hidden; background: color-mix(in srgb, var(--_accent) 8%, var(--_node)); }
 .dr2-chip button { all: unset; cursor: pointer; font: 500 12px/1 var(--_font); color: var(--_text); padding: 6px 10px; }
+.dr2-chip .dr2-wearer { appearance: none; border: 0; border-left: 1px solid var(--_border); background: color-mix(in srgb, var(--_accent) 14%, var(--_node)); color: var(--_text);
+  font: 500 11px/1 var(--_font); padding: 0 20px 0 8px; cursor: pointer; max-width: 130px; text-overflow: ellipsis;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 7px center; background-size: 9px 6px; }
+.dr2-chip .dr2-wearer:disabled { cursor: default; opacity: .7; }
+.dr2-chip .dr2-wearer:focus-visible { outline: 2px solid var(--_accent); outline-offset: -2px; }
 .dr2-chip button[data-nm-open]:hover, .dr2-chip button[data-nm-open]:focus-visible { color: var(--_accent); text-decoration: underline; }
 .dr2-chip .dr2-x { padding: 6px 8px 6px 2px; color: var(--_muted); }
 .nm-node:not(.nm-selected) .dr2-chip .dr2-x { display: none; }

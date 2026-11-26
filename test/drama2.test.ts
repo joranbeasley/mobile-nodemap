@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from 'vitest';
-import { Graph, Evaluator, NodeEditor, drama2Graph, dramaGraph, toDrama, fromDrama, drama2Lists, seedanceShot, getGraphType } from '../src/index';
+import { Graph, Evaluator, NodeEditor, drama2Graph, dramaGraph, toDrama, fromDrama, drama2Lists, seedanceShot, getGraphType, sceneCostumes, wearerOf } from '../src/index';
 
 const load = (id = 'term') => Graph.fromJSON(drama2Graph.examples!.find((e) => e.id === id)!.graph, drama2Graph.createRegistry());
 const view = (id: string) => drama2Graph.editor!.views!.find((v) => v.id === id)!;
@@ -162,6 +162,54 @@ describe('Editor views', () => {
     g.setParam('script', 'kind', 'Outfit');
     expect(sheetField().hidden).toBe(false);
     editor.closePalette();
+    editor.destroy();
+  });
+
+  it('lets any character wear any outfit, shot by shot', async () => {
+    const g = load();
+    const node = (id: string) => g.nodes.get(id)!;
+    // Maya's stage blacks, usually hers, put on Theo's close-up in scene 1 (he's the only one in it).
+    g.setParam('s1b', 'props', [...(node('s1b').params.props as string[]), 'maya-blacks']);
+    expect(wearerOf(g, node('s1b'), node('maya-blacks'))!.id).toBe('theo');
+    expect(wearerOf(g, node('s4a'), node('maya-blacks'))!.id).toBe('maya');
+    let wired = toDrama(g);
+    const worn = (scene: string, who: string) => sceneCostumes(wired, scene).get(who);
+    expect(worn('sc1', 'theo')!.id).toBe('maya-blacks@theo'); // a copy, worn by Theo
+    expect(worn('sc1', 'theo')!.params.images).toEqual(node('maya-blacks').params.images);
+    expect(worn('sc4', 'maya')!.id).toBe('maya-blacks'); // still Maya's in scene 4
+    expect(seedanceShot(wired, 's1b').prompt).toMatch(/Theo .*Costume in this scene: All-black crew clothes/s);
+    expect(titles(g, 'theo', 'Outfits')).toContain(node('maya-blacks').label);
+    // A shot with several people: the usual wearer if they're in it, else whoever the shot picks.
+    g.setParam('s1a', 'props', ['jules-lead']);
+    expect(wearerOf(g, node('s1a'), node('jules-lead'))!.id).toBe('jules');
+    g.setParam('s1a', 'wearers', { 'jules-lead': 'okafor' });
+    expect(wearerOf(g, node('s1a'), node('jules-lead'))!.id).toBe('okafor');
+    wired = toDrama(g);
+    expect(worn('sc1', 'okafor')!.id).toBe('jules-lead@okafor');
+    expect(worn('sc1', 'jules')).toBeUndefined();
+    expect(titles(g, 'sc1', 'Props')).toContain(`${node('jules-lead').label} (Ms Okafor)`);
+    // No usual wearer and several people: nobody is dressed until the shot says who.
+    g.setParam('jules-lead', 'wornBy', '');
+    g.setParam('s1a', 'wearers', {});
+    expect(wearerOf(g, node('s1a'), node('jules-lead'))).toBeUndefined();
+    expect([...sceneCostumes(toDrama(g), 'sc1').keys()]).toEqual(['theo']);
+  });
+
+  it('picks who wears an outfit from its chip on the shot', async () => {
+    const { g, el, editor } = mount();
+    await editor.setView('shots');
+    g.setParam('s1a', 'props', ['jules-lead', 'script']);
+    const pick = () => el.querySelector<HTMLSelectElement>('.nm-node[data-id="s1a"] [data-param="props"] .dr2-wearer')!;
+    expect(el.querySelectorAll('.nm-node[data-id="s1a"] [data-param="props"] .dr2-wearer')).toHaveLength(1); // outfits only
+    expect([...pick().options].map((o) => o.textContent)).toEqual(['on Maya', 'on Theo', 'on Jules', 'on Ms Okafor']);
+    expect(pick().value).toBe('jules');
+    pick().value = 'theo';
+    pick().dispatchEvent(new Event('change'));
+    expect(g.nodes.get('s1a')!.params.wearers).toEqual({ 'jules-lead': 'theo' });
+    expect(pick().value).toBe('theo');
+    // Saved and loaded with the map.
+    const again = Graph.fromJSON(JSON.parse(JSON.stringify(g.toJSON())), drama2Graph.createRegistry());
+    expect(wearerOf(again, again.nodes.get('s1a')!, again.nodes.get('jules-lead')!)!.id).toBe('theo');
     editor.destroy();
   });
 

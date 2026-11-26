@@ -7,7 +7,7 @@ export { dramaImagePrompt, dramaImageReferences, referencePicture, type DramaIma
 export type { DramaStatus, ShotInfo, SceneInfo, EpisodeInfo } from './drama.js';
 export { seedanceScript, seedanceShot, seedancePack, seedanceCost, SEEDANCE_RATES, setDramaFileSaver, saveDramaFile, zip as zipFiles } from './drama-seedance.js';
 export type { SeedanceOptions, SeedanceScript, SeedanceAsset, SeedanceShot, SeedanceCost, FileSaver } from './drama-seedance.js';
-export { drama2Pack, drama2Engine, drama2View, drama2Lists, toDrama, fromDrama, refParam, refsParam, nodeTitle, refsOf, referrers, D2 } from './drama2.js';
+export { drama2Pack, drama2Engine, drama2View, drama2Lists, toDrama, fromDrama, refParam, refsParam, nodeTitle, refsOf, referrers, wearerOf, outfitsOf, D2 } from './drama2.js';
 export type { Drama2List, Drama2Link } from './drama2.js';
 export { setImageGenerator, getImageGenerator, meshyImageGenerator, MESHY_IMAGE_MODELS } from './image-generation.js';
 export type { ImageGenerator, ImageRequest, ImageResult } from './image-generation.js';
