@@ -10,8 +10,9 @@ describe('Meshy image generator', () => {
     const calls: { url: string; init?: RequestInit }[] = [];
     let polls = 0;
     const fakeFetch = (async (url: string, init?: RequestInit) => {
-      calls.push({ url, init });
       const json = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body }) as Response;
+      if (url.endsWith('/balance')) return json({}); // no balance: credits come from the task
+      calls.push({ url, init });
       if (init?.method === 'POST') return json({ result: 'task-1' });
       polls++;
       return polls < 2 ? json({ status: 'IN_PROGRESS', progress: 40 }) : json({ status: 'SUCCEEDED', progress: 100, image_urls: ['https://assets.example/x.png'], consumed_credits: 9 });
@@ -30,8 +31,9 @@ describe('Meshy image generator', () => {
   it('sends reference pictures to image-to-image (up to 5) and polls that task', async () => {
     const calls: { url: string; init?: RequestInit }[] = [];
     const fakeFetch = (async (url: string, init?: RequestInit) => {
-      calls.push({ url, init });
       const json = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as Response;
+      if (url.endsWith('/balance')) return json({});
+      calls.push({ url, init });
       return init?.method === 'POST' ? json({ result: 'task-2' }) : json({ status: 'SUCCEEDED', progress: 100, image_urls: ['https://assets.example/y.png'], consumed_credits: 3 });
     }) as unknown as typeof fetch;
     const gen = meshyImageGenerator({ apiKey: 'k', fetch: fakeFetch, pollMs: 1 });
@@ -47,6 +49,35 @@ describe('Meshy image generator', () => {
     expect(calls[2].url).toBe('https://api.meshy.ai/openapi/v1/text-to-image');
   });
 
+  it('measures what a picture cost from the balance, and estimates the next one', async () => {
+    let balance = 100;
+    let lastModel = '';
+    const history = [
+      { status: 'SUCCEEDED', type: 'text-to-image', ai_model: 'nano-banana', consumed_credits: 3 },
+      { status: 'SUCCEEDED', type: 'image-to-image', ai_model: 'gpt-image-2', consumed_credits: 0 },
+    ];
+    const fakeFetch = (async (url: string, init?: RequestInit) => {
+      const json = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as Response;
+      if (url.endsWith('/balance')) return json({ balance });
+      if (init?.method === 'POST') {
+        lastModel = JSON.parse(String(init.body)).ai_model;
+        balance -= lastModel === 'gpt-image-2' ? 8 : 3;
+        return json({ result: 't' });
+      }
+      if (url.includes('page_size')) return json(history);
+      // Meshy reports 0 here: the balance says otherwise.
+      return json({ status: 'SUCCEEDED', image_urls: ['https://a/p.png'], consumed_credits: 0 });
+    }) as unknown as typeof fetch;
+    const gen = meshyImageGenerator({ apiKey: 'k', fetch: fakeFetch, pollMs: 1 });
+    expect(await gen.balance!()).toBe(100);
+    expect(await gen.estimate!({ model: 'nano-banana' })).toEqual({ credits: 3, basis: 'what Meshy recorded for your last one' });
+    expect(await gen.estimate!({ model: 'nano-banana', references: 2 })).toBeUndefined(); // no image-to-image with it yet
+    expect(await gen.estimate!({ model: 'gpt-image-2', references: 1 })).toBeUndefined(); // a recorded 0 is not believed
+    const res = await gen.generate({ prompt: 'x', model: 'gpt-image-2', references: ['https://a/r.png'] });
+    expect(res).toEqual({ images: ['https://a/p.png'], credits: 8, balance: 92 });
+    expect(await gen.estimate!({ model: 'gpt-image-2', references: 1 })).toEqual({ credits: 8, basis: 'what your last one cost' });
+  });
+
   it('explains failures', async () => {
     const noKey = meshyImageGenerator({ fetch: (async () => ({})) as unknown as typeof fetch });
     await expect(noKey.generate({ prompt: 'x' })).rejects.toThrow(/API key/);
@@ -56,7 +87,11 @@ describe('Meshy image generator', () => {
     const failed = meshyImageGenerator({
       apiKey: 'k',
       pollMs: 1,
-      fetch: (async () => ({ ok: true, status: 200, json: async () => (n++ ? { status: 'FAILED', task_error: { message: 'Prompt blocked' } } : { result: 't' }) })) as unknown as typeof fetch,
+      fetch: (async (url: string) => ({
+        ok: true,
+        status: 200,
+        json: async () => (url.endsWith('/balance') ? {} : n++ ? { status: 'FAILED', task_error: { message: 'Prompt blocked' } } : { result: 't' }),
+      })) as unknown as typeof fetch,
     });
     await expect(failed.generate({ prompt: 'x' })).rejects.toThrow('Prompt blocked');
   });
@@ -74,7 +109,12 @@ describe('Image prompts from drama cards', () => {
     expect(shot.prompt).toContain('On screen: Theo: 17, tall and lanky');
     expect(shot.prompt).toContain('Setting: School hall, interior, day.');
     expect(shot.prompt).toContain('35mm film look'); // the season's style
-    expect(dramaImagePrompt(g, g.nodes.get('jules-lead')!)!.prompt).toMatch(/^Costume reference: Deep green velvet.* Worn by Jules: 16/);
+    // Outfits on a dress form and objects on their own: never a person.
+    const outfit = dramaImagePrompt(g, g.nodes.get('jules-lead')!)!.prompt;
+    expect(outfit).toMatch(/^Costume reference: Deep green velvet.* Made for Jules\. .*headless dress form \(mannequin\).* No person, no face, no text\.$/);
+    expect(outfit).not.toMatch(/16, small/); // not their looks: that would draw a person
+    const prop = [...g.nodes.values()].find((n) => n.type === 'drama/prop')!;
+    expect(dramaImagePrompt(g, prop)!.prompt).toMatch(/the object on its own\..* No people, no hands, no text\.$/);
   });
 
   it('suggests reference pictures: who is in a shot, where, and what they wear', () => {
@@ -84,8 +124,8 @@ describe('Image prompts from drama cards', () => {
     expect(shot[0]).toEqual({ src: first('theo'), label: 'Theo' });
     expect(shot.map((r) => r.label)).toContain('School hall (location)');
     expect(dramaImagePrompt(g, g.nodes.get('s1b')!)!.references).toEqual(shot);
-    // A costume: its wearer. A character: nothing to match yet.
-    expect(dramaImageReferences(g, g.nodes.get('jules-lead')!)).toEqual([{ src: first('jules'), label: 'Jules' }]);
+    // Outfits take no reference people (a face would end up on the dress form); nor do characters.
+    expect(dramaImageReferences(g, g.nodes.get('jules-lead')!)).toEqual([]);
     expect(dramaImageReferences(g, g.nodes.get('maya')!)).toEqual([]);
     // Scenes: their cast and places, each picture once.
     const scene = dramaImageReferences(g, g.nodes.get('sc1')!);
@@ -142,9 +182,15 @@ describe('✨ Generate in image fields', () => {
       id: 'fake',
       name: 'Fakeshy',
       maxReferences: 2,
+      async balance() {
+        return 1234;
+      },
+      async estimate({ references }) {
+        return references ? { credits: 5, basis: 'a guess' } : undefined;
+      },
       async generate(req) {
         asked = req;
-        return { images: ['data:image/png;base64,QUJD'] };
+        return { images: ['data:image/png;base64,QUJD'], credits: 5, balance: 1229 };
       },
     });
     const g = Graph.fromJSON(drama2Graph.examples![0].graph, drama2Graph.createRegistry());
@@ -162,6 +208,8 @@ describe('✨ Generate in image fields', () => {
     expect(refs.map((r) => r.getAttribute('aria-pressed'))).toEqual(refs.map((_, i) => String(i < 2)));
     expect(refs.at(-1)!.getAttribute('aria-label')).toBe('This card’s picture 1');
     expect(panel.querySelector('.dr-gen-refs-note')!.textContent).toMatch(/^2 reference pictures/);
+    await tick(5);
+    expect(panel.querySelector('.dr-gen-cost')!.textContent).toBe(`About 5 credits (a guess) · ${(1234).toLocaleString()} left`);
     // A third can't go on until one is off.
     refs[2].click();
     expect(refs[2].getAttribute('aria-pressed')).toBe('false');
@@ -172,6 +220,7 @@ describe('✨ Generate in image fields', () => {
     await tick(30);
     const label = (b: HTMLButtonElement) => b.getAttribute('aria-label');
     expect(asked!.references).toEqual([refs[0], refs[2]].map((b) => b.querySelector('img')!.getAttribute('src')));
+    expect(field().querySelector('.dr-gen-note')!.textContent).toMatch(/· 5 credits · .*1229|1,229 left/);
     expect(asked!.prompt).toMatch(new RegExp(`Reference pictures, in order: 1\\. ${label(refs[0])}; 2\\. ${label(refs[2])!.replace(/[()]/g, '\\$&')}\\.`));
     editor.destroy();
   });

@@ -24,8 +24,17 @@ export interface ImageRequest {
 export interface ImageResult {
   /** URLs of the generated pictures (they may expire: copy them, as the images field does). */
   images: string[];
-  /** What the service charged, when it says. */
+  /** What it cost: from the service, or measured from the balance before and after. */
   credits?: number;
+  /** Credits left afterwards, when the service says. */
+  balance?: number;
+}
+
+/** What a picture will probably cost, and why we think so. */
+export interface ImageEstimate {
+  credits: number;
+  /** e.g. "what your last one cost" */
+  basis: string;
 }
 
 /** A picture the service already has (an earlier generation or a 3D model's thumbnail). */
@@ -52,6 +61,10 @@ export interface ImageGenerator {
   /** An API key the person gives once; the host decides where it is kept. */
   key?: { label: string; help?: string; get(): string | null | undefined; set(value: string): void };
   generate(req: ImageRequest): Promise<ImageResult>;
+  /** Credits left on the account. */
+  balance?(opts?: { signal?: AbortSignal }): Promise<number | undefined>;
+  /** What a picture with this model (and this many references) will probably cost; undefined when unknown. */
+  estimate?(req: { model?: string; references?: number; signal?: AbortSignal }): Promise<ImageEstimate | undefined>;
   /** Where to make pictures by hand when this page can't reach the service (offered with the prompt). */
   site?: string;
   /** The person's existing pictures on the service, newest first, to search and reuse. */
@@ -108,6 +121,9 @@ export function meshyImageGenerator(
   const base = (opts.baseUrl ?? 'https://api.meshy.ai').replace(/\/$/, '');
   const doFetch = opts.fetch ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
   let memoryKey = '';
+  /** Costs seen in this session, by "kind|model". */
+  const measured = new Map<string, number>();
+  let history: { at: number; rows: Record<string, any>[] } | undefined;
   const key = opts.key ?? { label: 'Meshy API key', get: () => opts.apiKey ?? memoryKey, set: (v: string) => void (memoryKey = v) };
   const sleep = (ms: number, signal?: AbortSignal) =>
     new Promise<void>((resolve, reject) => {
@@ -179,15 +195,50 @@ export function meshyImageGenerator(
           });
       return out.sort((a, b) => b.t - a.t).map(({ t, ...a }) => (void t, a));
     },
+    async balance({ signal } = {}) {
+      const b = await call('/openapi/v1/balance', { signal });
+      return typeof b.balance === 'number' ? b.balance : undefined;
+    },
+    async estimate({ model, references, signal } = {}) {
+      const kind = references ? 'image-to-image' : 'text-to-image';
+      const m = model ?? opts.model ?? 'nano-banana';
+      const seen = measured.get(`${kind}|${m}`);
+      if (seen != null) return { credits: seen, basis: 'what your last one cost' };
+      // Otherwise what Meshy recorded for your most recent picture like it.
+      if (!history || Date.now() - history.at > 60_000) {
+        try {
+          const rows = await call('/openapi/v1/text-to-image?page_size=50&sort_order=desc', { signal });
+          history = { at: Date.now(), rows: Array.isArray(rows) ? rows : [] };
+        } catch (err) {
+          if ((err as Error).name === 'AbortError') throw err;
+          return undefined;
+        }
+      }
+      // A recorded 0 isn't trustworthy (pictures made on meshy.ai often show 0): treat it as
+      // unknown, and let the balance measure the real cost of the next one.
+      const last = history.rows.find((r) => r.status === 'SUCCEEDED' && r.ai_model === m && (r.type ?? 'text-to-image') === kind && r.consumed_credits > 0);
+      return last ? { credits: last.consumed_credits, basis: 'what Meshy recorded for your last one' } : undefined;
+    },
     async generate({ prompt, aspect, model, references, signal, onProgress }) {
       const aspect_ratio = nearestAspect(aspect);
       const refs = (references ?? []).filter(Boolean).slice(0, MESHY_MAX_REFERENCES);
       const kind = refs.length ? 'image-to-image' : 'text-to-image';
+      const ai_model = model ?? opts.model ?? 'nano-banana';
+      // The balance before and after tells us what it really cost (Meshy doesn't always say).
+      const balanceNow = async () => {
+        try {
+          return (await call('/openapi/v1/balance', { signal })).balance as number | undefined;
+        } catch (err) {
+          if ((err as Error).name === 'AbortError') throw err;
+          return undefined;
+        }
+      };
+      const before = await balanceNow();
       const created = await call(`/openapi/v1/${kind}`, {
         method: 'POST',
         signal,
         body: JSON.stringify({
-          ai_model: model ?? opts.model ?? 'nano-banana',
+          ai_model,
           prompt,
           ...(aspect_ratio ? { aspect_ratio } : {}),
           ...(refs.length ? { reference_image_urls: refs } : {}),
@@ -199,7 +250,15 @@ export function meshyImageGenerator(
       for (;;) {
         const task = await call(`/openapi/v1/${kind}/${encodeURIComponent(id)}`, { signal });
         onProgress?.(Number(task.progress ?? 0));
-        if (task.status === 'SUCCEEDED') return { images: (task.image_urls ?? []) as string[], credits: task.consumed_credits };
+        if (task.status === 'SUCCEEDED') {
+          const after = await balanceNow();
+          const diff = before != null && after != null && before >= after ? before - after : undefined;
+          const reported = typeof task.consumed_credits === 'number' ? task.consumed_credits : undefined;
+          const credits = reported ? reported : diff ?? reported;
+          if (credits != null) measured.set(`${kind}|${ai_model}`, credits);
+          history = undefined;
+          return { images: (task.image_urls ?? []) as string[], credits, balance: after };
+        }
         if (['FAILED', 'CANCELED', 'EXPIRED'].includes(task.status)) throw new Error(task.task_error?.message || `Meshy task ${String(task.status).toLowerCase()}`);
         if (Date.now() > until) throw new Error('Meshy is taking too long; try again later');
         await sleep(opts.pollMs ?? 2000, signal);

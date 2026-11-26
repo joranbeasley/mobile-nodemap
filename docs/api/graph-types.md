@@ -174,11 +174,15 @@ interface ImageGenerator {
   models?: { id; label }[]; defaultModel?: string;
   maxReferences?: number;                                               // reference pictures per request (0: text only)
   key?: { label; help?; get(): string | null; set(v: string): void };   // the host decides where it's kept
-  generate({ prompt, aspect?, model?, references?, signal?, onProgress? }): Promise<{ images: string[]; credits?: number }>;
+  generate({ prompt, aspect?, model?, references?, signal?, onProgress? }): Promise<{ images: string[]; credits?: number; balance?: number }>;
+  balance?(): Promise<number | undefined>;                                      // credits left
+  estimate?({ model?, references? }): Promise<{ credits; basis } | undefined>;   // what the next picture will probably cost
 }
 ```
 
 `meshyImageGenerator({ key | apiKey, model?, baseUrl?, pollMs?, timeoutMs?, fetch? })` calls Meshy's text-to-image API straight from the browser (`POST /openapi/v1/text-to-image` with `ai_model`, `prompt` and `aspect_ratio`, then polls the task). With `references`, it uses image-to-image instead (`POST /openapi/v1/image-to-image` with `reference_image_urls`: up to 5 (`MESHY_MAX_REFERENCES`), https URLs or data: URIs of PNG, JPEG or WebP). Models: `MESHY_IMAGE_MODELS` (Nano Banana, Nano Banana 2 / 2 Lite / Pro, GPT Image 2; default `nano-banana`). Aspect ratios Meshy doesn't take are mapped to the nearest of 1:1, 16:9, 9:16, 4:3, 3:4, 3:2 and 2:3. Errors explain themselves: no key, a bad key, no credits, a failed task. The credits a picture used are shown after it's added.
+
+**Cost.** With `estimate` and `balance`, the panel shows what a picture will probably cost and the credits left, and updates when the model or the references change; after it's added, the note shows what it cost and what's left. Meshy's adapter measures each picture's cost from the balance before and after (Meshy's own `consumed_credits` is often 0), remembers it per model and kind (text or references) for the session, and otherwise estimates from the last picture like it in your Meshy history. A recorded 0 counts as unknown.
 
 **Searching existing assets.** A generator can also offer `browse()`: the person's existing pictures on the service, newest first, as `{ id, label, hint, thumb, url }`. Image fields with `browse: true` then get a 🔍 button next to ✨. It opens the editor's searchable chooser (now with thumbnails), matching each asset's prompt or name, and copies the chosen picture in. For Meshy, `browse()` lists your text-to-image pictures and the thumbnails of your text-to-3D, image-to-3D and multi-image-to-3D models (the newest 50 of each that succeeded). In the drama types, props and costumes have it (on boards, objects and outfits).
 
@@ -188,8 +192,8 @@ interface ImageGenerator {
 | --- | --- | --- |
 | Character | Reference portrait from their appearance and description | 3:4 |
 | Location | Establishing shot, interior or exterior, no people | 16:9 |
-| Object | Product-style reference photo | 1:1 |
-| Outfit | The costume on a mannequin, with who wears it | 3:4 |
+| Object | Product-style reference photo of the object on its own: no people, no hands | 1:1 |
+| Outfit | The costume on a headless dress form, made for its wearer (by name only): no person, no face, so it doesn't fight the actor's portrait when both are references for a shot | 3:4 |
 | Shot frames | Storyboard frame: framing, action, who is on screen (with their appearance), setting and time, and the episode's or season's style | 16:9 |
 | Scene storyboard | The same, for the scene | 16:9 |
 | Episode poster | Poster artwork | 2:3 |

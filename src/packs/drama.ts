@@ -249,6 +249,29 @@ export const imagesParam: ParamKind = {
         refs.append(b);
       }
       noteRefs();
+      // What it will cost, and what's left: re-checked when the model or the references change.
+      const cost = el('small', { class: 'dr-gen-cost', role: 'status' });
+      let costAsk = 0;
+      const showCost = async () => {
+        if (!gen.estimate && !gen.balance) return;
+        const ask = ++costAsk;
+        const m = gen.models?.length ? model.value : undefined;
+        try {
+          const [est, bal] = await Promise.all([gen.estimate?.({ model: m, references: chosen.size }), gen.key && !gen.key.get() ? undefined : gen.balance?.()]);
+          if (ask !== costAsk) return;
+          const label = gen.models?.find((x) => x.id === m)?.label ?? m ?? gen.name;
+          cost.textContent = [
+            est ? `About ${est.credits} credit${est.credits === 1 ? '' : 's'} (${est.basis})` : `Cost with ${label} not known yet: it shows after the first one`,
+            bal != null ? `${bal.toLocaleString()} left` : '',
+          ]
+            .filter(Boolean)
+            .join(' · ');
+        } catch {
+          if (ask === costAsk) cost.textContent = '';
+        }
+      };
+      model.addEventListener('change', () => void showCost());
+      refs.addEventListener('click', () => void showCost());
       // The key: a plain text field, masked (not type=password, so phone keyboards offer their
       // clipboard and paste behaves), with Paste and Show buttons. Saved as soon as it's entered.
       const keyRow = el('div', { class: 'dr-gen-key' });
@@ -274,6 +297,7 @@ export const imagesParam: ParamKind = {
         status.textContent = `${gen.key.label} saved in this browser.`;
       };
       keyInput.addEventListener('input', saveKey);
+      keyInput.addEventListener('change', () => void showCost());
       keyInput.addEventListener('paste', () => setTimeout(saveKey, 0));
       const paste = el('button', { type: 'button', class: 'dr-gen-cancel' }, 'Paste') as HTMLButtonElement;
       paste.addEventListener('click', async () => {
@@ -340,7 +364,7 @@ export const imagesParam: ParamKind = {
             if (k.copied) kept++;
           }
           if (!added.length) throw new Error(`${gen.name} returned no picture`);
-          note = `Added ${added.length} from ${gen.name}${result.credits != null ? ` · ${result.credits} credits` : ''}${kept < added.length ? ' · linked, not copied: the link expires' : ''}`;
+          note = `Added ${added.length} from ${gen.name}${result.credits != null ? ` · ${result.credits} credits` : ''}${result.balance != null ? ` · ${result.balance.toLocaleString()} left` : ''}${kept < added.length ? ' · linked, not copied: the link expires' : ''}`;
           closePanel();
           commit([...list, ...added]);
         } catch (err) {
@@ -368,7 +392,8 @@ export const imagesParam: ParamKind = {
         const open = el('a', { href: gen.site, target: '_blank', rel: 'noopener', class: 'dr-gen-cancel dr-gen-link' }, `Open ${gen.name}`);
         buttons.append(open);
       }
-      panel.append(prompt, row, ...(refChoices.length ? [refs, refNote] : []), keyRow, buttons, status);
+      panel.append(prompt, row, ...(refChoices.length ? [refs, refNote] : []), cost, keyRow, buttons, status);
+      void showCost();
       wrap.append(panel);
       prompt.focus({ preventScroll: true });
     };
@@ -863,8 +888,9 @@ export interface DramaImagePrompt {
 /**
  * The pictures already on the cards a new picture should match, so a generator that takes
  * references draws the actual cast: for a shot, each character's portrait, the location, the
- * costumes they wear in that scene and the props; for a scene, its cast and locations; for a
- * costume, whoever wears it. The first picture of each card is used.
+ * costumes they wear in that scene and the props; for a scene, its cast, locations and
+ * costumes. Outfits and objects take none (they are drawn on their own). The first picture of
+ * each card is used.
  */
 export function dramaImageReferences(graph: Graph, n: NodeInstance): { src: string; label: string }[] {
   const out: { src: string; label: string }[] = [];
@@ -885,10 +911,9 @@ export function dramaImageReferences(graph: Graph, n: NodeInstance): { src: stri
   } else if (n.type === T.scene) {
     const info = sceneInfo(graph, n);
     castAndPlaces(info.characters, info.locations, sceneCostumes(graph, n.id));
-  } else if (n.type === T.costume) {
-    const wearer = from(graph, n.id, 'character')[0];
-    add(wearer, wearer ? dramaName(wearer) : '');
   }
+  // Outfits and objects are drawn on their own (a dress form, no hands), so they take no
+  // reference people: a face would end up in the picture.
   return out;
 }
 
@@ -915,11 +940,14 @@ function basePrompt(graph: Graph, n: NodeInstance, param: string): { prompt: str
         aspect: '16:9',
       };
     case T.prop:
-      return { prompt: `Product-style reference photo of ${name}. ${end(t(n.params.description))} Plain light background, soft light, photorealistic. No text.`.replace(/\s+/g, ' '), aspect: '1:1' };
+      // The object on its own: no hands or people, so it can be put in anyone's hands later.
+      return { prompt: `Product-style reference photo of ${name}, the object on its own. ${end(t(n.params.description))} Plain light background, soft light, photorealistic. No people, no hands, no text.`.replace(/\s+/g, ' '), aspect: '1:1' };
     case T.costume: {
       const wearer = from(graph, n.id, 'character')[0];
       return {
-        prompt: `Costume reference: ${end(t(n.params.description) || name)}${wearer ? ` Worn by ${who(wearer)}.` : ''} Full outfit on a plain mannequin, front view, neutral background, photorealistic. No text.`.replace(/\s+/g, ' '),
+        // On a headless dress form, never a person: a face here would fight the actor's own
+        // portrait when both are sent as references for a shot.
+        prompt: `Costume reference: ${end(t(n.params.description) || name)}${wearer ? ` Made for ${dramaName(wearer)}.` : ''} The full outfit displayed on a headless dress form (mannequin), front view, plain neutral background, soft even light, photorealistic. No person, no face, no text.`.replace(/\s+/g, ' '),
         aspect: '3:4',
       };
     }
@@ -1236,7 +1264,8 @@ const css = `
 .dr-gen-ref[aria-pressed="true"] { border-color: var(--_accent); opacity: 1; }
 .dr-gen-ref img { width: 54px; height: 54px; object-fit: cover; border-radius: 5px; display: block; }
 .dr-gen-ref span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
-.dr-gen-refs-note { opacity: .75; font-size: 11px; }
+.dr-gen-refs-note, .dr-gen-cost { opacity: .75; font-size: 11px; }
+.dr-gen-cost:empty { display: none; }
 .dr-gen-row select { font: 12px var(--_font); min-height: 28px; }
 .dr-gen-key { display: flex; flex-direction: column; gap: 3px; }
 .dr-gen-key:empty { display: none; }
