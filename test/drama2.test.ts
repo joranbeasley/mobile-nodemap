@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from 'vitest';
-import { Graph, Evaluator, NodeEditor, drama2Graph, dramaGraph, toDrama, fromDrama, drama2Lists, seedanceShot, getGraphType, sceneCostumes, wearerOf } from '../src/index';
+import { Graph, Evaluator, NodeEditor, drama2Graph, dramaGraph, toDrama, fromDrama, drama2Lists, seedanceShot, getGraphType, sceneCostumes, shotCostumes, wearerOf, dressOf } from '../src/index';
 
 const load = (id = 'term') => Graph.fromJSON(drama2Graph.examples!.find((e) => e.id === id)!.graph, drama2Graph.createRegistry());
 const view = (id: string) => drama2Graph.editor!.views!.find((v) => v.id === id)!;
@@ -26,12 +26,13 @@ describe('Drama boards (drama2)', () => {
     expect(g.edges.size).toBe(0);
     expect(g.nodes.get('s1a')!.params).toMatchObject({ location: 'hall', characters: ['maya', 'theo', 'jules', 'okafor'] });
     expect(g.nodes.get('sc1')!.params.shots).toEqual(['s1a', 's1b', 's1c']);
-    // Costumes become props of type Outfit, on the shots their wearer is in.
+    // Costumes become props of type Outfit, in the wardrobe of the scenes they were wired into.
     expect(g.nodes.get('jules-lead')!.type).toBe('drama2/prop');
     expect(g.nodes.get('jules-lead')!.params).toMatchObject({ kind: 'Outfit', wornBy: 'jules' });
     expect(g.nodes.get('script')!.params).toMatchObject({ kind: 'Object' });
-    expect(g.nodes.get('s4c')!.params.props).toEqual(['jules-lead']);
-    expect(g.nodes.get('s4a')!.params.props).toEqual(['maya-blacks']);
+    expect(g.nodes.get('sc4')!.params.wardrobe).toEqual({ jules: 'jules-lead', maya: 'maya-blacks' });
+    expect(g.nodes.get('s4c')!.params.props).toEqual([]);
+    expect(g.nodes.get('s4a')!.params.props).toEqual([]);
     expect(g.nodes.get('s1b')!.params.props).toEqual(['script']);
     expect(g.nodes.get('ep1')!.params.style).toContain('35mm film look'); // handed down from the season
     // The wired version gives the same Seedance shots as the drama example: outfits dress
@@ -165,34 +166,88 @@ describe('Editor views', () => {
     editor.destroy();
   });
 
-  it('lets any character wear any outfit, shot by shot', async () => {
+  it('dresses characters by episode, scene or shot, each overriding the one above', () => {
     const g = load();
     const node = (id: string) => g.nodes.get(id)!;
-    // Maya's stage blacks, usually hers, put on Theo's close-up in scene 1 (he's the only one in it).
-    g.setParam('s1b', 'props', [...(node('s1b').params.props as string[]), 'maya-blacks']);
-    expect(wearerOf(g, node('s1b'), node('maya-blacks'))!.id).toBe('theo');
-    expect(wearerOf(g, node('s4a'), node('maya-blacks'))!.id).toBe('maya');
-    let wired = toDrama(g);
-    const worn = (scene: string, who: string) => sceneCostumes(wired, scene).get(who);
-    expect(worn('sc1', 'theo')!.id).toBe('maya-blacks@theo'); // a copy, worn by Theo
-    expect(worn('sc1', 'theo')!.params.images).toEqual(node('maya-blacks').params.images);
-    expect(worn('sc4', 'maya')!.id).toBe('maya-blacks'); // still Maya's in scene 4
+    const wears = (at: string, who: string) => dressOf(g, node(at), who);
+    // The example: scene 4 (episode 2) puts Maya in her stage blacks, for all its shots.
+    expect(wears('sc4', 'maya')).toMatchObject({ from: 'scene', outfit: { id: 'maya-blacks' } });
+    expect(wears('s4a', 'maya')).toMatchObject({ from: 'scene', outfit: { id: 'maya-blacks' } });
+    expect(wears('s1a', 'maya')).toEqual({ from: 'none' });
+    // On the episode: every scene and shot in it, unless a scene says otherwise.
+    g.setParam('ep1', 'wardrobe', { theo: 'jules-lead' });
+    expect(wears('s1b', 'theo')).toMatchObject({ from: 'episode', outfit: { id: 'jules-lead' } }); // anyone can wear it
+    expect(wears('sc1', 'theo').from).toBe('episode');
+    g.setParam('sc1', 'wardrobe', { theo: 'maya-blacks' });
+    expect(wears('s1b', 'theo')).toMatchObject({ from: 'scene', outfit: { id: 'maya-blacks' } });
+    // A shot overrides the scene, back to usual clothes too.
+    g.setParam('s1a', 'wardrobe', { theo: '' });
+    expect(wears('s1a', 'theo')).toEqual({ from: 'shot', outfit: undefined });
+    expect(wears('s1b', 'theo').outfit!.id).toBe('maya-blacks');
+
+    // The wired model (prompts, references, Seedance) follows, shot by shot.
+    const wired = toDrama(g);
+    expect(shotCostumes(wired, 's1b').get('theo')!.id).toBe('maya-blacks@theo'); // a copy, worn by Theo
+    expect(shotCostumes(wired, 's1b').get('theo')!.params.images).toEqual(node('maya-blacks').params.images);
+    expect(shotCostumes(wired, 's1a').has('theo')).toBe(false); // usual clothes in this one shot
+    expect(sceneCostumes(wired, 'sc1').get('theo')!.id).toBe('maya-blacks@theo'); // what the scene says
+    expect(shotCostumes(wired, 's4a').get('maya')!.id).toBe('maya-blacks');
     expect(seedanceShot(wired, 's1b').prompt).toMatch(/Theo .*Costume in this scene: All-black crew clothes/s);
-    expect(titles(g, 'theo', 'Outfits')).toContain(node('maya-blacks').label);
-    // A shot with several people: the usual wearer if they're in it, else whoever the shot picks.
-    g.setParam('s1a', 'props', ['jules-lead']);
-    expect(wearerOf(g, node('s1a'), node('jules-lead'))!.id).toBe('jules');
-    g.setParam('s1a', 'wearers', { 'jules-lead': 'okafor' });
-    expect(wearerOf(g, node('s1a'), node('jules-lead'))!.id).toBe('okafor');
-    wired = toDrama(g);
-    expect(worn('sc1', 'okafor')!.id).toBe('jules-lead@okafor');
-    expect(worn('sc1', 'jules')).toBeUndefined();
-    expect(titles(g, 'sc1', 'Props')).toContain(`${node('jules-lead').label} (Ms Okafor)`);
-    // No usual wearer and several people: nobody is dressed until the shot says who.
-    g.setParam('jules-lead', 'wornBy', '');
-    g.setParam('s1a', 'wearers', {});
-    expect(wearerOf(g, node('s1a'), node('jules-lead'))).toBeUndefined();
-    expect([...sceneCostumes(toDrama(g), 'sc1').keys()]).toEqual(['theo']);
+    expect(seedanceShot(wired, 's1a').prompt).not.toMatch(/Costume/);
+    // Scene 3 doesn't override the episode: Theo wears the episode's choice there.
+    expect(wears('s3a', 'theo')).toMatchObject({ from: 'episode', outfit: { id: 'jules-lead' } });
+    expect(shotCostumes(wired, 's3a').get('theo')!.id).toBe('jules-lead@theo');
+    expect(titles(g, 'theo', 'Outfits')).toEqual([node('maya-blacks').label, node('jules-lead').label]);
+    expect(titles(g, 'sc1', 'Props')).toContain(`${node('maya-blacks').label} (Theo)`);
+    expect(titles(g, 'maya-blacks', 'Scenes')).toEqual(['Ep 1 · Scene 1 · DAY', 'Ep 2 · Scene 1 · NIGHT']);
+    // Outfits still in a shot's props (as boards used to put them) count as set on that shot.
+    g.setParam('s3b', 'props', ['jules-lead']);
+    expect(wearerOf(g, node('s3b'), node('jules-lead'))).toBeDefined();
+    expect(dressOf(g, node('s3b'), wearerOf(g, node('s3b'), node('jules-lead'))!.id).from).toBe('shot');
+  });
+
+  it('sets the wardrobe on episode, scene and shot cards', async () => {
+    const { g, el, editor } = mount();
+    const row = (id: string, who: string) =>
+      [...el.querySelectorAll<HTMLElement>(`.nm-node[data-id="${id}"] [data-param="wardrobe"] .dr2-wardrobe-row`)].find((r) => r.textContent!.startsWith(who))!.querySelector('select')!;
+    const label = (sel: HTMLSelectElement) => sel.selectedOptions[0].textContent;
+    const choose = (sel: HTMLSelectElement, v: string) => {
+      sel.value = v;
+      sel.dispatchEvent(new Event('change'));
+    };
+    // Scene 4 dresses Maya; its shot shows that as inherited.
+    await editor.setView('scenes');
+    expect(label(row('sc4', 'Maya'))).toBe('Stage blacks');
+    expect(label(row('sc4', 'Jules'))).toBe('Lead costume');
+    await editor.setView('shots');
+    expect(label(row('s4a', 'Maya'))).toBe('Stage blacks (from scene)');
+    expect([...row('s4a', 'Maya').options].map((o) => o.textContent)).toEqual([
+      'Stage blacks (from scene)',
+      'Usual clothes',
+      'Stage blacks',
+      'Lead costume (Jules’s)',
+      '+ New outfit…',
+    ]);
+    // Override on the shot, then go back to the scene's.
+    choose(row('s4a', 'Maya'), '');
+    expect(g.nodes.get('s4a')!.params.wardrobe).toEqual({ maya: '' });
+    expect(label(row('s4a', 'Maya'))).toBe('Usual clothes');
+    choose(row('s4a', 'Maya'), row('s4a', 'Maya').options[0].value);
+    expect(g.nodes.get('s4a')!.params.wardrobe).toEqual({});
+    // The episode: everyone in its scenes, usual clothes until set.
+    await editor.setView('episodes');
+    expect(label(row('ep1', 'Theo'))).toBe('Usual clothes');
+    choose(row('ep1', 'Theo'), 'jules-lead');
+    await editor.setView('shots');
+    expect(label(row('s1b', 'Theo'))).toBe('Lead costume (from scene)'); // the scene inherits it from the episode
+    // A new outfit straight from a row: an outfit prop, usually worn by them.
+    choose(row('s1b', 'Theo'), row('s1b', 'Theo').options[row('s1b', 'Theo').options.length - 1].value);
+    const made = (g.nodes.get('s1b')!.params.wardrobe as Record<string, string>).theo;
+    expect(g.nodes.get(made)!.params).toMatchObject({ kind: 'Outfit', wornBy: 'theo' });
+    // Shots without characters say so.
+    g.setParam('s1b', 'characters', []);
+    expect(el.querySelector('.nm-node[data-id="s1b"] [data-param="wardrobe"]')!.textContent).toMatch(/Add characters/);
+    editor.destroy();
   });
 
   it('picks who wears an outfit from its chip on the shot', async () => {

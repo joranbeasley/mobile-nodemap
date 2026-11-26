@@ -54,14 +54,145 @@ export function wearerOf(graph: Graph, shot: NodeInstance, outfit: NodeInstance)
   return cast.find((c) => c.id === chosen) ?? cast.find((c) => c.id === idList(outfit.params.wornBy)[0]) ?? (cast.length === 1 ? cast[0] : undefined);
 }
 
-/** Every outfit a character wears: their usual ones, and any a shot puts on them. */
+// ------------------------------------------------------------------ wardrobe
+
+/** Who wears what: character id → outfit id, or '' for their usual clothes. On episodes, scenes and shots. */
+export type Wardrobe = Record<string, string>;
+const wardrobeOf = (n?: NodeInstance): Wardrobe => (n && n.params.wardrobe && typeof n.params.wardrobe === 'object' ? (n.params.wardrobe as Wardrobe) : {});
+const owns = (w: Wardrobe, k: string) => Object.prototype.hasOwnProperty.call(w, k);
+export const sceneOfShot = (graph: Graph, shotId: string) => referrers(graph, shotId, D2.scene, 'shots')[0];
+export const episodeOfScene = (graph: Graph, sceneId: string) => referrers(graph, sceneId, D2.episode, 'scenes')[0];
+
+/** What a character wears somewhere, and which level said so ('none': nobody did: usual clothes). */
+export interface Dress {
+  outfit?: NodeInstance;
+  from: 'shot' | 'scene' | 'episode' | 'none';
+}
+
+/**
+ * What a character wears in a shot, scene or episode. An outfit set on an episode dresses them in
+ * all its scenes and shots, one set on a scene overrides that for the scene's shots, and one set
+ * on a shot overrides both; each level can also say "usual clothes". (An outfit put in a shot's
+ * props, as boards used to, counts as set on that shot.)
+ */
+export function dressOf(graph: Graph, node: NodeInstance, characterId: string): Dress {
+  const levels: [NodeInstance | undefined, Dress['from']][] = [];
+  if (node.type === D2.shot) {
+    const sc = sceneOfShot(graph, node.id);
+    levels.push([node, 'shot'], [sc, 'scene'], [sc && episodeOfScene(graph, sc.id), 'episode']);
+  } else if (node.type === D2.scene) levels.push([node, 'scene'], [episodeOfScene(graph, node.id), 'episode']);
+  else if (node.type === D2.episode) levels.push([node, 'episode']);
+  for (const [n, from] of levels) {
+    if (!n) continue;
+    const w = wardrobeOf(n);
+    if (owns(w, characterId)) {
+      const o = graph.nodes.get(w[characterId]);
+      return { outfit: isOutfit(o) ? o : undefined, from };
+    }
+    if (from === 'shot') {
+      const legacy = refsOf(graph, n, 'props').find((o) => isOutfit(o) && wearerOf(graph, n, o)?.id === characterId);
+      if (legacy) return { outfit: legacy, from };
+    }
+  }
+  return { from: 'none' };
+}
+
+/** The characters a wardrobe applies to: a shot's, everyone in a scene's shots, everyone in an episode. */
+export function castOf(graph: Graph, node: NodeInstance): NodeInstance[] {
+  if (node.type === D2.shot) return refsOf(graph, node, 'characters');
+  if (node.type === D2.scene) return [...new Set(refsOf(graph, node, 'shots').flatMap((s) => castOf(graph, s)))];
+  if (node.type === D2.episode) return [...new Set(refsOf(graph, node, 'scenes').flatMap((sc) => castOf(graph, sc)))];
+  return [];
+}
+
+/** Every outfit a character wears: their usual ones, and any they end up in on a shot (set there, on its scene or its episode). */
 export function outfitsOf(graph: Graph, characterId: string): NodeInstance[] {
   const usual = referrers(graph, characterId, D2.prop, 'wornBy').filter(isOutfit);
-  const inShots = [...graph.nodes.values()]
-    .filter((s) => s.type === D2.shot)
-    .flatMap((s) => refsOf(graph, s, 'props').filter((o) => isOutfit(o) && wearerOf(graph, s, o)?.id === characterId));
-  return [...new Set([...usual, ...inShots])];
+  const worn = [...graph.nodes.values()]
+    .filter((n) => n.type === D2.shot && castOf(graph, n).some((c) => c.id === characterId))
+    .map((n) => dressOf(graph, n, characterId).outfit)
+    .filter((o): o is NodeInstance => !!o);
+  return [...new Set([...usual, ...worn])];
 }
+
+const INHERIT = '\u0000inherit';
+const NEW_OUTFIT = '\u0000new';
+
+/**
+ * The wardrobe of an episode, scene or shot: a row per character there, each with what they
+ * wear. "From scene" (or episode) keeps what the level above says; or pick an outfit, or
+ * their usual clothes, to override it here and below.
+ */
+export const wardrobeParam: ParamKind = {
+  kind: 'wardrobe',
+  render(ctx) {
+    const graph = ctx.graph;
+    const wrap = document.createElement('div');
+    wrap.className = 'dr2-wardrobe';
+    const parentOf = (n: NodeInstance): [NodeInstance | undefined, string] =>
+      n.type === D2.shot ? [sceneOfShot(graph, n.id), 'scene'] : n.type === D2.scene ? [episodeOfScene(graph, n.id), 'episode'] : [undefined, ''];
+    const draw = () => {
+      wrap.textContent = '';
+      const node = graph.nodes.get(ctx.node.id);
+      if (!node) return;
+      const cast = castOf(graph, node);
+      if (!cast.length) {
+        wrap.append(Object.assign(document.createElement('small'), { className: 'dr2-wardrobe-empty', textContent: node.type === D2.shot ? 'Add characters to dress them.' : 'Add shots with characters to dress them.' }));
+        return;
+      }
+      const own = wardrobeOf(node);
+      const outfits = [...graph.nodes.values()].filter(isOutfit);
+      const [parent, parentKind] = parentOf(node);
+      for (const c of cast) {
+        const row = document.createElement('label');
+        row.className = 'dr2-wardrobe-row';
+        const name = Object.assign(document.createElement('span'), { textContent: nodeTitle(graph, c) });
+        const sel = document.createElement('select');
+        sel.setAttribute('aria-label', `What ${nodeTitle(graph, c)} wears`);
+        const option = (text: string, v: string) => Object.assign(document.createElement('option'), { textContent: text, value: v });
+        const above = parent ? dressOf(graph, parent, c.id) : ({ from: 'none' } as Dress);
+        sel.append(option(above.outfit ? `${nodeTitle(graph, above.outfit)} (from ${parentKind})` : parentKind ? `Usual clothes (from ${parentKind})` : 'Usual clothes', INHERIT));
+        if (above.outfit) sel.append(option('Usual clothes', ''));
+        // Their usual outfits first, then everyone else's.
+        const mine = (o: NodeInstance) => idList(o.params.wornBy)[0] === c.id;
+        for (const o of [...outfits.filter(mine), ...outfits.filter((o) => !mine(o))]) {
+          const usual = refsOf(graph, o, 'wornBy')[0];
+          sel.append(option(`${nodeTitle(graph, o)}${usual && usual.id !== c.id ? ` (${nodeTitle(graph, usual)}’s)` : ''}`, o.id));
+        }
+        sel.append(option('+ New outfit…', NEW_OUTFIT));
+        // What shows: this level's own choice (or an outfit in the shot's props), else "as above".
+        const level = node.type === D2.shot ? 'shot' : node.type === D2.scene ? 'scene' : 'episode';
+        const here = dressOf(graph, node, c.id);
+        sel.value = owns(own, c.id) ? (own[c.id] && graph.nodes.has(own[c.id]) ? own[c.id] : above.outfit ? '' : INHERIT) : here.from === level && here.outfit ? here.outfit.id : INHERIT;
+        sel.addEventListener('change', () => {
+          const next = { ...wardrobeOf(graph.nodes.get(node.id)) };
+          let v = sel.value;
+          if (v === NEW_OUTFIT) {
+            const o = graph.addNode(D2.prop);
+            graph.setParam(o.id, 'kind', 'Outfit');
+            graph.setParam(o.id, 'wornBy', c.id);
+            graph.setLabel?.(o.id, `${nodeTitle(graph, c)}’s outfit`);
+            v = o.id;
+          }
+          if (v === INHERIT) delete next[c.id];
+          else next[c.id] = v;
+          ctx.set(next);
+        });
+        row.append(name, sel);
+        wrap.append(row);
+      }
+    };
+    const off = graph.on('change', (c) => {
+      if (!wrap.isConnected) return void (wrap.dataset.mounted && off());
+      wrap.dataset.mounted = '1';
+      if (c.kind === 'node:move' || wrap.contains(document.activeElement)) return;
+      draw();
+    });
+    draw();
+    return wrap;
+  },
+  update() {},
+};
 
 type RefParam = {
   name: string;
@@ -79,6 +210,8 @@ type RefParam = {
   sortable?: boolean;
   /** Keep this param of the listed nodes in step with the order: 1, 2, 3… */
   renumber?: string;
+  /** Which nodes the picker offers (others already listed still show). */
+  only?: (n: NodeInstance) => boolean;
   /** Something extra on a chip (who wears an outfit in this shot). */
   chip?: (graph: Graph, holder: NodeInstance, item: NodeInstance) => HTMLElement | undefined;
 };
@@ -203,7 +336,7 @@ function refControl(single: boolean): ParamKind {
         const free: NodeInstance[] = [];
         const taken: { n: NodeInstance; holder: NodeInstance }[] = [];
         for (const x of graph.nodes.values()) {
-          if (x.type !== p.of || value.includes(x.id)) continue;
+          if (x.type !== p.of || value.includes(x.id) || (p.only && !p.only(x))) continue;
           const holder = p.exclusive ? holderOf(x.id) : undefined;
           if (!holder) free.push(x);
           else if (p.movable) taken.push({ n: x, holder });
@@ -287,6 +420,7 @@ const images = (name = 'images', label = 'images', advanced = false) => ({
 const ref = (name: string, label: string, of: string) => ({ name, label, kind: 'ref', of, default: '' });
 const refs = (name: string, label: string, of: string, exclusive = false) => ({ name, label, kind: 'refs', of, exclusive, default: [] });
 const number = () => ({ name: 'number', label: 'number', kind: 'number' as const, default: 1, min: 1, step: 1 });
+const wardrobe = (description: string) => ({ name: 'wardrobe', label: 'wardrobe', kind: 'wardrobe', default: {}, description });
 
 const characterNode = defineNode({
   type: D2.character,
@@ -382,7 +516,8 @@ const shotNode = defineNode({
     { name: 'framing', label: 'framing', kind: 'select', options: FRAMINGS, default: 'Medium' },
     { ...ref('location', 'location', D2.location), create: true },
     { ...refs('characters', 'characters', D2.character), create: true },
-    { ...refs('props', 'props', D2.prop), create: true, chip: wearerPicker },
+    { ...refs('props', 'props', D2.prop), create: true, chip: wearerPicker, only: (n: NodeInstance) => !isOutfit(n) },
+    wardrobe('What each character wears in this shot. Leave it "from scene" to keep what the scene (or episode) says.'),
     text('description', 'description', 'What we see and hear'),
     images('images', 'frames'),
     { name: 'movement', label: 'camera', kind: 'select', options: MOVES, default: 'Static', advanced: true },
@@ -405,6 +540,7 @@ const sceneNode = defineNode({
     { name: 'time', label: 'time', kind: 'select', options: TIMES, default: 'DAY' },
     { ...refs('shots', 'shots', D2.shot, true), create: true, movable: true, sortable: true, renumber: 'number' },
     text('description', 'description', 'What happens'),
+    wardrobe('What each character wears in this scene, for all its shots (a shot can still change it).'),
     images('storyboard', 'storyboard', true),
   ],
 });
@@ -425,7 +561,14 @@ const episodeNode = defineNode({
   flavor: 'sink',
   width: 440,
   description: 'A titled, numbered episode: a set of scenes',
-  params: [number(), { ...refs('scenes', 'scenes', D2.scene, true), create: true, movable: true, sortable: true, renumber: 'number' }, text('description', 'description', 'Optional synopsis'), images('images', 'poster', true), ...look],
+  params: [
+    number(),
+    { ...refs('scenes', 'scenes', D2.scene, true), create: true, movable: true, sortable: true, renumber: 'number' },
+    text('description', 'description', 'Optional synopsis'),
+    wardrobe('What each character wears in this episode, for all its scenes and shots (a scene or shot can still change it).'),
+    images('images', 'poster', true),
+    ...look,
+  ],
   onCreate: (n) => void (n.label ??= 'Untitled episode'),
 });
 
@@ -454,42 +597,43 @@ export function toDrama(board: Graph): Graph {
     if (!type) continue;
     // An outfit is a prop to people, and a costume (worn by someone, scene by scene) to the drama model.
     if (isOutfit(n)) type = 'drama/costume';
-    const { location, characters, props, shots, scenes, wornBy, kind, wearers, ...params } = n.params as Record<string, unknown>;
-    void [location, characters, props, shots, scenes, wornBy, kind, wearers];
+    const { location, characters, props, shots, scenes, wornBy, kind, wearers, wardrobe, ...params } = n.params as Record<string, unknown>;
+    void [location, characters, props, shots, scenes, wornBy, kind, wearers, wardrobe];
+    // A board shot says exactly what everyone wears in it (see dressOf), scene costumes included.
+    if (n.type === D2.shot) params.costumesExact = true;
     json.nodes.push({ id: n.id, type, x: n.x, y: n.y, params, ...(n.label ? { label: n.label } : {}) });
   }
-  const sceneOfShot = new Map<string, string>();
-  for (const n of board.nodes.values()) if (n.type === D2.scene) for (const id of idList(n.params.shots)) if (!sceneOfShot.has(id)) sceneOfShot.set(id, n.id);
-  const worn = new Set<string>();
+  // Anyone can wear any outfit: on its usual wearer it is the outfit's own costume node; on
+  // someone else, a copy of it worn by them (the drama model gives each costume one wearer).
+  const costumeFor = (outfit: NodeInstance, who: NodeInstance) => {
+    const id = who.id === idList(outfit.params.wornBy)[0] ? outfit.id : `${outfit.id}@${who.id}`;
+    if (id !== outfit.id && !json.nodes.some((x) => x.id === id)) {
+      const base = json.nodes.find((x) => x.id === outfit.id)!;
+      json.nodes.push({ ...base, id, params: { ...base.params } });
+      edge(who.id, 'appears', id, 'character');
+    }
+    return id;
+  };
+  const dress = (n: NodeInstance) => {
+    for (const c of castOf(board, n)) {
+      const o = dressOf(board, n, c.id).outfit;
+      if (o) edge(costumeFor(o, c), 'scenes', n.id, 'costumes');
+    }
+  };
   for (const n of board.nodes.values()) {
     const ids = (k: string) => idList(n.params[k]);
     if (n.type === D2.shot) {
       ids('location').filter((id) => has(id, D2.location)).slice(0, 1).forEach((id) => edge(id, 'shots', n.id, 'location'));
       ids('characters').filter((id) => has(id, D2.character)).forEach((id) => edge(id, 'appears', n.id, 'characters'));
-      for (const id of ids('props').filter((x) => has(x, D2.prop))) {
-        const o = board.nodes.get(id)!;
-        if (!isOutfit(o)) edge(id, 'used', n.id, 'props');
-        else {
-          // An outfit in a shot dresses whoever wears it there for that shot's scene. Anyone can
-          // wear it: on its usual wearer it is the outfit's own costume node; on someone else, a
-          // copy of it worn by them (the drama model gives each costume one wearer).
-          const sc = sceneOfShot.get(n.id);
-          const who = wearerOf(board, n, o);
-          if (!sc || !who) continue;
-          const costume = who.id === idList(o.params.wornBy)[0] ? id : `${id}@${who.id}`;
-          if (costume !== id && !json.nodes.some((x) => x.id === costume)) {
-            const base = json.nodes.find((x) => x.id === id)!;
-            json.nodes.push({ ...base, id: costume, params: { ...base.params } });
-            edge(who.id, 'appears', costume, 'character');
-          }
-          if (!worn.has(`${costume}>${sc}`)) {
-            worn.add(`${costume}>${sc}`);
-            edge(costume, 'scenes', sc, 'costumes');
-          }
-        }
-      }
+      // Objects are props; outfits (in props, as boards used to) dress someone (see dressOf).
+      ids('props')
+        .filter((x) => has(x, D2.prop) && !isOutfit(board.nodes.get(x)))
+        .forEach((id) => edge(id, 'used', n.id, 'props'));
+      dress(n);
     } else if (n.type === D2.scene) {
       ids('shots').filter((id) => has(id, D2.shot)).forEach((id) => edge(id, 'scene', n.id, 'shots'));
+      // What the scene (or its episode) says, for scene-wide summaries and storyboards.
+      dress(n);
     } else if (n.type === D2.episode) {
       ids('scenes').filter((id) => has(id, D2.scene)).forEach((id) => edge(id, 'episode', n.id, 'scenes'));
     } else if (isOutfit(n)) {
@@ -519,12 +663,13 @@ export function fromDrama(json: GraphJSON): GraphJSON {
   const outOf = (id: string, port: string) => json.edges.filter((e) => e.from.node === id && e.from.port === port).map((e) => e.to.node);
   const out: GraphJSON = { version: 1, type: 'drama2', nodes: [], edges: [], meta: {} };
   const settings = ['style', 'aspect', 'maxImages', 'maxClip'];
-  // A costume worn in a scene goes on the scene's shots its wearer is in.
-  const outfitsFor = (shotId: string) => {
-    const scene = outOf(shotId, 'scene')[0];
-    const cast = new Set(into(shotId, 'characters'));
-    return scene ? into(scene, 'costumes').filter((c) => cast.has(into(c, 'character')[0] ?? '')) : [];
-  };
+  // Costumes wired into a scene (or a shot) become that scene's (or shot's) wardrobe.
+  const wardrobeFrom = (id: string): Wardrobe =>
+    Object.fromEntries(
+      into(id, 'costumes')
+        .map((c) => [into(c, 'character')[0], c] as const)
+        .filter((x): x is readonly [string, string] => !!x[0]),
+    );
   for (const n of json.nodes) {
     const base = { id: n.id, x: 0, y: 0, ...(n.label ? { label: n.label } : {}) };
     const p = n.params;
@@ -541,20 +686,24 @@ export function fromDrama(json: GraphJSON): GraphJSON {
       case 'drama/costume':
         out.nodes.push({ ...base, type: D2.prop, params: { kind: 'Outfit', wornBy: into(n.id, 'character')[0] ?? '', description: p.description ?? '', images: p.images ?? [] } });
         break;
-      case 'drama/shot':
+      case 'drama/shot': {
+        const { costumesExact, ...shotParams } = p;
+        void costumesExact;
         out.nodes.push({
           ...base,
           type: D2.shot,
           params: {
-            ...p,
+            ...shotParams,
             location: into(n.id, 'location')[0] ?? '',
             characters: into(n.id, 'characters'),
-            props: [...into(n.id, 'props'), ...outfitsFor(n.id)],
+            props: into(n.id, 'props'),
+            wardrobe: wardrobeFrom(n.id),
           },
         });
         break;
+      }
       case 'drama/scene':
-        out.nodes.push({ ...base, type: D2.scene, params: { ...p, shots: into(n.id, 'shots') } });
+        out.nodes.push({ ...base, type: D2.scene, params: { ...p, shots: into(n.id, 'shots'), wardrobe: wardrobeFrom(n.id) } });
         break;
       case 'drama/episode': {
         const season = nodes.get(outOf(n.id, 'season')[0] ?? '');
@@ -613,8 +762,10 @@ export function drama2Lists(board: Graph, wired: Graph, id: string): Drama2List[
     return lists;
   }
   if (n.type === D2.prop) {
-    // Where it is used: the shots that list it, their scenes and episodes.
-    const shots = referrers(board, id, D2.shot, 'props');
+    // Where it is used: the shots that list it (an outfit: where someone wears it), their scenes and episodes.
+    const shots = isOutfit(n)
+      ? [...board.nodes.values()].filter((sh) => sh.type === D2.shot && castOf(board, sh).some((c) => dressOf(board, sh, c.id).outfit?.id === id))
+      : referrers(board, id, D2.shot, 'props');
     const scenes = uniq(shots.flatMap((s) => referrers(board, s.id, D2.scene, 'shots').map((sc) => sc.id)));
     const eps = uniq(scenes.flatMap((sc) => referrers(board, sc, D2.episode, 'scenes').map((e) => e.id)));
     return [
@@ -639,14 +790,17 @@ export function drama2Lists(board: Graph, wired: Graph, id: string): Drama2List[
       { title: 'Locations', items: (info?.locations ?? []).map((l) => link(l.id, nodeTitle(board, board.nodes.get(l.id) ?? l))) },
       {
         title: 'Props',
-        // Each outfit with whoever wears it in this scene's shots (one entry per wearer).
+        // Objects in its shots, and each outfit with whoever wears it in them (one entry per wearer).
         items: uniq(
-          refsOf(board, n, 'shots').flatMap((s) =>
-            refsOf(board, s, 'props').map((o) => {
-              const who = isOutfit(o) ? wearerOf(board, s, o) : undefined;
-              return `${o.id}\u0000${who ? nodeTitle(board, who) : ''}`;
+          refsOf(board, n, 'shots').flatMap((s) => [
+            ...refsOf(board, s, 'props')
+              .filter((o) => !isOutfit(o))
+              .map((o) => `${o.id}\u0000`),
+            ...castOf(board, s).flatMap((c) => {
+              const o = dressOf(board, s, c.id).outfit;
+              return o ? [`${o.id}\u0000${nodeTitle(board, c)}`] : [];
             }),
-          ),
+          ]),
         ).map((k) => {
           const [oid, who] = k.split('\u0000');
           return link(oid, `${nodeTitle(board, board.nodes.get(oid)!)}${who ? ` (${who})` : ''}`);
@@ -714,6 +868,11 @@ const css = `
 .dr2-refs { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 .dr2-chip { display: inline-flex; align-items: stretch; border: 1px solid var(--_border); border-radius: 999px; overflow: hidden; background: color-mix(in srgb, var(--_accent) 8%, var(--_node)); }
 .dr2-chip button { all: unset; cursor: pointer; font: 500 12px/1 var(--_font); color: var(--_text); padding: 6px 10px; }
+.dr2-wardrobe { display: flex; flex-direction: column; gap: 6px; min-width: 0; width: 100%; }
+.dr2-wardrobe-row { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dr2-wardrobe-row > span { font: 500 11px/1.2 var(--_font); color: var(--_muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dr2-wardrobe-row select { width: 100%; min-width: 0; font: 12px var(--_font); color: var(--_text); background: var(--_node-2, var(--_node)); border: 1px solid var(--_border); border-radius: 6px; height: 28px; padding: 0 4px; }
+.dr2-wardrobe-empty { color: var(--_muted); font: 12px var(--_font); }
 .dr2-chip .dr2-wearer { appearance: none; border: 0; border-left: 1px solid var(--_border); background: color-mix(in srgb, var(--_accent) 14%, var(--_node)); color: var(--_text);
   font: 500 11px/1 var(--_font); padding: 0 20px 0 8px; cursor: pointer; max-width: 130px; text-overflow: ellipsis;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888' stroke-width='1.5'/%3E%3C/svg%3E");
@@ -754,7 +913,7 @@ const nodes: NodeType[] = [characterNode, propNode, locationNode, shotNode, scen
 export const drama2Pack = definePack({
   id: 'nodemap/drama2',
   title: 'Drama boards',
-  paramKinds: [imagesParam, refParam, refsParam],
+  paramKinds: [imagesParam, refParam, refsParam, wardrobeParam],
   nodes,
   css: (dramaPack.css ?? '') + css,
 });

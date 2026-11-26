@@ -1,6 +1,6 @@
 import type { Graph } from '../core/graph.js';
 import type { NodeInstance } from '../core/types.js';
-import { dramaName, episodeInfo, imageList, sceneCostumes, sceneInfo, shotInfo, type EpisodeInfo, type SceneInfo } from './drama.js';
+import { dramaName, episodeInfo, imageList, sceneInfo, shotCostumes, shotInfo, type EpisodeInfo, type SceneInfo } from './drama.js';
 
 /**
  * Export a production for Seedance video generation, one generation per shot.
@@ -223,8 +223,8 @@ export function seedanceShot(graph: Graph, shotId: string, opts: SeedanceOptions
   const add = (n: NodeInstance, kind: string, name = dramaName(n)) => {
     imageList(n.params.images).forEach((src, i) => (i ? rest : first).push({ src, name, label: `${dramaName(n)} (${kind}${i ? `, view ${i + 1}` : ''})` }));
   };
-  // What each character wears in this scene, if a costume is wired into it.
-  const costumes = scene ? sceneCostumes(graph, scene.node.id) : new Map<string, NodeInstance>();
+  // What each character wears in this shot: the scene's costumes, or the shot's own.
+  const costumes = shotCostumes(graph, shotId);
   x.characters.forEach((c) => add(c, 'character'));
   x.characters.forEach((c) => {
     const k = costumes.get(c.id);

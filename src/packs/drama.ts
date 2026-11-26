@@ -639,9 +639,9 @@ const costumeNode = defineNode({
   flavor: 'transform',
   width: 230,
   tags: ['wardrobe', 'outfit', 'clothes', 'look'],
-  description: 'What a character wears in the scenes it is wired into',
+  description: 'What a character wears in the scenes (or single shots) it is wired into',
   inputs: { character: { type: DRAMA.character, label: 'character', description: 'Who wears it' } },
-  outputs: { scenes: { type: DRAMA.costume, label: 'in scenes' } },
+  outputs: { scenes: { type: DRAMA.costume, label: 'in scenes / shots' } },
   params: [description(false, 'What they wear: garments, colours, accessories'), { ...images(), browse: true }],
   onCreate: (n) => void (n.label ??= 'New costume'),
   meta: { drama: 'costume' },
@@ -661,6 +661,7 @@ const shotNode = defineNode({
     location: { type: DRAMA.location, label: 'location', description: 'A shot has one location' },
     characters: { type: DRAMA.character, multiple: true, label: 'characters' },
     props: { type: DRAMA.prop, multiple: true, label: 'props' },
+    costumes: { type: DRAMA.costume, multiple: true, label: 'costumes', description: 'What characters wear in this shot, over what the scene says' },
   },
   outputs: { scene: { type: DRAMA.shot, label: 'scene' } },
   caption: (n) => `Shot ${String(n.params.number ?? '').trim() || '?'} · ${n.params.framing ?? 'Medium'}`,
@@ -907,8 +908,7 @@ export function dramaImageReferences(graph: Graph, n: NodeInstance): { src: stri
   };
   if (n.type === T.shot) {
     const s = shotInfo(graph, n);
-    const sc = into(graph, n.id).find((x) => x.type === T.scene);
-    castAndPlaces(s.characters, s.location ? [s.location] : [], sc ? sceneCostumes(graph, sc.id) : new Map(), s.props);
+    castAndPlaces(s.characters, s.location ? [s.location] : [], shotCostumes(graph, n.id), s.props);
   } else if (n.type === T.scene) {
     const info = sceneInfo(graph, n);
     castAndPlaces(info.characters, info.locations, sceneCostumes(graph, n.id));
@@ -968,7 +968,7 @@ function basePrompt(graph: Graph, n: NodeInstance, param: string): { prompt: str
       const sc = sceneOfShot(n.id);
       const time = sc ? String(sc.params.time ?? 'DAY').toLowerCase() : 'day';
       const where = s.location ? `Setting: ${dramaName(s.location)}, ${s.location.params.setting === 'EXT' ? 'exterior' : 'interior'}, ${time}. ${end(t(s.location.params.description))}` : '';
-      const costumes = sc ? sceneCostumes(graph, sc.id) : new Map<string, NodeInstance>();
+      const costumes = shotCostumes(graph, n.id);
       const cast = s.characters.length ? `On screen: ${s.characters.map((c) => who(c, costumes)).join('; ')}.` : '';
       return {
         prompt: `Storyboard frame, ${s.framing.toLowerCase()} shot. ${end(s.description)} ${cast} ${where} ${end(styleFor(sc))} Single film still, no text, no captions.`.replace(/\s+/g, ' ').trim(),
@@ -1001,6 +1001,24 @@ export function sceneCostumes(graph: Graph, sceneId: string): Map<string, NodeIn
     const who = from(graph, c.id, 'character')[0];
     if (who && !out.has(who.id)) out.set(who.id, c);
   }
+  return out;
+}
+
+/**
+ * What each character wears in a shot: the scene's costumes, with the shot's own costumes over
+ * them. A shot with `costumesExact` (Drama boards set it) wears exactly its own: a character
+ * without one there is in their usual clothes, whatever the scene says.
+ */
+export function shotCostumes(graph: Graph, shotId: string): Map<string, NodeInstance> {
+  const shot = graph.nodes.get(shotId);
+  const scene = into(graph, shotId).find((x) => x.type === T.scene);
+  const out = shot?.params.costumesExact || !scene ? new Map<string, NodeInstance>() : sceneCostumes(graph, scene.id);
+  const own = new Map<string, NodeInstance>();
+  for (const c of from(graph, shotId, 'costumes')) {
+    const who = from(graph, c.id, 'character')[0];
+    if (who && !own.has(who.id)) own.set(who.id, c);
+  }
+  for (const [who, c] of own) out.set(who, c);
   return out;
 }
 
