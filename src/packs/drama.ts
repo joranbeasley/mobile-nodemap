@@ -899,9 +899,10 @@ export function dramaImageReferences(graph: Graph, n: NodeInstance): { src: stri
     if (src && !out.some((r) => r.src === src)) out.push({ src, label });
   };
   const castAndPlaces = (characters: NodeInstance[], locations: NodeInstance[], costumes: Map<string, NodeInstance>, props: NodeInstance[] = []) => {
-    characters.forEach((c) => add(c, dramaName(c)));
+    // A character in costume: their portrait is for the face and hair, the costume for the clothes.
+    characters.forEach((c) => add(c, costumes.has(c.id) ? `${dramaName(c)} (face and hair; not the clothes)` : dramaName(c)));
     locations.forEach((l) => add(l, `${dramaName(l)} (location)`));
-    characters.forEach((c) => add(costumes.get(c.id), `${dramaName(c)}’s costume`));
+    characters.forEach((c) => add(costumes.get(c.id), `${dramaName(c)}’s costume in this scene (what they wear)`));
     props.forEach((p) => add(p, `${dramaName(p)} (prop)`));
   };
   if (n.type === T.shot) {
@@ -921,7 +922,18 @@ function basePrompt(graph: Graph, n: NodeInstance, param: string): { prompt: str
   const t = (v: unknown) => String(v ?? '').replace(/\s+/g, ' ').trim();
   const end = (v: string) => (v && !/[.!?]$/.test(v) ? `${v}.` : v);
   const name = dramaName(n);
-  const who = (c: NodeInstance) => [dramaName(c), t(c.params.appearance)].filter(Boolean).join(': ');
+  const bare = (v: string) => v.replace(/[.!?]+$/, '');
+  /**
+   * A character as they look in this scene: their appearance word for word, and, when a costume
+   * is wired into the scene for them, that costume in place of their usual clothes (as the
+   * Seedance export says it).
+   */
+  const who = (c: NodeInstance, costumes?: Map<string, NodeInstance>) => {
+    const k = costumes?.get(c.id);
+    const look = [dramaName(c), bare(t(c.params.appearance))].filter(Boolean).join(': ');
+    const what = bare(t(k?.params.description) || (k ? dramaName(k) : ''));
+    return k ? `${look}. In this scene wearing ${what.charAt(0).toLowerCase()}${what.slice(1)}, instead of their usual clothes` : look;
+  };
   const sceneOfShot = (id: string) => into(graph, id).find((x) => x.type === T.scene);
   const styleFor = (sceneNode?: NodeInstance) => {
     const ep = sceneNode && into(graph, sceneNode.id).find((x) => x.type === T.episode);
@@ -956,7 +968,8 @@ function basePrompt(graph: Graph, n: NodeInstance, param: string): { prompt: str
       const sc = sceneOfShot(n.id);
       const time = sc ? String(sc.params.time ?? 'DAY').toLowerCase() : 'day';
       const where = s.location ? `Setting: ${dramaName(s.location)}, ${s.location.params.setting === 'EXT' ? 'exterior' : 'interior'}, ${time}. ${end(t(s.location.params.description))}` : '';
-      const cast = s.characters.length ? `On screen: ${s.characters.map(who).join('; ')}.` : '';
+      const costumes = sc ? sceneCostumes(graph, sc.id) : new Map<string, NodeInstance>();
+      const cast = s.characters.length ? `On screen: ${s.characters.map((c) => who(c, costumes)).join('; ')}.` : '';
       return {
         prompt: `Storyboard frame, ${s.framing.toLowerCase()} shot. ${end(s.description)} ${cast} ${where} ${end(styleFor(sc))} Single film still, no text, no captions.`.replace(/\s+/g, ' ').trim(),
         aspect: '16:9',
@@ -964,7 +977,8 @@ function basePrompt(graph: Graph, n: NodeInstance, param: string): { prompt: str
     }
     case T.scene: {
       const info = sceneInfo(graph, n);
-      const cast = info.characters.length ? `Characters: ${info.characters.map(who).join('; ')}.` : '';
+      const costumes = sceneCostumes(graph, n.id);
+      const cast = info.characters.length ? `Characters: ${info.characters.map((c) => who(c, costumes)).join('; ')}.` : '';
       return {
         prompt: `Storyboard frame for a scene set in ${info.slug}. ${end(info.description)} ${cast} ${end(styleFor(n))} Single film still, no text.`.replace(/\s+/g, ' ').trim(),
         aspect: '16:9',

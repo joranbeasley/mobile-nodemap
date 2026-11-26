@@ -127,6 +127,14 @@ describe('Image prompts from drama cards', () => {
     // Outfits take no reference people (a face would end up on the dress form); nor do characters.
     expect(dramaImageReferences(g, g.nodes.get('jules-lead')!)).toEqual([]);
     expect(dramaImageReferences(g, g.nodes.get('maya')!)).toEqual([]);
+    // In a scene where they wear a costume: the costume replaces their usual clothes, in the
+    // prompt and in the references (portrait for the face, costume for the clothes).
+    const dressed = dramaImagePrompt(g, g.nodes.get('s4a')!)!;
+    expect(dressed.prompt).toContain('round tortoiseshell glasses. Usually in a blue hoodie and black jeans, headset round her neck. In this scene wearing all-black crew clothes:');
+    expect(dressed.prompt).toContain('torch clipped to the belt, instead of their usual clothes.');
+    expect(dressed.prompt).not.toContain('..');
+    expect(dressed.references.map((r) => r.label)).toEqual(['Maya (face and hair; not the clothes)', 'School hall (location)', 'Maya’s costume in this scene (what they wear)']);
+    expect(dressed.references[2].src).toBe(first('maya-blacks'));
     // Scenes: their cast and places, each picture once.
     const scene = dramaImageReferences(g, g.nodes.get('sc1')!);
     expect(new Set(scene.map((r) => r.src)).size).toBe(scene.length);

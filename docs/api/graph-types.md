@@ -194,11 +194,11 @@ interface ImageGenerator {
 | Location | Establishing shot, interior or exterior, no people | 16:9 |
 | Object | Product-style reference photo of the object on its own: no people, no hands | 1:1 |
 | Outfit | The costume on a headless dress form, made for its wearer (by name only): no person, no face, so it doesn't fight the actor's portrait when both are references for a shot | 3:4 |
-| Shot frames | Storyboard frame: framing, action, who is on screen (with their appearance), setting and time, and the episode's or season's style | 16:9 |
+| Shot frames | Storyboard frame: framing, action, who is on screen (with their appearance, and the costume they wear in that scene *instead of their usual clothes*), setting and time, and the episode's or season's style | 16:9 |
 | Scene storyboard | The same, for the scene | 16:9 |
 | Episode poster | Poster artwork | 2:3 |
 
-It also suggests **reference pictures** (`references: { src, label }[]`, also `dramaImageReferences(graph, node)`): the first picture of each card the new picture should match. For a shot: each character on screen, the location, the costumes they wear in that scene, then the props. For a scene: its cast, locations and costumes. For an outfit: whoever wears it. Characters, locations, objects and episodes suggest none.
+It also suggests **reference pictures** (`references: { src, label }[]`, also `dramaImageReferences(graph, node)`): the first picture of each card the new picture should match. For a shot: each character on screen, the location, the costumes they wear in that scene, then the props. A character in costume is labelled *face and hair; not the clothes*, and their costume *what they wear*, so the model takes the face from the portrait and the clothes from the costume. For a scene: its cast, locations and costumes. For an outfit: whoever wears it. Characters, locations, objects and episodes suggest none.
 
 In the ✨ panel the suggested pictures come first, then the card's own pictures. The suggested ones are switched on up to the generator's limit, and the card's own are off (switch one on for a variation of it). On Generate, the chosen pictures are sent in order, converted where needed by `referencePicture(src)` (SVG drawings and very large pictures become JPEGs of at most 1024 px). The prompt gets a line naming them, e.g. *Reference pictures, in order: 1. Theo; 2. School hall (location).*, so the model knows whose face and which room each one is.
 
