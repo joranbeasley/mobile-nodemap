@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from 'vitest';
-import { Graph, Evaluator, NodeEditor, drama2Graph, dramaGraph, toDrama, fromDrama, drama2Lists, seedanceShot, getGraphType, sceneCostumes, shotCostumes, wearerOf, dressOf } from '../src/index';
+import { Graph, Evaluator, NodeEditor, drama2Graph, dramaGraph, toDrama, fromDrama, drama2Lists, seedanceShot, getGraphType, sceneCostumes, shotCostumes, wearerOf, dressOf, dramaImagePrompt, previousShot } from '../src/index';
 
 const load = (id = 'term') => Graph.fromJSON(drama2Graph.examples!.find((e) => e.id === id)!.graph, drama2Graph.createRegistry());
 const view = (id: string) => drama2Graph.editor!.views!.find((v) => v.id === id)!;
@@ -247,6 +247,59 @@ describe('Editor views', () => {
     // Shots without characters say so.
     g.setParam('s1b', 'characters', []);
     expect(el.querySelector('.nm-node[data-id="s1b"] [data-param="wardrobe"]')!.textContent).toMatch(/Add characters/);
+    editor.destroy();
+  });
+
+  it('starts a continuing shot on the last frame of the shot before; otherwise matches it', () => {
+    const g = load();
+    const END = 'data:image/jpeg;base64,RU5EMQ==';
+    const shot = (id: string) => seedanceShot(toDrama(g), id);
+    expect(previousShot(toDrama(g), toDrama(g).nodes.get('s1b')!)!.id).toBe('s1a');
+    expect(previousShot(toDrama(g), toDrama(g).nodes.get('s1a')!)).toBeUndefined();
+    // Shot 1's finished clip: shot 2 (a cut) gets its end as a continuity reference.
+    g.setParam('s1a', 'lastFrame', END);
+    let s2 = shot('s1b');
+    const k = s2.refs.findIndex((r) => r.label === 'End of shot 1 (continuity)');
+    expect(k).toBeGreaterThan(0);
+    expect(s2.prompt).toContain(`Keep props, positions and lighting continuous with how shot 1 ended (@Image${k + 1}).`);
+    expect(s2.markdown).not.toContain('Continues shot');
+    // Shot 2 carries on from shot 1: that frame is @Image1 and the first frame.
+    g.setParam('s1b', 'continues', true);
+    s2 = shot('s1b');
+    expect(s2.refs[0]).toMatchObject({ src: END, label: "Last frame of shot 1's clip (first frame)" });
+    expect(s2.prompt).toContain('Start exactly on @Image1, the last frame of shot 1, as the first frame, and carry the action on from there without a cut');
+    expect(s2.prompt).not.toContain('Match the composition');
+    expect(s2.markdown).toContain('**Continues shot 1.** Use @Image1');
+    // The picture prompt and references say so too.
+    const pic = dramaImagePrompt(toDrama(g), toDrama(g).nodes.get('s1b')!)!;
+    expect(pic.references[0]).toEqual({ src: END, label: 'End of shot 1 (this shot carries on from it)' });
+    expect(pic.prompt).toContain('It carries straight on from the previous shot, without a cut.');
+    // No clip on shot 1 yet: the export says what to do.
+    g.setParam('s1a', 'lastFrame', '');
+    s2 = shot('s1b');
+    expect(s2.refs.some((r) => r.src === END)).toBe(false);
+    expect(s2.prompt).toContain('Carries straight on from shot 1 without a cut.');
+    expect(s2.markdown).toContain("Add shot 1's finished clip to its card");
+    // The first shot of a scene has nothing to carry on from.
+    g.setParam('s1a', 'continues', true);
+    expect(shot('s1a').prompt).not.toMatch(/carr(y|ies) .* on from/i);
+  });
+
+  it('keeps a shot’s finished clip as its last frame', async () => {
+    const { g, el, editor } = mount();
+    await editor.setView('shots');
+    const field = () => el.querySelector<HTMLElement>('.nm-node[data-id="s1a"] [data-param="lastFrame"]')!;
+    expect(field().querySelector('.dr-clip-btn')!.textContent).toBe('🎞 Add finished clip…');
+    expect(field().querySelector('input[type=file]')!.getAttribute('accept')).toBe('video/*');
+    expect(el.querySelector<HTMLInputElement>('.nm-node[data-id="s1a"] input[type=checkbox][data-key="p:continues"]')!.checked).toBe(false);
+    // Set from elsewhere (undo, a save from another device): the field shows the frame.
+    g.setParam('s1a', 'lastFrame', 'data:image/jpeg;base64,QUJD');
+    expect(field().querySelector<HTMLImageElement>('.dr-clip-thumb img')!.getAttribute('src')).toBe('data:image/jpeg;base64,QUJD');
+    expect(field().textContent).toContain('Last frame of the finished clip');
+    // × removes it.
+    field().querySelector<HTMLButtonElement>('[aria-label="Remove the clip"]')!.click();
+    expect(g.nodes.get('s1a')!.params.lastFrame).toBe('');
+    expect(field().querySelector('.dr-clip-thumb')).toBeNull();
     editor.destroy();
   });
 

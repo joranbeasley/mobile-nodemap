@@ -133,6 +133,107 @@ export function openLightbox(images: string[], start = 0, caption?: string): voi
  * button that takes photos from the camera or library (shrunk before they are stored).
  *   { name: 'images', kind: 'images', max: 12 }
  */
+/**
+ * The last frame of a video (a finished clip), as a JPEG data URL at most `max` px on its long
+ * side. Runs in the browser: the video is opened locally and never uploaded or stored.
+ */
+export async function lastFrameOf(file: Blob, max = 1280): Promise<string> {
+  const url = URL.createObjectURL(file);
+  const v = document.createElement('video');
+  const once = (ev: string) =>
+    new Promise<void>((resolve, reject) => {
+      const done = () => (v.removeEventListener(ev, done), v.removeEventListener('error', fail), resolve());
+      const fail = () => (v.removeEventListener(ev, done), v.removeEventListener('error', fail), reject(new Error('This browser can’t open that video')));
+      v.addEventListener(ev, done);
+      v.addEventListener('error', fail);
+    });
+  try {
+    v.muted = true;
+    v.playsInline = true;
+    v.preload = 'auto';
+    const loaded = once('loadedmetadata');
+    v.src = url;
+    await loaded;
+    // Some files only know their length after a seek to the end.
+    if (!Number.isFinite(v.duration)) {
+      const s = once('seeked');
+      v.currentTime = 1e9;
+      await s;
+    }
+    const seeked = once('seeked');
+    v.currentTime = Math.max(0, v.duration - 0.05);
+    await seeked;
+    const k = Math.min(1, max / Math.max(v.videoWidth, v.videoHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(v.videoWidth * k));
+    c.height = Math.max(1, Math.round(v.videoHeight * k));
+    c.getContext('2d')!.drawImage(v, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.9);
+  } finally {
+    v.removeAttribute('src');
+    v.load();
+    URL.revokeObjectURL(url);
+  }
+}
+
+/**
+ * A shot's finished clip, kept as its last frame (a data URL): the next shot can start from it
+ * (when it continues this one) or match it (continuity). Pick the video and the frame is taken
+ * in the browser; the video itself is not stored.
+ */
+export const clipFrameParam: ParamKind = {
+  kind: 'clipframe',
+  render(ctx) {
+    const wrap = document.createElement('div');
+    wrap.className = 'dr-clip';
+    let value = typeof ctx.value === 'string' ? ctx.value : '';
+    const status = document.createElement('small');
+    const input = Object.assign(document.createElement('input'), { type: 'file', accept: 'video/*', hidden: true });
+    input.addEventListener('change', async () => {
+      const file = input.files?.[0];
+      input.value = '';
+      if (!file) return;
+      status.textContent = 'Taking the last frame…';
+      try {
+        value = await lastFrameOf(file);
+        ctx.set(value);
+        draw();
+      } catch (err) {
+        status.textContent = (err as Error).message;
+      }
+    });
+    const button = (text: string, aria: string, fn: () => void, cls = 'dr-clip-btn') => {
+      const b = Object.assign(document.createElement('button'), { type: 'button', className: cls, textContent: text });
+      b.setAttribute('aria-label', aria);
+      b.addEventListener('click', fn);
+      return b;
+    };
+    const draw = () => {
+      wrap.replaceChildren(input);
+      if (value) {
+        const view = button('', 'View the last frame', () => openLightbox([value], 0, 'Last frame of the finished clip'), 'dr-clip-thumb');
+        view.append(Object.assign(document.createElement('img'), { src: value, alt: '' }));
+        const note = Object.assign(document.createElement('small'), { textContent: 'Last frame of the finished clip' });
+        wrap.append(view, note, button('Replace…', 'Replace the clip', () => input.click()), button('×', 'Remove the clip', () => ((value = ''), ctx.set(''), draw())));
+      } else {
+        wrap.append(button('🎞 Add finished clip…', 'Add the finished clip', () => input.click()));
+        status.textContent = '';
+      }
+      wrap.append(status);
+    };
+    // Changes from elsewhere (undo, another device's save) redraw it.
+    (wrap as HTMLElement & { setClip?: (v: unknown) => void }).setClip = (v) => {
+      const next = typeof v === 'string' ? v : '';
+      if (next !== value) ((value = next), draw());
+    };
+    draw();
+    return wrap;
+  },
+  update(el, v) {
+    (el as HTMLElement & { setClip?: (v: unknown) => void }).setClip?.(v);
+  },
+};
+
 export const imagesParam: ParamKind = {
   kind: 'images',
   render(ctx) {
@@ -527,6 +628,24 @@ const T = {
   season: 'drama/season',
 } as const;
 
+/** A shot's finished clip and whether it carries on from the shot before (wired and board shots). */
+export const SHOT_CLIP_PARAMS = [
+  {
+    name: 'continues',
+    label: 'continues previous shot',
+    kind: 'boolean' as const,
+    default: false,
+    description: 'One camera take carried on from the shot before it in the scene: its clip starts on that clip’s last frame, without a cut.',
+  },
+  {
+    name: 'lastFrame',
+    label: 'clip',
+    kind: 'clipframe',
+    default: '',
+    description: 'Add the finished clip: its last frame starts the next shot if that one continues this, and keeps the next shot consistent if not.',
+  },
+];
+
 const description = (advanced = false, placeholder = '') => ({ name: 'description', label: 'description', kind: 'text' as const, multiline: true, default: '', placeholder, advanced });
 const images = (name = 'images', label = 'images', advanced = false) => ({
   name,
@@ -671,6 +790,7 @@ const shotNode = defineNode({
     { name: 'framing', label: 'framing', kind: 'select', options: FRAMINGS, default: 'Medium' },
     description(false, 'What we see and hear'),
     images('images', 'frames'),
+    ...SHOT_CLIP_PARAMS,
     { name: 'movement', label: 'camera', kind: 'select', options: MOVES, default: 'Static', advanced: true },
     { name: 'duration', label: 'seconds', kind: 'number', default: 5, min: 0, step: 1, advanced: true },
   ],
@@ -909,7 +1029,13 @@ export function dramaImageReferences(graph: Graph, n: NodeInstance): { src: stri
   };
   if (n.type === T.shot) {
     const s = shotInfo(graph, n);
+    // How the shot before ended: where this one starts (continuing), or what it must match.
+    const prev = previousShot(graph, n);
+    const end = lastFrame(prev);
+    const prevNo = prev ? String(prev.params.number ?? '').trim() || '?' : '';
+    if (end && n.params.continues) out.push({ src: end, label: `End of shot ${prevNo} (this shot carries on from it)` });
     castAndPlaces(s.characters, s.location ? [s.location] : [], shotCostumes(graph, n.id), s.props);
+    if (end && !n.params.continues && !out.some((r) => r.src === end)) out.push({ src: end, label: `End of shot ${prevNo} (for continuity)` });
   } else if (n.type === T.scene) {
     const info = sceneInfo(graph, n);
     castAndPlaces(info.characters, info.locations, sceneCostumes(graph, n.id));
@@ -972,7 +1098,7 @@ function basePrompt(graph: Graph, n: NodeInstance, param: string): { prompt: str
       const costumes = shotCostumes(graph, n.id);
       const cast = s.characters.length ? `On screen: ${s.characters.map((c) => who(c, costumes)).join('; ')}.` : '';
       return {
-        prompt: `Storyboard frame, ${s.framing.toLowerCase()} shot. ${end(s.description)} ${cast} ${where} ${end(styleFor(sc))} Single film still, no text, no captions.`.replace(/\s+/g, ' ').trim(),
+        prompt: `Storyboard frame, ${s.framing.toLowerCase()} shot.${n.params.continues ? ' It carries straight on from the previous shot, without a cut.' : ''} ${end(s.description)} ${cast} ${where} ${end(styleFor(sc))} Single film still, no text, no captions.`.replace(/\s+/g, ' ').trim(),
         aspect: '16:9',
       };
     }
@@ -994,6 +1120,16 @@ function basePrompt(graph: Graph, n: NodeInstance, param: string): { prompt: str
       return undefined;
   }
 }
+
+/** The shot before this one in its scene (by shot number), or undefined for the first. */
+export function previousShot(graph: Graph, shot: NodeInstance): NodeInstance | undefined {
+  const scene = into(graph, shot.id).find((x) => x.type === T.scene);
+  if (!scene) return undefined;
+  const shots = sceneInfo(graph, scene).shots.map((s) => s.node);
+  const i = shots.findIndex((s) => s.id === shot.id);
+  return i > 0 ? shots[i - 1] : undefined;
+}
+const lastFrame = (n?: NodeInstance) => (n && typeof n.params.lastFrame === 'string' && n.params.lastFrame ? n.params.lastFrame : undefined);
 
 /** The costume each character wears in a scene (the first wired in, if there are two). */
 export function sceneCostumes(graph: Graph, sceneId: string): Map<string, NodeInstance> {
@@ -1311,6 +1447,13 @@ const css = `
 .dr-gen-go:disabled { opacity: .6; cursor: progress; }
 .dr-gen-cancel { font: 12px var(--_font); padding: 6px 12px; border-radius: 999px; border: 1px solid var(--_border); background: transparent; color: var(--_text); cursor: pointer; }
 .dr-gen-status { font-size: 11.5px; color: var(--_muted); min-height: 1em; }
+.dr-clip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.dr-clip-btn { font: 12px var(--_font); padding: 6px 12px; border-radius: 999px; border: 1px solid var(--_border); background: transparent; color: var(--_text); cursor: pointer; }
+.dr-clip-btn:hover, .dr-clip-btn:focus-visible { border-color: var(--_accent); }
+.dr-clip-thumb { all: unset; cursor: zoom-in; border-radius: 6px; overflow: hidden; line-height: 0; border: 1px solid var(--_border); }
+.dr-clip-thumb img { width: 80px; height: 45px; object-fit: cover; display: block; }
+.dr-clip small { flex-basis: 100%; color: var(--_muted); font-size: 11px; }
+.dr-clip small:empty { display: none; }
 .dr-gen-link { text-decoration: none; display: inline-block; }
 .dr-file { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 0; }
 .dr-status { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--_text); }
@@ -1327,7 +1470,7 @@ export const dramaPack = definePack({
   id: 'nodemap/drama',
   title: 'Drama',
   portTypes,
-  paramKinds: [imagesParam],
+  paramKinds: [imagesParam, clipFrameParam],
   nodes,
   css,
 });

@@ -174,7 +174,8 @@ describe('Seedance export', () => {
     expect(shot.dropped.length).toBeGreaterThan(0);
     expect(shot.duration).toBe(15);
     expect(shot.markdown).toContain('Left out (this script allows 9 images per clip');
-    expect(shot.markdown).toContain('so it is cut');
+    expect(shot.markdown).toContain('so it is generated in two parts');
+    expect(shot.markdown).toMatch(/\*\*Prompt\*\*[\s\S]*\*\*Part 2\*\* \(7 s\): when the clip above is done, use its last frame as the \*\*first frame\*\*/);
   });
 
   it('takes the image cap and clip length from the episode, then the season', () => {

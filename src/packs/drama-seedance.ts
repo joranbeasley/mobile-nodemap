@@ -1,6 +1,6 @@
 import type { Graph } from '../core/graph.js';
 import type { NodeInstance } from '../core/types.js';
-import { dramaName, episodeInfo, imageList, sceneInfo, shotCostumes, shotInfo, type EpisodeInfo, type SceneInfo } from './drama.js';
+import { dramaName, episodeInfo, imageList, previousShot, sceneInfo, shotCostumes, shotInfo, type EpisodeInfo, type SceneInfo } from './drama.js';
 
 /**
  * Export a production for Seedance video generation, one generation per shot.
@@ -232,8 +232,17 @@ export function seedanceShot(graph: Graph, shotId: string, opts: SeedanceOptions
   });
   if (x.location) add(x.location, 'location');
   x.props.forEach((p) => add(p, 'prop'));
+  // How the shot before ended (its finished clip's last frame): the first frame of a shot that
+  // carries on from it, or a continuity reference for one that cuts to it.
+  const prev = previousShot(graph, node);
+  const prevNo = prev ? String(prev.params.number ?? '').trim() || '?' : '';
+  const prevEnd = typeof prev?.params.lastFrame === 'string' && prev.params.lastFrame ? prev.params.lastFrame : undefined;
+  const continues = !!node.params.continues && !!prev;
+  const startFrame = continues && prevEnd ? { src: prevEnd, name: `shot-${prevNo}-last-frame`, label: `Last frame of shot ${prevNo}'s clip (first frame)` } : undefined;
+  if (startFrame) cands.push(startFrame);
   cands.push(...first);
-  x.images.forEach((src, i) => cands.push({ src, name: `shot-${x.number}-frame`, label: `Shot ${x.number} storyboard frame${x.images.length > 1 ? ` ${i + 1}` : ''}` }));
+  if (!continues) x.images.forEach((src, i) => cands.push({ src, name: `shot-${x.number}-frame`, label: `Shot ${x.number} storyboard frame${x.images.length > 1 ? ` ${i + 1}` : ''}` }));
+  if (prevEnd && !continues) cands.push({ src: prevEnd, name: `shot-${prevNo}-end`, label: `End of shot ${prevNo} (continuity)` });
   cands.push(...rest);
 
   const refs: SeedanceAsset[] = [];
@@ -281,8 +290,20 @@ export function seedanceShot(graph: Graph, shotId: string, opts: SeedanceOptions
   const action = [`${FRAMING[x.framing] ?? x.framing}, ${MOVE[x.movement] ?? x.movement.toLowerCase()}.`];
   if (x.characters.length) action.push(`On screen: ${and(x.characters.map(dramaName))}.`);
   if (x.description) action.push(sentence(x.description));
-  const frames = x.images.map((src) => refs.find((r) => r.src === src)).filter((r): r is SeedanceAsset => !!r);
+  const frames = continues ? [] : x.images.map((src) => refs.find((r) => r.src === src)).filter((r): r is SeedanceAsset => !!r);
   if (frames.length) action.push(`Match the composition of ${frames.map((f) => `@Image${refs.indexOf(f) + 1}`).join(' and ')}.`);
+  const at = (src?: string) => {
+    const i = src ? refs.findIndex((r) => r.src === src) : -1;
+    return i >= 0 ? `@Image${i + 1}` : undefined;
+  };
+  if (continues) {
+    const start = at(startFrame?.src);
+    action.unshift(
+      start
+        ? `Start exactly on ${start}, the last frame of shot ${prevNo}, as the first frame, and carry the action on from there without a cut: same camera, light and positions.`
+        : `Carries straight on from shot ${prevNo} without a cut.`,
+    );
+  } else if (at(prevEnd)) action.push(`Keep props, positions and lighting continuous with how shot ${prevNo} ended (${at(prevEnd)}).`);
   lines.push(`Shot (0–${duration} s): ${action.join(' ')}`);
   lines.push('');
   const dressed = x.characters.some((c) => costumes.has(c.id));
@@ -294,7 +315,12 @@ export function seedanceShot(graph: Graph, shotId: string, opts: SeedanceOptions
   const md: string[] = [];
   md.push(`# ${mdEsc(title)}: Seedance shot`, '');
   md.push(`**Duration:** ${duration} s · **Aspect ratio:** ${cfg.aspect} · **Framing:** ${mdEsc(x.framing)}, ${mdEsc(x.movement.toLowerCase())}`, '');
-  if (x.duration > cfg.maxClip) md.push(`> This shot is ${x.duration} s; clips here stop at ${cfg.maxClip} s, so it is cut. Generate the rest as a second clip, or raise “clip seconds” on the episode or season.`, '');
+  if (continues && startFrame)
+    md.push(`> **Continues shot ${prevNo}.** Use @Image1 (the last frame of shot ${prevNo}'s clip) as the **first frame**, so the two clips join without a cut.`, '');
+  else if (continues)
+    md.push(`> **Continues shot ${prevNo}.** Add shot ${prevNo}'s finished clip to its card (🎞 clip) and export again: its last frame becomes this clip's first frame. Or take that frame yourself and use it as the first frame.`, '');
+  const part2 = x.duration > cfg.maxClip ? Math.max(cfg.minClip, Math.min(cfg.maxClip, x.duration - cfg.maxClip)) : 0;
+  if (part2) md.push(`> This shot is ${x.duration} s; clips here stop at ${cfg.maxClip} s, so it is generated in two parts (see Part 2 below). Or raise “clip seconds” on the episode or season.`, '');
   if (x.duration < cfg.minClip) md.push(`> This shot is ${x.duration} s; Seedance clips are at least ${cfg.minClip} s, so trim it in the edit.`, '');
   if (refs.length) {
     md.push('**Upload these images in this order** (they become @Image1, @Image2…):', '');
@@ -304,6 +330,15 @@ export function seedanceShot(graph: Graph, shotId: string, opts: SeedanceOptions
   } else md.push('No reference images: add pictures to the characters, location or shot to keep them consistent.', '');
   if (dropped.length) md.push(`> Left out (this script allows ${cfg.maxImages} images per clip; raise “reference images” on the episode or season for more): ${dropped.map((a) => mdEsc(a.label)).join(', ')}`, '');
   md.push('**Prompt**', '', '```text', prompt, '```', '');
+  if (part2)
+    md.push(
+      `**Part 2** (${part2} s): when the clip above is done, use its last frame as the **first frame** of a second clip, with the same reference images and this prompt:`,
+      '',
+      '```text',
+      `Carry straight on from the first frame without a cut: same camera, light and positions, for ${part2} more seconds. ${x.description ? sentence(x.description) : ''}`.trim(),
+      '```',
+      '',
+    );
   const cost = seedanceCost(duration, opts);
   md.push(...costMarkdown(cost, 'this shot'), '');
   return { id: node.id, title, zipPath, duration, cost, refs, dropped, prompt, markdown: md.join('\n') };
