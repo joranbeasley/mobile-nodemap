@@ -1701,6 +1701,61 @@ export const viewsParam: ParamKind = {
   },
 };
 
+/** ElevenLabs' ready-made voices (fal's voice changer): what a character can be changed to. */
+export const VOICE_NAMES = ['Aria', 'Roger', 'Sarah', 'Laura', 'Charlie', 'George', 'Callum', 'River', 'Liam', 'Charlotte', 'Alice', 'Matilda', 'Will', 'Jessica', 'Eric', 'Chris', 'Brian', 'Daniel', 'Lily', 'Bill'];
+
+/**
+ * A short voice recording (the actor reading a few lines): picked from the phone's files, played
+ * back here, kept with the card (up to 2 MB). 🎙 Fix voices can match a character's lines to it.
+ */
+export const audioParam: ParamKind = {
+  kind: 'audio',
+  render(ctx) {
+    const wrap = document.createElement('div');
+    wrap.className = 'dr-audio';
+    let value = typeof ctx.value === 'string' ? ctx.value : '';
+    const input = Object.assign(document.createElement('input'), { type: 'file', accept: 'audio/*,video/*', hidden: true });
+    const note = document.createElement('small');
+    input.addEventListener('change', async () => {
+      const file = input.files?.[0];
+      input.value = '';
+      if (!file) return;
+      if (file.size > 2 * 1024 * 1024) return void (note.textContent = 'That recording is over 2 MB: 10–20 seconds is plenty.');
+      value = await new Promise<string>((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(String(r.result));
+        r.onerror = () => rej(r.error);
+        r.readAsDataURL(file);
+      });
+      ctx.set(value);
+      draw();
+    });
+    const draw = () => {
+      wrap.replaceChildren(input);
+      const add = Object.assign(document.createElement('button'), { type: 'button', className: 'dr-clip-btn', textContent: value ? 'Replace recording…' : '🎤 Add a recording…' });
+      add.addEventListener('click', () => input.click());
+      if (value) {
+        const player = Object.assign(document.createElement('audio'), { src: value, controls: true });
+        player.dataset.nmLive = '';
+        const rm = Object.assign(document.createElement('button'), { type: 'button', className: 'dr-clip-btn', textContent: '×' });
+        rm.setAttribute('aria-label', 'Remove the recording');
+        rm.addEventListener('click', () => ((value = ''), ctx.set(''), draw()));
+        wrap.append(player, add, rm);
+      } else wrap.append(add);
+      wrap.append(note);
+    };
+    (wrap as HTMLElement & { setAudio?: (v: unknown) => void }).setAudio = (v) => {
+      const next = typeof v === 'string' ? v : '';
+      if (next !== value) ((value = next), draw());
+    };
+    draw();
+    return wrap;
+  },
+  update(el, v) {
+    (el as HTMLElement & { setAudio?: (v: unknown) => void }).setAudio?.(v);
+  },
+};
+
 export const imagesParam: ParamKind = {
   kind: 'images',
   render(ctx) {
@@ -3190,6 +3245,8 @@ const css = `
 .dr-clip small { flex-basis: 100%; color: var(--_muted); font-size: 11px; }
 .dr-clip small:empty { display: none; }
 .dr-clip-panel { flex-basis: 100%; }
+.dr-audio { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.dr-audio audio { max-width: 100%; height: 36px; }
 .dr-history { flex-basis: 100%; font-size: 13px; color: var(--_text); }
 .dr-history > summary { cursor: pointer; color: var(--_muted); padding: 6px 0; }
 .dr-history-item { border-top: 1px solid var(--_border); padding: 6px 0; }

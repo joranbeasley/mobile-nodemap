@@ -283,6 +283,10 @@ export function seedanceShot(graph: Graph, shotId: string, opts: SeedanceOptions
       // Appearance goes in word for word, every time: fixed wording keeps separate clips consistent.
       const look = oneLine(String(c.params.appearance ?? ''));
       if (look) parts.push(`Appearance: ${sentence(look)}`);
+      // Their voice, word for word too: video models make a new voice every clip, so the same
+      // description keeps it recognisably the same person (🎙 Fix voices makes it exact).
+      const voice = oneLine(String(c.params.voice ?? ''));
+      if (voice) parts.push(`Voice: ${sentence(voice)}`);
       const k = costumes.get(c.id);
       if (k) {
         const kr = refsOf(k);

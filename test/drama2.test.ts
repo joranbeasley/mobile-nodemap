@@ -324,6 +324,13 @@ describe('Editor views', () => {
     editor.destroy();
   });
 
+  it('puts a character’s voice in every clip prompt they’re in, word for word', () => {
+    const g = load();
+    g.setParam('theo', 'voice', 'Soft, slightly hoarse teenage voice, South London accent');
+    expect(seedanceShot(toDrama(g), 's1b').prompt).toContain('Voice: Soft, slightly hoarse teenage voice, South London accent.');
+    expect(seedanceShot(toDrama(g), 's2a').prompt).not.toContain('Voice:'); // Theo isn't in it
+  });
+
   it('names a location’s views, and says in a shot which it uses', () => {
     const g = load();
     const [front, wings] = ['data:image/png;base64,RlJPTlQ=', 'data:image/png;base64,V0lOR1M='];
