@@ -1,6 +1,6 @@
 import type { Graph } from '../core/graph.js';
 import type { NodeInstance } from '../core/types.js';
-import { dramaName, episodeInfo, imageList, previousShot, sceneInfo, shotCostumes, shotInfo, type EpisodeInfo, type SceneInfo } from './drama.js';
+import { dramaName, episodeInfo, imageList, previousShot, sceneInfo, setShotClipSuggester, shotCostumes, shotInfo, type EpisodeInfo, type SceneInfo } from './drama.js';
 
 /**
  * Export a production for Seedance video generation, one generation per shot.
@@ -668,3 +668,19 @@ export function setDramaFileSaver(fn: FileSaver): void {
   saver = fn;
 }
 export const saveDramaFile: FileSaver = (f) => saver(f);
+
+// 🎬 Generate clip (drama.ts) starts from this export: the same prompt, pictures in the same
+// order (the prompt calls them @Image1…), the clip length and aspect ratio.
+setShotClipSuggester((graph, shotId) => {
+  const node = graph.nodes.get(shotId);
+  if (node?.type !== 'drama/shot') return undefined;
+  const shot = seedanceShot(graph, shotId);
+  const first = node.params.continues && shot.refs[0]?.label.endsWith('(first frame)') ? shot.refs[0].src : undefined;
+  return {
+    prompt: shot.prompt,
+    references: shot.refs.map((r) => ({ src: r.src, label: r.label })),
+    firstFrame: first,
+    duration: shot.duration,
+    aspect: settingsFor(graph, node, {}).aspect,
+  };
+});

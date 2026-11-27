@@ -1,7 +1,7 @@
 import { defineNode, definePack, type GraphEngine } from '../core/registry.js';
 import { Graph } from '../core/graph.js';
 import type { GraphJSON, NodeInstance, NodeResult, NodeType, ParamKind } from '../core/types.js';
-import { DRAMA_DETAILS, SHOT_CLIP_PARAMS, clipFrameParam, dramaImagePrompt, FRAMINGS, MOVES, TIMES, appearances, dramaEngine, dramaPack, dramaView, imagesParam, sceneInfo, episodeInfo } from './drama.js';
+import { DRAMA_DETAILS, SHOT_CLIP_PARAMS, clipFrameParam, dramaImagePrompt, shotClipSuggestion, FRAMINGS, MOVES, TIMES, appearances, dramaEngine, dramaPack, dramaView, imagesParam, sceneInfo, episodeInfo } from './drama.js';
 
 /**
  * Drama 2: the same production model as the drama graph type, edited as boards instead of
@@ -520,7 +520,8 @@ const shotNode = defineNode({
     wardrobe('What each character wears in this shot. Leave it "from scene" to keep what the scene (or episode) says.'),
     text('description', 'description', 'What we see and hear'),
     images('images', 'frames'),
-    ...SHOT_CLIP_PARAMS,
+    // The clip field: 🎬 Generate clip reads the wired drama model (same ids).
+    ...SHOT_CLIP_PARAMS.map((p) => (p.name === 'lastFrame' ? { ...p, video: (node: NodeInstance, graph: Graph) => shotClipSuggestion(toDrama(graph), node.id) } : p)),
     { name: 'movement', label: 'camera', kind: 'select', options: MOVES, default: 'Static', advanced: true },
     { name: 'duration', label: 'seconds', kind: 'number', default: 5, min: 0, step: 1, advanced: true },
   ],

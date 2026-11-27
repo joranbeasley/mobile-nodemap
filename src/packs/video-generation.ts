@@ -1,0 +1,78 @@
+/**
+ * Video generation for shots: a pluggable generator (a prompt, reference pictures and/or a first
+ * frame → a clip). Several can be set at once; people pick one in the clip panel. See fal.ts for
+ * an adapter.
+ *
+ *   setVideoGenerators([falVideoGenerator({ key: { label: 'fal key', get, set } })]);
+ */
+
+export interface VideoRequest {
+  prompt: string;
+  /**
+   * Pictures to work from, in order (a prompt can call them @Image1, @Image2…): https URLs or
+   * data: URIs. Only for generators with `maxReferences`.
+   */
+  references?: string[];
+  /** Start exactly on this picture (a continuing shot). */
+  firstFrame?: string;
+  /** End on this picture, where the model can. */
+  lastFrame?: string;
+  /** Seconds. */
+  duration?: number;
+  /** '16:9', '9:16', '1:1'… */
+  aspect?: string;
+  /** '480p', '720p', '1080p'… */
+  resolution?: string;
+  model?: string;
+  /** Generate sound (speech, effects) where the model can. */
+  audio?: boolean;
+  signal?: AbortSignal;
+  /** What it's doing, e.g. "In queue (3 ahead)", "Generating…". */
+  onProgress?: (status: string) => void;
+}
+
+export interface VideoResult {
+  /** URLs of the generated clips (they may expire: keep a copy). */
+  videos: string[];
+  /** What it cost, in the service's own words when it says (e.g. "119 credits", "$0.84"). */
+  cost?: string;
+}
+
+export interface VideoModel {
+  id: string;
+  label: string;
+  /** Allowed durations in seconds (inclusive). */
+  minDuration?: number;
+  maxDuration?: number;
+  resolutions?: string[];
+  aspects?: string[];
+  /** Reference pictures it takes (0: none). */
+  maxReferences?: number;
+  /** Takes a first frame. */
+  firstFrame?: boolean;
+  /** Can generate sound. */
+  audio?: boolean;
+  /** One line about it: speed, cost… */
+  hint?: string;
+}
+
+export interface VideoGenerator {
+  id: string;
+  /** Shown on buttons and in messages, e.g. "fal". */
+  name: string;
+  models: VideoModel[];
+  defaultModel?: string;
+  /** An API key the person gives once; the host decides where it is kept. */
+  key?: { label: string; help?: string; get(): string | null | undefined; set(value: string): void };
+  generate(req: VideoRequest): Promise<VideoResult>;
+  /** Where to see prices and make clips by hand. */
+  site?: string;
+}
+
+let generators: VideoGenerator[] = [];
+
+/** The video generators people can choose from (empty: no 🎬 Generate). */
+export function setVideoGenerators(list: VideoGenerator[]): void {
+  generators = [...list];
+}
+export const getVideoGenerators = (): VideoGenerator[] => generators;

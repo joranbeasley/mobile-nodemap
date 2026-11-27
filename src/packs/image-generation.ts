@@ -71,13 +71,19 @@ export interface ImageGenerator {
   browse?(opts?: { signal?: AbortSignal }): Promise<ImageAsset[]>;
 }
 
-let current: ImageGenerator | null = null;
+let generators: ImageGenerator[] = [];
 
-/** Turn on ✨ Generate in image fields (or off, with null). */
+/** Turn on ✨ Generate in image fields with one generator (or off, with null). */
 export function setImageGenerator(generator: ImageGenerator | null): void {
-  current = generator;
+  generators = generator ? [generator] : [];
 }
-export const getImageGenerator = (): ImageGenerator | null => current;
+/** Several generators: the ✨ panel offers a choice, remembering the last one used. */
+export function setImageGenerators(list: ImageGenerator[]): void {
+  generators = [...list];
+}
+/** The first (default) generator. */
+export const getImageGenerator = (): ImageGenerator | null => generators[0] ?? null;
+export const getImageGenerators = (): ImageGenerator[] => generators;
 
 /** Aspect ratios Meshy accepts; others are mapped to the nearest. */
 const MESHY_ASPECTS = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'];

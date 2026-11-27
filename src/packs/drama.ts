@@ -2,7 +2,26 @@ import { defineNode, definePack, type GraphEngine } from '../core/registry.js';
 import type { Graph } from '../core/graph.js';
 import type { NodeInstance, NodeResult, NodeType, ParamKind, PortTypeDef } from '../core/types.js';
 import { saveDramaFile, seedancePack, seedanceScript } from './drama-seedance.js';
-import { getImageGenerator } from './image-generation.js';
+import { getImageGenerators, type ImageGenerator } from './image-generation.js';
+import { getVideoGenerators, type VideoGenerator } from './video-generation.js';
+
+/** The generator people last chose (per kind), remembered in this browser. */
+function preferred<T extends { id: string }>(kind: string, list: T[]): T | null {
+  let id = '';
+  try {
+    id = localStorage.getItem(`nodemap:${kind}-generator`) ?? '';
+  } catch {
+    /* private mode */
+  }
+  return list.find((g) => g.id === id) ?? list[0] ?? null;
+}
+function remember(kind: string, id: string) {
+  try {
+    localStorage.setItem(`nodemap:${kind}-generator`, id);
+  } catch {
+    /* private mode */
+  }
+}
 
 /**
  * Drama productions: a cast of characters, locations and props feed shots; shots make up
@@ -176,6 +195,28 @@ export async function lastFrameOf(file: Blob, max = 1280): Promise<string> {
   }
 }
 
+/** What 🎬 Generate clip starts from for a shot: its Seedance prompt, pictures and settings. */
+export interface ShotClipSuggestion {
+  prompt: string;
+  /** In order: the prompt calls them @Image1, @Image2… */
+  references: { src: string; label: string }[];
+  /** The previous clip's last frame, for a shot that carries on from it. */
+  firstFrame?: string;
+  duration: number;
+  aspect: string;
+}
+type ClipSuggester = (graph: Graph, shotId: string) => ShotClipSuggestion | undefined;
+/**
+ * Set by the Seedance export (it writes the prompt). Kept on the function itself: that module
+ * and this one import each other, and a function declaration exists before either has run.
+ */
+export function setShotClipSuggester(fn: ClipSuggester): void {
+  (setShotClipSuggester as unknown as { fn?: ClipSuggester }).fn = fn;
+}
+export function shotClipSuggestion(graph: Graph, shotId: string): ShotClipSuggestion | undefined {
+  return (setShotClipSuggester as unknown as { fn?: ClipSuggester }).fn?.(graph, shotId);
+}
+
 /**
  * A shot's finished clip, kept as its last frame (a data URL): the next shot can start from it
  * (when it continues this one) or match it (continuity). Pick the video and the frame is taken
@@ -217,9 +258,169 @@ export const clipFrameParam: ParamKind = {
         wrap.append(view, note, button('Replace…', 'Replace the clip', () => input.click()), button('×', 'Remove the clip', () => ((value = ''), ctx.set(''), draw())));
       } else {
         wrap.append(button('🎞 Add finished clip…', 'Add the finished clip', () => input.click()));
-        status.textContent = '';
       }
+      const url = ctx.graph.nodes.get(ctx.node.id)?.params.clipUrl;
+      if (typeof url === 'string' && url) {
+        const watch = Object.assign(document.createElement('a'), { href: url, target: '_blank', rel: 'noopener', className: 'dr-clip-btn dr-clip-watch', textContent: '▶ Watch clip' });
+        wrap.append(watch);
+      }
+      if (getVideoGenerators().length) wrap.append(button('🎬 Generate clip', 'Generate a clip for this shot', () => openGen()));
       wrap.append(status);
+      if (panel) wrap.append(panel);
+    };
+
+    // 🎬 Generate clip: the shot's own Seedance prompt and pictures, sent to a video service.
+    let panel: HTMLElement | undefined;
+    let chosen: VideoGenerator | null = preferred('video', getVideoGenerators());
+    let abort: AbortController | undefined;
+    const el = (tag: string, attrs: Record<string, string> = {}, text = '') => {
+      const x = document.createElement(tag);
+      for (const [k, v] of Object.entries(attrs)) x.setAttribute(k, v);
+      if (text) x.textContent = text;
+      return x;
+    };
+    const openGen = () => {
+      if (panel) {
+        abort?.abort();
+        panel = undefined;
+        return draw();
+      }
+      const gen = chosen;
+      if (!gen) return;
+      const p = ctx.param as { video?: (node: NodeInstance, graph: Graph) => ShotClipSuggestion | undefined };
+      let s: ShotClipSuggestion | undefined;
+      try {
+        s = p.video?.(ctx.node, ctx.graph);
+      } catch {
+        s = undefined;
+      }
+      const box = el('div', { class: 'dr-gen-panel dr-clip-panel', role: 'group', 'aria-label': `Generate a clip with ${gen.name}` });
+      const row = (...kids: Node[]) => {
+        const r = el('div', { class: 'dr-gen-row' });
+        r.append(...kids);
+        return r;
+      };
+      const select = (label: string, options: { value: string; text: string }[], value?: string) => {
+        const x = el('select', { 'aria-label': label }) as HTMLSelectElement;
+        for (const o of options) x.append(Object.assign(document.createElement('option'), { value: o.value, textContent: o.text }));
+        if (value && options.some((o) => o.value === value)) x.value = value;
+        return x;
+      };
+      const gens = getVideoGenerators();
+      if (gens.length > 1) {
+        const service = select('Service', gens.map((g) => ({ value: g.id, text: g.name })), gen.id);
+        service.addEventListener('change', () => {
+          chosen = gens.find((g) => g.id === service.value) ?? gen;
+          remember('video', chosen.id);
+          panel = undefined;
+          openGen();
+        });
+        box.append(row(el('small', {}, 'Service'), service));
+      }
+      const model = select('Model', gen.models.map((m) => ({ value: m.id, text: m.label })), gen.defaultModel);
+      const hint = el('small', { class: 'dr-gen-refs-note' });
+      const dur = el('input', { type: 'number', 'aria-label': 'Seconds', step: '1' }) as HTMLInputElement;
+      const aspect = select('Aspect ratio', [], '');
+      const res = select('Resolution', [], '');
+      const audio = el('input', { type: 'checkbox', 'aria-label': 'With sound' }) as HTMLInputElement;
+      const fit = () => {
+        const m = gen.models.find((x) => x.id === model.value) ?? gen.models[0];
+        hint.textContent = m?.hint ?? '';
+        dur.min = String(m?.minDuration ?? 1);
+        dur.max = String(m?.maxDuration ?? 60);
+        dur.value = String(Math.min(Number(dur.max), Math.max(Number(dur.min), Number(dur.value) || s?.duration || 5)));
+        const keep = (x: HTMLSelectElement, values: string[] | undefined, want: string) => {
+          const cur = x.value || want;
+          x.replaceChildren(...(values ?? [want]).map((v) => Object.assign(document.createElement('option'), { value: v, textContent: v })));
+          x.value = (values ?? [want]).includes(cur) ? cur : (values ?? [want]).includes(want) ? want : (values ?? [want])[0];
+        };
+        keep(aspect, m?.aspects, s?.aspect ?? '16:9');
+        keep(res, m?.resolutions, '720p');
+        audio.disabled = !m?.audio;
+      };
+      model.addEventListener('change', fit);
+      fit();
+      const sound = el('label', { class: 'dr-clip-sound' });
+      sound.append(audio, ' sound');
+      const secs = el('label', { class: 'dr-clip-dur' });
+      secs.append(dur, ' s');
+      box.append(row(model, secs, aspect, res, sound), hint);
+      const prompt = el('textarea', { rows: '6', 'aria-label': 'Clip prompt', placeholder: 'Describe the shot' }) as HTMLTextAreaElement;
+      prompt.value = s?.prompt ?? '';
+      box.append(prompt);
+      // The shot's pictures, in the export's order (the prompt calls them @Image1…): all on.
+      const refs = s?.references ?? [];
+      const on = new Set(refs.map((r) => r.src));
+      if (refs.length) {
+        const strip = el('div', { class: 'dr-gen-refs', role: 'group', 'aria-label': 'Reference pictures' });
+        refs.forEach((r, i) => {
+          const b = el('button', { type: 'button', class: 'dr-gen-ref', title: r.label, 'aria-label': r.label, 'aria-pressed': 'true' }) as HTMLButtonElement;
+          b.append(el('img', { src: r.src, alt: '' }), el('span', {}, `@Image${i + 1} ${r.label}`));
+          b.addEventListener('click', () => {
+            if (on.has(r.src)) on.delete(r.src);
+            else on.add(r.src);
+            b.setAttribute('aria-pressed', String(on.has(r.src)));
+          });
+          strip.append(b);
+        });
+        box.append(strip, el('small', { class: 'dr-gen-refs-note' }, 'Sent in this order; the prompt calls them @Image1, @Image2… Switching one off renumbers the rest, so edit the prompt to match.'));
+      }
+      // The key, saved as soon as it's entered.
+      const keyIn = el('input', { type: 'text', class: 'dr-key-masked', autocomplete: 'off', spellcheck: 'false', 'aria-label': gen.key?.label ?? 'API key', placeholder: `Paste your ${gen.key?.label ?? 'API key'}` }) as HTMLInputElement;
+      keyIn.addEventListener('input', () => {
+        const k = keyIn.value.replace(/^\s*(?:bearer\s+|key\s+)?/i, '').replace(/[\s"'`]/g, '');
+        if (gen.key && k) gen.key.set(k);
+      });
+      if (gen.key && !gen.key.get()) box.append(keyIn, ...(gen.key.help ? [el('small', {}, gen.key.help)] : []));
+      const go = el('button', { type: 'button', class: 'dr-gen-go' }, `🎬 Generate with ${gen.name}`) as HTMLButtonElement;
+      const cancel = el('button', { type: 'button', class: 'dr-gen-cancel' }, 'Cancel') as HTMLButtonElement;
+      const st = el('div', { class: 'dr-gen-status', role: 'status' });
+      cancel.addEventListener('click', () => openGen());
+      go.addEventListener('click', async () => {
+        if (gen.key && !gen.key.get()) return void (st.textContent = `Add your ${gen.key.label} first.`);
+        if (!prompt.value.trim()) return void (st.textContent = 'Write a prompt first.');
+        abort = new AbortController();
+        go.disabled = true;
+        st.textContent = `Asking ${gen.name}…`;
+        try {
+          const picked = refs.filter((r) => on.has(r.src)).map((r) => r.src);
+          const result = await gen.generate({
+            prompt: prompt.value.trim(),
+            references: picked,
+            firstFrame: s?.firstFrame && on.has(s.firstFrame) ? s.firstFrame : undefined,
+            duration: Number(dur.value),
+            aspect: aspect.value,
+            resolution: res.value,
+            model: model.value,
+            audio: audio.checked && !audio.disabled,
+            signal: abort.signal,
+            onProgress: (t) => (st.textContent = t),
+          });
+          const clip = result.videos[0];
+          if (!clip) throw new Error(`${gen.name} returned no clip`);
+          ctx.graph.setParam(ctx.node.id, 'clipUrl', clip);
+          // Keep its last frame, as if the clip had been added by hand.
+          st.textContent = 'Taking the last frame…';
+          try {
+            value = await lastFrameOf(await (await fetch(clip, { signal: abort.signal })).blob());
+            ctx.set(value);
+            status.textContent = `Clip ready${result.cost ? ` · ${result.cost}` : ''}. Its link may expire: download it to keep it.`;
+          } catch (err) {
+            if ((err as Error).name === 'AbortError') throw err;
+            status.textContent = 'Clip ready. Its last frame couldn’t be taken here: download it and add it with 🎞.';
+          }
+          panel = undefined;
+          draw();
+        } catch (err) {
+          if ((err as Error).name === 'AbortError') return;
+          st.textContent = (err as Error).message || 'Something went wrong';
+          go.disabled = false;
+        }
+      });
+      box.append(row(go, cancel, ...(gen.site ? [el('a', { href: gen.site, target: '_blank', rel: 'noopener', class: 'dr-gen-cancel dr-gen-link' }, 'Prices')] : [])), st);
+      panel = box;
+      draw();
+      prompt.focus({ preventScroll: true });
     };
     // Changes from elsewhere (undo, another device's save) redraw it.
     (wrap as HTMLElement & { setClip?: (v: unknown) => void }).setClip = (v) => {
@@ -270,7 +471,7 @@ export const imagesParam: ParamKind = {
     });
     // ✨ Generate (when an image generator is set): a small panel with a prompt written
     // from the card, sent to the generator; results are copied in like added photos.
-    const gen = getImageGenerator();
+    let chosenGen: ImageGenerator | null = preferred('image', getImageGenerators());
     const p = ctx.param as {
       prompt?: (node: NodeInstance, graph: Graph) => { prompt: string; aspect?: string; references?: { src: string; label: string }[] } | undefined;
       browse?: boolean;
@@ -294,6 +495,7 @@ export const imagesParam: ParamKind = {
       panel = undefined;
     };
     const openPanel = () => {
+      const gen = chosenGen;
       if (!gen) return;
       if (panel) return closePanel();
       const suggestion = (() => {
@@ -310,6 +512,23 @@ export const imagesParam: ParamKind = {
         return x;
       };
       panel = el('div', { class: 'dr-gen-panel', role: 'group', 'aria-label': `Generate an image with ${gen.name}` });
+      // More than one service: pick one (remembered); the panel reopens for it.
+      const gens = getImageGenerators();
+      if (gens.length > 1) {
+        const service = el('select', { 'aria-label': 'Service', class: 'dr-gen-service' }) as HTMLSelectElement;
+        for (const g of gens) service.append(Object.assign(document.createElement('option'), { value: g.id, textContent: g.name }));
+        service.value = gen.id;
+        service.addEventListener('change', () => {
+          chosenGen = gens.find((g) => g.id === service.value) ?? gen;
+          remember('image', chosenGen.id);
+          closePanel();
+          openPanel();
+          draw();
+        });
+        const row = el('div', { class: 'dr-gen-row' });
+        row.append(el('small', {}, 'Service'), service);
+        panel.append(row);
+      }
       const prompt = el('textarea', { rows: '4', 'aria-label': 'Image prompt', placeholder: 'Describe the picture' }) as HTMLTextAreaElement;
       prompt.value = suggestion?.prompt ?? '';
       const row = el('div', { class: 'dr-gen-row' });
@@ -499,6 +718,7 @@ export const imagesParam: ParamKind = {
       prompt.focus({ preventScroll: true });
     };
     const draw = () => {
+      const gen = chosenGen;
       wrap.replaceChildren();
       list.forEach((src, i) => {
         const t = document.createElement('span');
@@ -643,6 +863,8 @@ export const SHOT_CLIP_PARAMS = [
     kind: 'clipframe',
     default: '',
     description: 'Add the finished clip: its last frame starts the next shot if that one continues this, and keeps the next shot consistent if not.',
+    // 🎬 Generate clip starts from the shot's Seedance prompt and pictures.
+    video: (node: NodeInstance, graph: Graph) => shotClipSuggestion(graph, node.id),
   },
 ];
 
@@ -1454,6 +1676,15 @@ const css = `
 .dr-clip-thumb img { width: 80px; height: 45px; object-fit: cover; display: block; }
 .dr-clip small { flex-basis: 100%; color: var(--_muted); font-size: 11px; }
 .dr-clip small:empty { display: none; }
+.dr-clip-panel { flex-basis: 100%; }
+.dr-clip-panel select, .dr-clip-panel input[type=number] { font: 12px var(--_font); min-height: 28px; }
+.dr-clip-panel .dr-gen-row { flex-wrap: wrap; }
+.dr-clip-panel .dr-gen-row > select { width: auto; flex: 1 1 72px; min-width: 0; }
+.dr-clip-panel .dr-gen-row > select[aria-label="Model"] { flex-basis: 100%; }
+.dr-clip-dur { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; font-size: 12px; }
+.dr-clip-panel .dr-clip-dur input[type=number] { width: 52px !important; min-width: 0; }
+.dr-clip-sound { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+.dr-clip-watch { text-decoration: none; }
 .dr-gen-link { text-decoration: none; display: inline-block; }
 .dr-file { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 0; }
 .dr-status { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--_text); }
