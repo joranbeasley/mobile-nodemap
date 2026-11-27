@@ -1909,9 +1909,20 @@ export class NodeEditor extends Emitter<EditorEvents> {
     }
   }
 
+  /** On a look-only card: shows its details (which don't open on tap). */
+  private detailsButton(id: string, label: string, icon = 'ⓘ'): HTMLElement {
+    const b = h('button', { type: 'button', class: 'nm-card-edit nm-card-details', 'data-nm-live': '', 'aria-label': label, title: label }, icon);
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.select({ node: id });
+      this.showDetails(id);
+    });
+    return b;
+  }
+
   /** ✎ Edit on a look-only card: the way into its Edit sheet. */
   private editButton(id: string): HTMLElement {
-    const b = h('button', { type: 'button', class: 'nm-card-edit', 'data-nm-live': '', 'aria-label': 'Edit', title: 'Edit' }, '✎ Edit');
+    const b = h('button', { type: 'button', class: 'nm-card-edit nm-card-pencil', 'data-nm-live': '', 'aria-label': 'Edit', title: 'Edit' }, '✎');
     b.addEventListener('click', (e) => {
       e.stopPropagation();
       this.select({ node: id });
@@ -1957,6 +1968,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
         h('span', { class: 'nm-title' }, this.titleOf(node)),
         h('span', { class: 'nm-cat' }, def?.category ?? ''),
         ...(def?.subgraph ? [this.enterButton(node.id)] : []),
+        ...(def?.editOnCard === false && def.details ? [this.detailsButton(node.id, def.detailsLabel ?? 'Details', def.detailsIcon)] : []),
         ...(def?.editOnCard === false && !this.ro ? [this.editButton(node.id)] : []),
       ),
     );
@@ -2921,8 +2933,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
             this.select({ node: g.id });
             // A double tap opens the Edit sheet (look-only cards also have ✎ Edit); a single tap only selects.
             if (again) this.openNodeEditor(g.id);
-            // Nodes with details (e.g. custom nodes) show them on tap.
-            else if (this.registry.get(this.graph.nodes.get(g.id)!.type)?.details) this.showDetails(g.id);
+            // Nodes with details (e.g. custom nodes) show them on tap; a look-only card from its button.
+            else if (this.registry.get(this.graph.nodes.get(g.id)!.type)?.details && !this.records.get(g.id)?.el.classList.contains('nm-summary')) this.showDetails(g.id);
           }
         }
         break;

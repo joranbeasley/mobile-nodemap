@@ -161,6 +161,10 @@ export interface NodeType {
    * button (shown zoomed in) or a double tap opens its Edit sheet. Elements marked `data-nm-live` (a play button) still work.
    */
   editOnCard?: boolean;
+  /** On a look-only card: the label of the button that shows its `details` (they don't show on tap). Default "Details". */
+  detailsLabel?: string;
+  /** …and its icon (default ⓘ). */
+  detailsIcon?: string;
   /** Short text, an emoji or an inline `<svg>` shown in the header and the add menu. */
   icon?: string;
   /** Extra search words for the add menu. */

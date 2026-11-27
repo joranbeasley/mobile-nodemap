@@ -413,9 +413,13 @@ describe('Editor views', () => {
     await editor.setView('shots');
     const card = el.querySelector<HTMLElement>('.nm-node[data-id="s1a"]')!;
     expect(card.classList.contains('nm-summary')).toBe(true);
-    card.querySelector<HTMLButtonElement>('.nm-card-edit')!.click();
+    card.querySelector<HTMLButtonElement>('.nm-card-pencil')!.click();
     expect(document.querySelector('.nm-edit')!.getAttribute('aria-label')).toBe('Edit Shot 1 · Wide');
     editor.closePalette();
+    // Its Seedance export opens from Export (not on every tap).
+    card.querySelector<HTMLButtonElement>('.nm-card-details')!.click();
+    expect(document.querySelector('.nm-card')!.textContent).toMatch(/Seedance shot/);
+    editor.hideDetails?.();
     // Other cards edit in place, without the button.
     await editor.setView('cast');
     expect(el.querySelector('.nm-node[data-id="maya"] .nm-card-edit')).toBeNull();

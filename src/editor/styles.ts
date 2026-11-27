@@ -219,10 +219,14 @@ export const css = /* css */ `
 .nm-node [data-nm-open], .nm-node [data-nm-live], .nm-node [data-nm-live] summary { pointer-events: auto !important; cursor: pointer; }
 /* Look-only cards (edited in their sheet): nothing on them responds but what's marked live. */
 .nm-node.nm-summary { cursor: pointer; }
-.nm-card-edit { all: unset; box-sizing: border-box; margin-left: auto; padding: 3px 9px; border: 1px solid var(--_border); border-radius: 999px;
-  font: 600 11px/1.2 var(--_font); color: var(--_accent); background: var(--_node); cursor: pointer; white-space: nowrap; }
+.nm-card-edit { all: unset; box-sizing: border-box; flex: none; margin-left: auto; width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid var(--_border); border-radius: 50%;
+  font: 600 14px/1 var(--_font); color: var(--_accent); background: var(--_node); cursor: pointer; }
 .nm-card-edit:hover, .nm-card-edit:focus-visible { border-color: var(--_accent); }
 .nm-overview .nm-card-edit { display: none; }
+.nm-card-details { margin-left: auto; }
+.nm-card-details + .nm-card-edit { margin-left: 4px; }
+/* Room for the buttons: the type name goes (the icon and colour say it). */
+.nm-root:not(.nm-overview) .nm-summary .nm-cat { display: none; }
 .nm-node.nm-summary :is(input, select, textarea, button, label, summary, [data-nm-open]):not([data-nm-live]) { pointer-events: none !important; }
 .nm-node.nm-summary :is(textarea, input) { resize: none; caret-color: transparent; }
 .nm-toolbar { position: absolute; right: max(12px, env(safe-area-inset-right, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; gap: 6px; z-index: 4;

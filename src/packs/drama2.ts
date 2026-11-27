@@ -521,6 +521,9 @@ const shotNode = defineNode({
   description: 'One camera set-up: one location, any characters',
   // Its card is for looking: a tap opens the Edit sheet, where shots are edited.
   editOnCard: false,
+  // Its Seedance export (prompt, pictures, .zip) opens from a button, not on every tap.
+  detailsLabel: 'Export',
+  detailsIcon: '⇩',
   caption: (n) => `Shot ${String(n.params.number ?? '').trim() || '?'} · ${n.params.framing ?? 'Medium'}`,
   params: [
     // A shot's card is a summary (its title says the number and framing); tap it twice for the rest.
