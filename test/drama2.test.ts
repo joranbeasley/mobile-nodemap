@@ -253,6 +253,55 @@ describe('Editor views', () => {
     editor.destroy();
   });
 
+  it('names a location’s views, and says in a shot which it uses', () => {
+    const g = load();
+    const [front, wings] = ['data:image/png;base64,RlJPTlQ=', 'data:image/png;base64,V0lOR1M='];
+    g.setParam('hall', 'images', [front, wings]);
+    g.setParam('hall', 'views', [
+      { src: front, name: 'from the audience' },
+      { src: wings, name: 'from the wings', description: 'Black curtain edge in the foreground, the seats beyond the stage lights.' },
+    ]);
+    // Unpicked: the first view leads, the other goes along, each by name.
+    let shot = seedanceShot(toDrama(g), 's1b');
+    expect(shot.refs.map((r) => r.label)).toEqual(expect.arrayContaining(['School hall (location, from the audience)', 'School hall (location, from the wings)']));
+    expect(shot.prompt).toMatch(/Setting: School hall[^\n]*View: from the audience\./);
+    // Picked for this shot: that view, named and described, in both prompts.
+    g.setParam('s1b', 'referencePicks', { hall: wings });
+    shot = seedanceShot(toDrama(g), 's1b');
+    expect(shot.refs.filter((r) => r.label.startsWith('School hall')).map((r) => r.label)).toEqual(['School hall (location, from the wings)']);
+    expect(shot.prompt).toContain('View: from the wings — Black curtain edge in the foreground, the seats beyond the stage lights.');
+    const w = toDrama(g);
+    expect(dramaImagePrompt(w, w.nodes.get('s1b')!)!.prompt).toContain('View: from the wings — Black curtain edge');
+    expect(dramaImagePrompt(w, w.nodes.get('s1b')!)!.references.find((r) => r.card === 'hall')!.label).toBe('School hall (location, from the wings)');
+  });
+
+  it('edits a location’s views in its Edit sheet', async () => {
+    const g = load();
+    const el = document.createElement('div');
+    document.body.append(el);
+    const editor = new NodeEditor(el, { graph: g, registry: g.registry!, views: drama2Graph.editor!.views });
+    await editor.setView('locations');
+    const [front, wings] = ['data:image/png;base64,RlJPTlQ=', 'data:image/png;base64,V0lOR1M='];
+    g.setParam('hall', 'images', [front, wings]);
+    expect(el.querySelector('.nm-node[data-id="hall"] [data-param="views"]')).toBeNull(); // not on the card
+    editor.openNodeEditor('hall');
+    const rows = () => [...document.querySelectorAll<HTMLElement>('.nm-edit [data-param="views"] .dr-view')];
+    expect(rows()).toHaveLength(2);
+    const name = rows()[1].querySelector('input')!;
+    name.value = 'from the wings';
+    name.dispatchEvent(new Event('change'));
+    const desc = rows()[1].querySelector('textarea')!;
+    desc.value = 'Curtain edge in front';
+    desc.dispatchEvent(new Event('change'));
+    expect(g.nodes.get('hall')!.params.views).toEqual([{ src: wings, name: 'from the wings', description: 'Curtain edge in front' }]);
+    // A picture removed: its view goes with it on the next save.
+    g.setParam('hall', 'images', [wings]);
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0].querySelector('input')!.value).toBe('from the wings');
+    editor.closePalette();
+    editor.destroy();
+  });
+
   it('starts a continuing shot on the last frame of the shot before; otherwise matches it', () => {
     const g = load();
     const END = 'data:image/jpeg;base64,RU5EMQ==';

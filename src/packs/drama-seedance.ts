@@ -1,6 +1,6 @@
 import type { Graph } from '../core/graph.js';
 import type { NodeInstance } from '../core/types.js';
-import { cardId, dramaName, episodeInfo, imageList, previousShot, referenceImages, sceneInfo, setShotClipSuggester, shotCostumes, shotInfo, type EpisodeInfo, type SceneInfo } from './drama.js';
+import { cardId, pictureView, viewSentence, dramaName, episodeInfo, imageList, previousShot, referenceImages, sceneInfo, setShotClipSuggester, shotCostumes, shotInfo, type EpisodeInfo, type SceneInfo } from './drama.js';
 
 /**
  * Export a production for Seedance video generation, one generation per shot.
@@ -228,8 +228,10 @@ export function seedanceShot(graph: Graph, shotId: string, opts: SeedanceOptions
     const r = referenceImages(n, node);
     if (!r.picked) return;
     const card = cardId(n.id);
-    first.push({ src: r.picked, name, label: `${dramaName(n)} (${kind})`, card });
-    if (!r.explicit) r.all.filter((src) => src !== r.picked).forEach((src) => rest.push({ src, name, label: `${dramaName(n)} (${kind}, view ${r.all.indexOf(src) + 1})`, card }));
+    // Named views say which way the picture looks: "School hall (location, from the wings)".
+    const viewOf = (src: string) => pictureView(n, src)?.name;
+    first.push({ src: r.picked, name, label: `${dramaName(n)} (${kind}${viewOf(r.picked) ? `, ${viewOf(r.picked)}` : ''})`, card });
+    if (!r.explicit) r.all.filter((src) => src !== r.picked).forEach((src) => rest.push({ src, name, label: `${dramaName(n)} (${kind}, ${viewOf(src) ?? `view ${r.all.indexOf(src) + 1}`})`, card }));
   };
   // What each character wears in this shot: the scene's costumes, or the shot's own.
   const costumes = shotCostumes(graph, shotId);
@@ -290,7 +292,9 @@ export function seedanceShot(graph: Graph, shotId: string, opts: SeedanceOptions
     const l = x.location;
     const r = refsOf(l);
     const d = oneLine(String(l.params.description ?? ''));
-    lines.push(`Setting: ${dramaName(l)}${r.length ? ` (${r.join(', ')})` : ''}, ${l.params.setting === 'EXT' ? 'exterior' : 'interior'}, ${TIME[scene?.time ?? 'DAY'] ?? 'day'}.${d ? ` ${sentence(d)}` : ''}`);
+    // The view this shot uses (its picked picture's, else the first's), named and described.
+    const view = viewSentence(pictureView(l, referenceImages(l, node).picked));
+    lines.push(`Setting: ${dramaName(l)}${r.length ? ` (${r.join(', ')})` : ''}, ${l.params.setting === 'EXT' ? 'exterior' : 'interior'}, ${TIME[scene?.time ?? 'DAY'] ?? 'day'}.${d ? ` ${sentence(d)}` : ''}${view ? ` ${view}` : ''}`);
   }
   if (x.props.length) lines.push(`Props: ${x.props.map((p) => `${dramaName(p)}${refsOf(p).length ? ` (${refsOf(p).join(', ')})` : ''}`).join(', ')}.`);
   if (scene?.description) lines.push(`Scene context: ${sentence(scene.description)}`);

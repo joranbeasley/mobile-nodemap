@@ -1,7 +1,7 @@
 import { defineNode, definePack, type GraphEngine } from '../core/registry.js';
 import { Graph } from '../core/graph.js';
 import type { GraphJSON, NodeInstance, NodeResult, NodeType, ParamKind } from '../core/types.js';
-import { DRAMA_DETAILS, GENERATE_EVENT, SHOT_CLIP_PARAMS, clipFrameParam, dramaImagePrompt, shotClipSuggestion, FRAMINGS, MOVES, TIMES, appearances, dramaEngine, dramaPack, dramaView, imagesParam, sceneInfo, episodeInfo } from './drama.js';
+import { DRAMA_DETAILS, GENERATE_EVENT, viewsParam, SHOT_CLIP_PARAMS, clipFrameParam, dramaImagePrompt, shotClipSuggestion, FRAMINGS, MOVES, TIMES, appearances, dramaEngine, dramaPack, dramaView, imagesParam, sceneInfo, episodeInfo } from './drama.js';
 import { getImageGenerators } from './image-generation.js';
 import { getVideoGenerators } from './video-generation.js';
 
@@ -491,7 +491,13 @@ const locationNode = defineNode({
   width: 250,
   description: 'Where shots happen: name, setting, description, pictures',
   cardActions: [pictureAction],
-  params: [sheetOnly({ name: 'setting', label: 'setting', kind: 'select', options: ['INT', 'EXT'], default: 'INT' }), text('description', 'description', 'What it looks like'), images()],
+  params: [
+    sheetOnly({ name: 'setting', label: 'setting', kind: 'select', options: ['INT', 'EXT'], default: 'INT' }),
+    text('description', 'description', 'What it looks like'),
+    images(),
+    // Its pictures as named views (from the wings, from the audience…): shots say which they use.
+    sheetOnly({ name: 'views', label: 'views', kind: 'views', of: 'images', default: [], description: 'Name each picture’s viewpoint; a shot that uses it (⇄) says so in its prompt.' }),
+  ],
   onCreate: (n) => void (n.label ??= 'New location'),
 });
 
@@ -975,7 +981,7 @@ const nodes: NodeType[] = [characterNode, propNode, locationNode, shotNode, scen
 export const drama2Pack = definePack({
   id: 'nodemap/drama2',
   title: 'Drama boards',
-  paramKinds: [imagesParam, clipFrameParam, refParam, refsParam, wardrobeParam],
+  paramKinds: [imagesParam, clipFrameParam, viewsParam, refParam, refsParam, wardrobeParam],
   nodes,
   css: (dramaPack.css ?? '') + css,
 });

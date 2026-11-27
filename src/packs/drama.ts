@@ -83,7 +83,11 @@ function referenceSwitch(r: Reference, ctx: { node: NodeInstance; graph: Graph; 
     if (ctx.choose) {
       const id = await ctx.choose({
         title: `Which picture for ${r.label}?`,
-        items: choices.map((src, i) => ({ id: String(i), label: `Picture ${i + 1}`, hint: src === r.src ? 'sending this one' : undefined, image: src })),
+        items: choices.map((src, i) => {
+          const v = pictureView(ctx.graph.nodes.get(r.card!), src);
+          const hint = [src === r.src ? 'sending this one' : '', v?.description ?? ''].filter(Boolean).join(' · ');
+          return { id: String(i), label: v?.name ?? `Picture ${i + 1}`, hint: hint || undefined, image: src };
+        }),
       });
       if (id !== undefined) next = choices[Number(id)];
     } else next = choices[(choices.indexOf(r.src) + 1) % choices.length];
@@ -932,6 +936,63 @@ export const clipFrameParam: ParamKind = {
   },
   update(el, v) {
     (el as HTMLElement & { setClip?: (v: unknown) => void }).setClip?.(v);
+  },
+};
+
+/**
+ * Name and describe a card's pictures as views ("from the wings": what it shows), for the
+ * prompts and the ⇄ picker. One row per picture, in the pictures' order.
+ */
+export const viewsParam: ParamKind = {
+  kind: 'views',
+  render(ctx) {
+    const wrap = document.createElement('div');
+    wrap.className = 'dr-views';
+    const of = (ctx.param as { of?: string }).of ?? 'images';
+    const read = (): PictureView[] => {
+      const v = ctx.graph.nodes.get(ctx.node.id)?.params.views;
+      return Array.isArray(v) ? (v as PictureView[]) : [];
+    };
+    const save = (src: string, patch: Partial<PictureView>) => {
+      const pics = imageList(ctx.graph.nodes.get(ctx.node.id)?.params[of]);
+      const all = read().filter((x) => x && pics.includes(x.src));
+      const i = all.findIndex((x) => x.src === src);
+      const next = { ...(i >= 0 ? all[i] : { src }), ...patch };
+      if (i >= 0) all[i] = next;
+      else all.push(next);
+      ctx.set(all.filter((x) => x.name?.trim() || x.description?.trim()));
+    };
+    const draw = () => {
+      const pics = imageList(ctx.graph.nodes.get(ctx.node.id)?.params[of]);
+      const views = read();
+      wrap.replaceChildren();
+      if (!pics.length) return void wrap.append(Object.assign(document.createElement('small'), { className: 'dr-views-empty', textContent: 'Add pictures first; then name each view (e.g. from the wings).' }));
+      pics.forEach((src, i) => {
+        const v = views.find((x) => x?.src === src);
+        const row = document.createElement('div');
+        row.className = 'dr-view';
+        const img = Object.assign(document.createElement('img'), { src, alt: '' });
+        const name = Object.assign(document.createElement('input'), { type: 'text', value: v?.name ?? '', placeholder: i ? 'e.g. from the wings' : 'e.g. from the audience' });
+        name.setAttribute('aria-label', `Picture ${i + 1}: view name`);
+        name.dataset.key = `${ctx.key}:n:${i}`;
+        const desc = Object.assign(document.createElement('textarea'), { rows: 2, value: v?.description ?? '', placeholder: 'What it shows (optional), e.g. black curtain in the foreground, the seats beyond' });
+        desc.setAttribute('aria-label', `Picture ${i + 1}: what the view shows`);
+        desc.dataset.key = `${ctx.key}:d:${i}`;
+        name.addEventListener('change', () => save(src, { name: name.value }));
+        desc.addEventListener('change', () => save(src, { description: desc.value }));
+        const text = document.createElement('div');
+        text.append(name, desc);
+        row.append(img, text);
+        wrap.append(row);
+      });
+    };
+    // New or removed pictures: new rows (not while typing in one).
+    const off = ctx.graph.on('change', (c) => {
+      if (!wrap.isConnected) return queueMicrotask(off);
+      if (c.kind === 'node:params' && c.node.id === ctx.node.id && !wrap.contains(document.activeElement)) draw();
+    });
+    draw();
+    return wrap;
   },
 };
 
@@ -1806,6 +1867,25 @@ export const cardId = (id: string) => id.split('@')[0];
  * reference: the one picked for it (`referencePicks`, card id → picture), else the first.
  * `explicit`: a pick was made, so the card's other pictures stay out.
  */
+/** A named view of one of a card's pictures (a location seen "from the wings"), from its `views`. */
+export interface PictureView {
+  src: string;
+  name?: string;
+  description?: string;
+}
+/** The view a card's picture shows, when it has been named or described. */
+export function pictureView(card: NodeInstance | undefined, src: string | undefined): PictureView | undefined {
+  if (!card || !src || !Array.isArray(card.params.views)) return undefined;
+  const v = (card.params.views as PictureView[]).find((x) => x && x.src === src);
+  return v && (v.name?.trim() || v.description?.trim()) ? { src, name: v.name?.trim() || undefined, description: v.description?.trim() || undefined } : undefined;
+}
+/** "View: from the wings — black curtain in the foreground." for a prompt, or ''. */
+export function viewSentence(v: PictureView | undefined): string {
+  if (!v) return '';
+  const d = v.description ? v.description.replace(/[.!?]\s*$/, '') : '';
+  return `View: ${[v.name, d].filter(Boolean).join(' — ')}.`;
+}
+
 export function referenceImages(card: NodeInstance, target?: NodeInstance): { picked: string | undefined; all: string[]; explicit: boolean } {
   const all = imageList(card.params.images);
   const picks = target?.params.referencePicks as Record<string, string> | undefined;
@@ -1826,7 +1906,10 @@ export function dramaImageReferences(graph: Graph, n: NodeInstance): Reference[]
   const add = (node: NodeInstance | undefined, label: string) => {
     if (!node) return;
     const r = referenceImages(node, n);
-    if (r.picked && !out.some((x) => x.src === r.picked)) out.push({ src: r.picked, label, card: cardId(node.id), ...(r.all.length > 1 ? { choices: r.all } : {}) });
+    const v = pictureView(node, r.picked);
+    // A named view says which way it looks: "School hall (location, from the wings)".
+    const named = v?.name ? label.replace(/\)$/, `, ${v.name})`).replace(/^([^(]*)$/, `$1 (${v.name})`) : label;
+    if (r.picked && !out.some((x) => x.src === r.picked)) out.push({ src: r.picked, label: named, card: cardId(node.id), ...(r.all.length > 1 ? { choices: r.all } : {}) });
   };
   const castAndPlaces = (characters: NodeInstance[], locations: NodeInstance[], costumes: Map<string, NodeInstance>, props: NodeInstance[] = []) => {
     // A character in costume: their portrait is for the face and hair, the costume for the clothes.
@@ -1902,7 +1985,8 @@ function basePrompt(graph: Graph, n: NodeInstance, param: string): { prompt: str
       const s = shotInfo(graph, n);
       const sc = sceneOfShot(n.id);
       const time = sc ? String(sc.params.time ?? 'DAY').toLowerCase() : 'day';
-      const where = s.location ? `Setting: ${dramaName(s.location)}, ${s.location.params.setting === 'EXT' ? 'exterior' : 'interior'}, ${time}. ${end(t(s.location.params.description))}` : '';
+      const view = s.location ? viewSentence(pictureView(s.location, referenceImages(s.location, n).picked)) : '';
+      const where = s.location ? `Setting: ${dramaName(s.location)}, ${s.location.params.setting === 'EXT' ? 'exterior' : 'interior'}, ${time}. ${end(t(s.location.params.description))} ${view}` : '';
       const costumes = shotCostumes(graph, n.id);
       const cast = s.characters.length ? `On screen: ${s.characters.map((c) => who(c, costumes)).join('; ')}.` : '';
       return {
@@ -2263,6 +2347,12 @@ const css = `
 .dr-clip small { flex-basis: 100%; color: var(--_muted); font-size: 11px; }
 .dr-clip small:empty { display: none; }
 .dr-clip-panel { flex-basis: 100%; }
+.dr-views { display: flex; flex-direction: column; gap: 8px; }
+.dr-view { display: grid; grid-template-columns: 72px 1fr; gap: 8px; align-items: start; }
+.dr-view img { width: 72px; height: 54px; object-fit: cover; border-radius: 6px; border: 1px solid var(--_border); }
+.dr-view > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.dr-view textarea { font-size: 13px !important; min-height: 0 !important; resize: vertical; }
+.dr-views-empty { color: var(--_muted); }
 .dr-gen-card { all: unset; box-sizing: border-box; align-self: center; padding: 5px 10px; border: 1px solid var(--_border); border-radius: 999px;
   font: 600 12px/1.2 var(--_font); color: var(--_accent); background: var(--_node); cursor: pointer; white-space: nowrap; }
 .dr-gen-card:hover, .dr-gen-card:focus-visible { border-color: var(--_accent); }
