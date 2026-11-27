@@ -58,6 +58,8 @@ export interface VideoEstimate {
   unit: 'USD' | 'credits';
   /** Where the figure comes from, e.g. "fal's listed price". */
   basis: string;
+  /** The length it was priced for, when the model makes another than asked (e.g. Veo's 8 s with references). */
+  seconds?: number;
 }
 
 export interface VideoModel {
@@ -66,6 +68,8 @@ export interface VideoModel {
   /** Allowed durations in seconds (inclusive). */
   minDuration?: number;
   maxDuration?: number;
+  /** Only these lengths (seconds), when it doesn't take any length in the range. */
+  durations?: number[];
   resolutions?: string[];
   aspects?: string[];
   /** Reference pictures it takes (0: none). */
@@ -93,7 +97,7 @@ export interface VideoGenerator {
    */
   resume?(job: VideoJob, opts?: { signal?: AbortSignal; onProgress?: (status: string, percent?: number) => void }): Promise<VideoResult>;
   /** What a clip with these settings will probably cost; undefined when unknown. */
-  estimate?(req: { model?: string; duration?: number; resolution?: string; aspect?: string }): VideoEstimate | undefined;
+  estimate?(req: { model?: string; duration?: number; resolution?: string; aspect?: string; audio?: boolean; references?: number }): VideoEstimate | undefined;
   /** Where to see prices and make clips by hand. */
   site?: string;
 }

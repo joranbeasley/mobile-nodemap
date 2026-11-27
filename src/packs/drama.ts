@@ -523,12 +523,20 @@ export const clipFrameParam: ParamKind = {
       const aspect = select('Aspect ratio', [], '');
       const res = select('Resolution', [], '');
       const audio = el('input', { type: 'checkbox', 'aria-label': 'With sound' }) as HTMLInputElement;
+      const current = () => gen.models.find((x) => x.id === model.value) ?? gen.models[0];
+      // A length the model takes: in its range, and one of its lengths when it has a list.
+      const snap = (m: (typeof gen.models)[number] | undefined, want: number) => {
+        const d = Math.min(m?.maxDuration ?? 60, Math.max(m?.minDuration ?? 1, want));
+        return m?.durations?.length ? m.durations.reduce((a, b) => (Math.abs(b - d) <= Math.abs(a - d) ? b : a)) : Math.round(d);
+      };
+      // Reference pictures switched on (set once the strip is built).
+      let refsOn = () => 0;
       const fit = () => {
-        const m = gen.models.find((x) => x.id === model.value) ?? gen.models[0];
+        const m = current();
         hint.textContent = m?.hint ?? '';
         dur.min = String(m?.minDuration ?? 1);
         dur.max = String(m?.maxDuration ?? 60);
-        dur.value = String(Math.min(Number(dur.max), Math.max(Number(dur.min), Number(dur.value) || s?.duration || 5)));
+        dur.value = String(snap(m, Number(dur.value) || s?.duration || 5));
         const keep = (x: HTMLSelectElement, values: string[] | undefined, want: string) => {
           const cur = x.value || want;
           x.replaceChildren(...(values ?? [want]).map((v) => Object.assign(document.createElement('option'), { value: v, textContent: v })));
@@ -541,13 +549,20 @@ export const clipFrameParam: ParamKind = {
       // What it will cost: the model, resolution and length decide it (not the prompt).
       const price = el('small', { class: 'dr-gen-cost', role: 'status' });
       const money = (e: { amount: number; unit: string }) => (e.unit === 'USD' ? `$${e.amount.toFixed(2)}` : `${e.amount} credits`);
-      const quote = () => gen.estimate?.({ model: model.value, duration: Number(dur.value), resolution: res.value, aspect: aspect.value });
+      const quote = () => gen.estimate?.({ model: model.value, duration: Number(dur.value), resolution: res.value, aspect: aspect.value, audio: audio.checked && !audio.disabled, references: refsOn() });
+      // What the model will do with the pictures switched on, when it takes fewer.
+      const limits = el('small', { class: 'dr-gen-refs-note dr-gen-limit' });
       const showPrice = () => {
         const e = quote();
-        price.textContent = e ? `About ${money(e)} for ${dur.value} s at ${res.value} (${e.basis})` : '';
+        price.textContent = e ? `About ${money(e)} for ${e.seconds ?? dur.value} s at ${res.value}${audio.checked && !audio.disabled ? ' with sound' : ''} (${e.basis})` : '';
+        const m = current();
+        const max = m?.maxReferences ?? 0;
+        const n = refsOn();
+        limits.textContent = !n || n <= max ? '' : max === 0 ? `${m?.label ?? 'This model'} takes no reference pictures: it gets the prompt only (and a continuing shot’s first frame).` : `${m?.label ?? 'This model'} takes up to ${max} reference pictures: the first ${max} switched on are sent.`;
       };
       model.addEventListener('change', () => (fit(), showPrice()));
-      for (const x of [dur, res, aspect]) x.addEventListener('change', showPrice);
+      dur.addEventListener('change', () => ((dur.value = String(snap(current(), Number(dur.value) || 5))), showPrice()));
+      for (const x of [res, aspect, audio]) x.addEventListener('change', showPrice);
       dur.addEventListener('input', showPrice);
       fit();
       showPrice();
@@ -555,7 +570,7 @@ export const clipFrameParam: ParamKind = {
       sound.append(audio, ' sound');
       const secs = el('label', { class: 'dr-clip-dur' });
       secs.append(dur, ' s');
-      box.append(row(model, secs, aspect, res, sound), hint, price);
+      box.append(row(model, secs, aspect, res, sound), hint, price, limits);
       const prompt = el('textarea', { rows: '6', 'aria-label': 'Clip prompt', placeholder: 'Describe the shot' }) as HTMLTextAreaElement;
       prompt.value = s?.prompt ?? '';
       box.append(prompt);
@@ -574,6 +589,7 @@ export const clipFrameParam: ParamKind = {
             if (on.has(r.src)) on.delete(r.src);
             else on.add(r.src);
             b.setAttribute('aria-pressed', String(on.has(r.src)));
+            showPrice();
           });
           const lead = !!r.card && !views.has(r.card);
           if (r.card && !lead) views.get(r.card)!.push({ r, b, im });
@@ -603,6 +619,8 @@ export const clipFrameParam: ParamKind = {
           } else strip.append(b);
         });
         box.append(strip, el('small', { class: 'dr-gen-refs-note' }, 'Sent in this order; the prompt calls them @Image1, @Image2… Switching one off renumbers the rest, so edit the prompt to match.'));
+        refsOn = () => refs.filter((r) => on.has(r.src)).length;
+        showPrice();
       }
       // The key, saved as soon as it's entered.
       const keyIn = el('input', { type: 'text', class: 'dr-key-masked', autocomplete: 'off', spellcheck: 'false', 'aria-label': gen.key?.label ?? 'API key', placeholder: `Paste your ${gen.key?.label ?? 'API key'}` }) as HTMLInputElement;

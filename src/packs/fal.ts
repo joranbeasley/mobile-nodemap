@@ -49,55 +49,125 @@ export interface FalOptions {
 
 /** Seedance on fal: one model, three endpoints (text, first frame, reference pictures). */
 interface FalVideoModel extends VideoModel {
-  endpoints: { text: string; image: string; reference: string };
-  /** fal's listed price, USD per second of video, by resolution (the same for all three endpoints). */
+  /** How its inputs are named: each family on fal has its own. */
+  family: 'seedance' | 'kling' | 'veo' | 'wan' | 'minimax';
+  endpoints: { text: string; image: string; reference?: string; firstLast?: string };
+  /** fal's listed price, USD per second of video, by resolution ('*': any), without sound… */
   perSecond: Record<string, number>;
+  /** …and with sound, where that costs more. */
+  perSecondAudio?: Record<string, number>;
 }
 
 const SEEDANCE_ASPECTS = ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'];
-export const FAL_VIDEO_MODELS: FalVideoModel[] = (<Omit<FalVideoModel, 'aspects' | 'maxReferences' | 'firstFrame' | 'audio'>[]>[
-  {
-    id: 'seedance-2.0',
-    label: 'Seedance 2.0',
-    hint: 'Best quality; up to 4K',
-    endpoints: { text: 'bytedance/seedance-2.0/us/text-to-video', image: 'bytedance/seedance-2.0/us/image-to-video', reference: 'bytedance/seedance-2.0/us/reference-to-video' },
-    minDuration: 4,
-    maxDuration: 15,
+const seedance = (id: string, label: string, hint: string, path: string, more: Partial<FalVideoModel>): FalVideoModel => ({
+  id,
+  label,
+  hint,
+  family: 'seedance',
+  endpoints: { text: `${path}/text-to-video`, image: `${path}/image-to-video`, reference: `${path}/reference-to-video` },
+  minDuration: 4,
+  maxDuration: 15,
+  aspects: SEEDANCE_ASPECTS,
+  maxReferences: 9,
+  firstFrame: true,
+  audio: true, // the same price with or without sound
+  resolutions: [],
+  perSecond: {},
+  ...more,
+});
+const kling = (tier: 'pro' | 'standard', rate: number, withSound: number): FalVideoModel => ({
+  id: `kling-o3-${tier}`,
+  label: `Kling O3 ${tier === 'pro' ? 'Pro' : 'Standard'}`,
+  hint: `Kling; up to 4 reference pictures (@Image1…); 3–15 s${tier === 'standard' ? '; cheaper' : ''}`,
+  family: 'kling',
+  endpoints: { text: `fal-ai/kling-video/o3/${tier}/text-to-video`, image: `fal-ai/kling-video/o3/${tier}/image-to-video`, reference: `fal-ai/kling-video/o3/${tier}/reference-to-video` },
+  minDuration: 3,
+  maxDuration: 15,
+  aspects: ['16:9', '9:16', '1:1'],
+  // fal: "Maximum 4 total (elements + reference images)" (said for video elements; the safe limit).
+  maxReferences: 4,
+  firstFrame: true,
+  audio: true,
+  perSecond: { '*': rate },
+  perSecondAudio: { '*': withSound },
+});
+const veo = (fast: boolean): FalVideoModel => ({
+  id: fast ? 'veo-3.1-fast' : 'veo-3.1',
+  label: fast ? 'Veo 3.1 Fast' : 'Veo 3.1',
+  hint: `Google; 4, 6 or 8 s (8 s with reference pictures, up to 3)${fast ? '; cheaper' : ''}`,
+  family: 'veo',
+  endpoints: fast
+    ? { text: 'fal-ai/veo3.1/fast', image: 'fal-ai/veo3.1/fast/image-to-video', reference: 'fal-ai/veo3.1/fast/reference-to-video', firstLast: 'fal-ai/veo3.1/fast/first-last-frame-to-video' }
+    : { text: 'fal-ai/veo3.1', image: 'fal-ai/veo3.1/image-to-video', reference: 'fal-ai/veo3.1/reference-to-video', firstLast: 'fal-ai/veo3.1/first-last-frame-to-video' },
+  minDuration: 4,
+  maxDuration: 8,
+  durations: [4, 6, 8],
+  aspects: ['16:9', '9:16'],
+  resolutions: ['720p', '1080p', '4k'],
+  // Google's limit for Veo 3.1 reference pictures (fal's page doesn't give one).
+  maxReferences: 3,
+  firstFrame: true,
+  audio: true,
+  perSecond: fast ? { '720p': 0.1, '1080p': 0.1, '4k': 0.3 } : { '720p': 0.2, '1080p': 0.2, '4k': 0.4 },
+  perSecondAudio: fast ? { '720p': 0.15, '1080p': 0.15, '4k': 0.35 } : { '720p': 0.4, '1080p': 0.4, '4k': 0.6 },
+});
+
+export const FAL_VIDEO_MODELS: FalVideoModel[] = [
+  seedance('seedance-2.0', 'Seedance 2.0', 'Best quality; up to 4K', 'bytedance/seedance-2.0/us', {
     resolutions: ['480p', '720p', '1080p', '4k'],
     perSecond: { '480p': 0.1406, '720p': 0.3024, '1080p': 0.7484, '4k': 1.5552 },
-  },
-  {
-    id: 'seedance-2.0-fast',
-    label: 'Seedance 2.0 Fast',
-    hint: 'Quicker and cheaper; up to 720p',
-    endpoints: { text: 'bytedance/seedance-2.0/fast/text-to-video', image: 'bytedance/seedance-2.0/fast/image-to-video', reference: 'bytedance/seedance-2.0/fast/reference-to-video' },
-    minDuration: 4,
-    maxDuration: 15,
+  }),
+  seedance('seedance-2.0-fast', 'Seedance 2.0 Fast', 'Quicker and cheaper; up to 720p', 'bytedance/seedance-2.0/fast', {
     resolutions: ['480p', '720p'],
     // fal lists 720p only; 480p from its token price ($0.0112 per 1,000 tokens) at Mini's 480p token count.
     perSecond: { '480p': 0.1154, '720p': 0.2419 },
-  },
-  {
-    id: 'seedance-2.0-mini',
-    label: 'Seedance 2.0 Mini',
-    hint: 'Cheapest; drafts; up to 720p',
-    endpoints: { text: 'bytedance/seedance-2.0/mini/text-to-video', image: 'bytedance/seedance-2.0/mini/image-to-video', reference: 'bytedance/seedance-2.0/mini/reference-to-video' },
-    minDuration: 4,
-    maxDuration: 15,
+  }),
+  seedance('seedance-2.0-mini', 'Seedance 2.0 Mini', 'Cheapest; drafts; up to 720p', 'bytedance/seedance-2.0/mini', {
     resolutions: ['480p', '720p'],
     perSecond: { '480p': 0.0721, '720p': 0.1547 },
-  },
-  {
-    id: 'seedance-2.5',
-    label: 'Seedance 2.5',
-    hint: 'Newest; clips up to 30 s; up to 1080p',
-    endpoints: { text: 'bytedance/seedance-2.5/us/text-to-video', image: 'bytedance/seedance-2.5/us/image-to-video', reference: 'bytedance/seedance-2.5/us/reference-to-video' },
-    minDuration: 4,
+  }),
+  seedance('seedance-2.5', 'Seedance 2.5', 'Newest; clips up to 30 s; up to 1080p', 'bytedance/seedance-2.5/us', {
     maxDuration: 30,
     resolutions: ['480p', '720p', '1080p'],
     perSecond: { '480p': 0.2205, '720p': 0.473, '1080p': 1.164 },
+  }),
+  kling('pro', 0.112, 0.14),
+  kling('standard', 0.084, 0.112),
+  veo(false),
+  veo(true),
+  {
+    id: 'wan-2.6',
+    label: 'Wan 2.6',
+    hint: 'No reference pictures (prompt, or a continuing shot’s first frame); 5, 10 or 15 s; prompts up to 1,500 characters',
+    family: 'wan',
+    endpoints: { text: 'wan/v2.6/text-to-video', image: 'wan/v2.6/image-to-video' },
+    minDuration: 5,
+    maxDuration: 15,
+    durations: [5, 10, 15],
+    aspects: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+    resolutions: ['720p', '1080p'],
+    maxReferences: 0,
+    firstFrame: true,
+    audio: false,
+    perSecond: { '720p': 0.1, '1080p': 0.15 },
   },
-]).map((m) => ({ ...m, aspects: SEEDANCE_ASPECTS, maxReferences: 9, firstFrame: true, audio: true }));
+  {
+    id: 'minimax-h3-max',
+    label: 'MiniMax H3 Max',
+    hint: 'Cheap; no reference pictures (prompt, or a continuing shot’s first frame); up to 15 s',
+    family: 'minimax',
+    endpoints: { text: 'minimax/h3-max/text-to-video', image: 'minimax/h3-max/image-to-video' },
+    minDuration: 1,
+    maxDuration: 15,
+    aspects: ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'],
+    resolutions: ['480p', '768p', '1080p'],
+    maxReferences: 0,
+    firstFrame: true,
+    audio: false,
+    // Standard rates from 16 Nov 2026 (fal ran discounts before that).
+    perSecond: { '480p': 0.05, '768p': 0.08, '1080p': 0.16 },
+  },
+];
 /** Where the prices come from (each model's https://fal.ai/models/<endpoint>/llms.txt, Nov 2026). They change: fal bills what it bills. */
 export const FAL_PRICE_BASIS = "fal's listed price";
 
@@ -254,53 +324,98 @@ const clipOf = (out: Record<string, any>) => {
   return { videos: [url as string] };
 };
 
+/** The length a model will make: snapped to the lengths it takes. */
+function lengthFor(m: FalVideoModel, want: number | undefined): number {
+  const d = Math.min(m.maxDuration ?? 15, Math.max(m.minDuration ?? 4, want ?? 5));
+  return m.durations ? m.durations.reduce((a, b) => (Math.abs(b - d) <= Math.abs(a - d) ? b : a)) : Math.round(d);
+}
+/** Veo's reference-to-video makes 8-second clips only. */
+const lengthWith = (m: FalVideoModel, want: number | undefined, references: number) =>
+  m.family === 'veo' && references > 0 && (m.maxReferences ?? 0) > 0 ? 8 : lengthFor(m, want);
+
 /**
- * Seedance clips through fal. With reference pictures it uses reference-to-video (the prompt
- * can call them @Image1, @Image2…, as the drama Seedance export writes it); with only a first
- * frame, image-to-video (a continuing shot); otherwise text-to-video.
+ * Clips through fal: Seedance, Kling O3, Veo 3.1, Wan 2.6 and MiniMax H3. With reference pictures
+ * (for models that take them) it uses the model's reference-to-video (the prompt calls them
+ * @Image1, @Image2…, as the drama Seedance export writes it); with only a first frame,
+ * image-to-video (a continuing shot); otherwise text-to-video.
  */
 export function falVideoGenerator(opts: FalOptions & { model?: string } = {}): VideoGenerator {
   const fal = falClient(opts);
+  const pick = (id?: string) => FAL_VIDEO_MODELS.find((x) => x.id === (id ?? opts.model)) ?? FAL_VIDEO_MODELS.find((x) => x.id === 'seedance-2.0-fast')!;
   return {
     id: 'fal',
     name: 'fal',
     site: 'https://fal.ai/models',
-    models: FAL_VIDEO_MODELS.map(({ endpoints, perSecond, ...m }) => (void endpoints, void perSecond, m)),
+    models: FAL_VIDEO_MODELS.map(({ endpoints, perSecond, perSecondAudio, family, ...m }) => (void endpoints, void perSecond, void perSecondAudio, void family, m)),
     defaultModel: opts.model ?? 'seedance-2.0-fast',
-    // The price depends only on the model, resolution and length (not the prompt, pictures or sound).
-    estimate({ model, duration, resolution }) {
+    // The price depends on the model, resolution, length and (for some) sound; not the prompt.
+    estimate({ model, duration, resolution, audio, references }) {
       const m = FAL_VIDEO_MODELS.find((x) => x.id === (model ?? opts.model ?? 'seedance-2.0-fast'));
-      const rate = m && m.perSecond[nearest(m.resolutions, resolution, '720p')];
-      if (!m || rate == null) return undefined;
-      const seconds = Math.round(Math.min(m.maxDuration ?? 15, Math.max(m.minDuration ?? 4, duration ?? 5)));
-      return { amount: Math.round(rate * seconds * 100) / 100, unit: 'USD', basis: FAL_PRICE_BASIS };
+      if (!m) return undefined;
+      const table = audio && m.audio && m.perSecondAudio ? m.perSecondAudio : m.perSecond;
+      const rate = table[nearest(m.resolutions, resolution, '720p')] ?? table['*'];
+      if (rate == null) return undefined;
+      const seconds = lengthWith(m, duration, Math.min(references ?? 0, m.maxReferences ?? 0));
+      return { amount: Math.round(rate * seconds * 100) / 100, unit: 'USD', basis: FAL_PRICE_BASIS, ...(seconds !== duration ? { seconds } : {}) };
     },
     key: { help: 'From fal.ai → Dashboard → Keys. Kept in this browser only and sent only to fal. Billed by fal.', ...fal.key },
     async generate(req: VideoRequest) {
-      const m = FAL_VIDEO_MODELS.find((x) => x.id === (req.model ?? opts.model)) ?? FAL_VIDEO_MODELS.find((x) => x.id === 'seedance-2.0-fast')!;
-      const refs = (req.references ?? []).filter(Boolean).slice(0, m.maxReferences);
-      const duration = Math.round(Math.min(m.maxDuration ?? 15, Math.max(m.minDuration ?? 4, req.duration ?? 5)));
-      const base = {
-        prompt: req.prompt,
-        duration: String(duration),
-        aspect_ratio: nearest(m.aspects, req.aspect, '16:9'),
-        resolution: nearest(m.resolutions, req.resolution, '720p'),
-        generate_audio: req.audio ?? false,
-      };
-      let endpoint: string;
+      const m = pick(req.model);
+      const refs = (req.references ?? []).filter(Boolean).slice(0, m.maxReferences ?? 0);
+      const seconds = lengthWith(m, req.duration, refs.length);
+      const aspect = nearest(m.aspects, req.aspect, '16:9');
+      const resolution = nearest(m.resolutions, req.resolution, '720p');
+      const sound = m.audio ? { generate_audio: req.audio ?? false } : {};
+      let prompt = req.prompt;
+      if (m.family === 'wan' && prompt.length > 1500) throw new Error(`Wan takes prompts of up to 1,500 characters; this one has ${prompt.length}. Shorten it, or pick another model.`);
+      // Veo doesn't name its reference pictures: say which is which in words.
+      if (m.family === 'veo') prompt = prompt.replace(/@Image(\d+)/g, 'reference image $1');
+      const first = !refs.length && req.firstFrame ? req.firstFrame : undefined;
+      req.onProgress?.(refs.length || first ? 'Sending pictures to fal…' : 'Sending to fal…');
+      const url = (src: string) => fal.fileUrl(src, req.signal);
+      const urls = await Promise.all(refs.map(url));
+      const firstUrl = first ? await url(first) : undefined;
+      const lastUrl = first && req.lastFrame ? await url(req.lastFrame) : undefined;
+      let endpoint = m.endpoints.text;
       let input: Record<string, unknown>;
-      req.onProgress?.(refs.length || req.firstFrame ? 'Sending pictures to fal…' : 'Sending to fal…');
-      if (refs.length) {
-        endpoint = m.endpoints.reference;
-        input = { ...base, image_urls: await Promise.all(refs.map((r) => fal.fileUrl(r, req.signal))) };
-      } else if (req.firstFrame) {
-        endpoint = m.endpoints.image;
-        input = { ...base, image_url: await fal.fileUrl(req.firstFrame, req.signal), ...(req.lastFrame ? { end_image_url: await fal.fileUrl(req.lastFrame, req.signal) } : {}) };
-      } else {
-        endpoint = m.endpoints.text;
-        input = base;
+      switch (m.family) {
+        case 'seedance': {
+          const base = { prompt, duration: String(seconds), aspect_ratio: aspect, resolution, ...sound };
+          if (urls.length) (endpoint = m.endpoints.reference!), (input = { ...base, image_urls: urls });
+          else if (firstUrl) (endpoint = m.endpoints.image), (input = { ...base, image_url: firstUrl, ...(lastUrl ? { end_image_url: lastUrl } : {}) });
+          else input = base;
+          break;
+        }
+        case 'kling': {
+          const base = { prompt, duration: String(seconds), ...sound };
+          if (urls.length) (endpoint = m.endpoints.reference!), (input = { ...base, aspect_ratio: aspect, image_urls: urls });
+          else if (firstUrl) (endpoint = m.endpoints.image), (input = { ...base, image_url: firstUrl, ...(lastUrl ? { end_image_url: lastUrl } : {}) });
+          else input = { ...base, aspect_ratio: aspect };
+          break;
+        }
+        case 'veo': {
+          const base = { prompt, aspect_ratio: aspect, duration: `${seconds}s`, resolution, ...sound };
+          if (urls.length) (endpoint = m.endpoints.reference!), (input = { ...base, image_urls: urls });
+          else if (firstUrl && lastUrl) (endpoint = m.endpoints.firstLast!), (input = { ...base, first_frame_url: firstUrl, last_frame_url: lastUrl });
+          else if (firstUrl) (endpoint = m.endpoints.image), (input = { ...base, image_url: firstUrl });
+          else input = base;
+          break;
+        }
+        case 'wan': {
+          const base = { prompt, resolution, duration: String(seconds) };
+          if (firstUrl) (endpoint = m.endpoints.image), (input = { ...base, image_url: firstUrl });
+          else input = { ...base, aspect_ratio: aspect };
+          break;
+        }
+        case 'minimax': {
+          // Our prompts are already written out in full: no rewriting.
+          const base = { prompt, duration: seconds, resolution: resolution.toUpperCase(), prompt_expansion_mode: 'disabled' };
+          if (firstUrl) (endpoint = m.endpoints.image), (input = { ...base, image_url: firstUrl, ...(lastUrl ? { end_image_url: lastUrl } : {}) });
+          else input = { ...base, aspect_ratio: aspect };
+          break;
+        }
       }
-      const job = await fal.submit(endpoint, input, req.signal);
+      const job = await fal.submit(endpoint, input!, req.signal);
       req.onSubmitted?.(job);
       return clipOf(await fal.wait(job, req.signal, req.onProgress));
     },

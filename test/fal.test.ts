@@ -100,6 +100,47 @@ describe('fal video (Seedance)', () => {
     expect(fal.calls.some((c) => c.url === 'https://queue.fal.run/x/y/requests/req-1/status')).toBe(true);
   });
 
+  it('runs Kling, Veo, Wan and MiniMax with each one’s own inputs', async () => {
+    const fal = fakeFal({ video: { url: 'https://v/c.mp4' } });
+    const gen = falVideoGenerator({ apiKey: 'k', fetch: fal.fetch, pollMs: 1 });
+    const refs = ['https://cdn.test/1.jpg', 'https://cdn.test/2.jpg', 'https://cdn.test/3.jpg', 'https://cdn.test/4.jpg', 'https://cdn.test/5.jpg'];
+    // Kling O3: @Image1… like Seedance, up to 4.
+    await gen.generate({ prompt: 'Theo (@Image1)', references: refs, duration: 20, aspect: '4:3', model: 'kling-o3-pro', audio: true });
+    // Veo 3.1: up to 3, 8 s with references, the @Image tags in words.
+    await gen.generate({ prompt: 'Theo (@Image1) by @Image2', references: refs, duration: 4, resolution: '1080p', aspect: '9:16', model: 'veo-3.1-fast' });
+    // Veo from a first and a last frame; Kling from a first frame.
+    await gen.generate({ prompt: 'carry on', firstFrame: 'https://cdn.test/a.jpg', lastFrame: 'https://cdn.test/b.jpg', duration: 5, model: 'veo-3.1' });
+    await gen.generate({ prompt: 'carry on', firstFrame: 'https://cdn.test/a.jpg', duration: 3, model: 'kling-o3-standard' });
+    // Wan and MiniMax take no reference pictures: the first frame, or the prompt only.
+    await gen.generate({ prompt: 'carry on', references: refs, firstFrame: 'https://cdn.test/a.jpg', duration: 12, resolution: '480p', model: 'wan-2.6' });
+    await gen.generate({ prompt: 'words', references: refs, duration: 7.4, resolution: '768p', aspect: '21:9', model: 'minimax-h3-max' });
+    const [kl, ve, fl, ki, wa, mm] = fal.posts();
+    expect(kl.url).toBe('https://queue.fal.run/fal-ai/kling-video/o3/pro/reference-to-video');
+    expect(kl.body).toEqual({ prompt: 'Theo (@Image1)', duration: '15', generate_audio: true, aspect_ratio: '1:1', image_urls: refs.slice(0, 4) });
+    expect(ve.url).toBe('https://queue.fal.run/fal-ai/veo3.1/fast/reference-to-video');
+    expect(ve.body).toEqual({ prompt: 'Theo (reference image 1) by reference image 2', aspect_ratio: '9:16', duration: '8s', resolution: '1080p', generate_audio: false, image_urls: refs.slice(0, 3) });
+    expect(fl.url).toBe('https://queue.fal.run/fal-ai/veo3.1/first-last-frame-to-video');
+    expect(fl.body).toMatchObject({ first_frame_url: 'https://cdn.test/a.jpg', last_frame_url: 'https://cdn.test/b.jpg', duration: '6s' });
+    expect(ki.url).toBe('https://queue.fal.run/fal-ai/kling-video/o3/standard/image-to-video');
+    expect(ki.body).toEqual({ prompt: 'carry on', duration: '3', generate_audio: false, image_url: 'https://cdn.test/a.jpg' });
+    expect(wa.url).toBe('https://queue.fal.run/wan/v2.6/image-to-video');
+    expect(wa.body).toEqual({ prompt: 'carry on', resolution: '720p', duration: '10', image_url: 'https://cdn.test/a.jpg' });
+    expect(mm.url).toBe('https://queue.fal.run/minimax/h3-max/text-to-video');
+    expect(mm.body).toEqual({ prompt: 'words', duration: 7, resolution: '768P', prompt_expansion_mode: 'disabled', aspect_ratio: '21:9' });
+    await expect(gen.generate({ prompt: 'x'.repeat(1600), model: 'wan-2.6' })).rejects.toThrow(/up to 1,500 characters; this one has 1600/);
+  });
+
+  it('prices sound where it costs more, and Veo’s 8-second reference clips', () => {
+    const gen = falVideoGenerator({ apiKey: 'k' });
+    expect(gen.estimate!({ model: 'kling-o3-pro', duration: 5 })!.amount).toBe(0.56); // 5 × $0.112
+    expect(gen.estimate!({ model: 'kling-o3-pro', duration: 5, audio: true })!.amount).toBe(0.7); // 5 × $0.14
+    expect(gen.estimate!({ model: 'veo-3.1', duration: 4, resolution: '1080p', audio: true })!.amount).toBe(1.6);
+    expect(gen.estimate!({ model: 'veo-3.1-fast', duration: 4, resolution: '720p', references: 2 })).toMatchObject({ amount: 0.8, seconds: 8 }); // 8 s
+    expect(gen.estimate!({ model: 'wan-2.6', duration: 7, resolution: '1080p', audio: true })!.amount).toBe(0.75); // 5 s; no sound option
+    expect(gen.estimate!({ model: 'minimax-h3-max', duration: 5, resolution: '768p' })!.amount).toBe(0.4);
+    expect(gen.estimate!({ model: 'seedance-2.0-mini', duration: 5, resolution: '480p', audio: true })!.amount).toBe(0.36); // the same with sound
+  });
+
   it('estimates from fal’s listed prices: model, resolution and length decide it', () => {
     const gen = falVideoGenerator({ apiKey: 'k' });
     expect(gen.estimate!({ model: 'seedance-2.0-mini', duration: 5, resolution: '480p' })).toEqual({ amount: 0.36, unit: 'USD', basis: "fal's listed price" });
