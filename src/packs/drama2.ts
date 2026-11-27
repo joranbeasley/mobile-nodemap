@@ -608,7 +608,15 @@ const sceneNode = defineNode({
   type: D2.scene,
   editOnCard: false, // for looking; ✎ Edit opens its sheet
   // ▶ Preview: its shots in order, clips crossfading (stills for shots without one).
-  cardActions: [{ label: '▶ Preview', run: (scene: NodeInstance, graph: Graph) => playSequence(sceneSequence(graph, scene), { title: `Preview: ${nodeTitle(graph, scene)}` }) }],
+  cardActions: [
+    { label: '▶ Preview', run: (scene: NodeInstance, graph: Graph) => playSequence(sceneSequence(graph, scene), { title: `Preview: ${nodeTitle(graph, scene)}` }) },
+    // ⬇ Save video: the same preview, recorded as it plays into one file (where the browser can record).
+    {
+      label: '⬇ Save video',
+      when: () => typeof MediaRecorder !== 'undefined' && typeof HTMLCanvasElement !== 'undefined' && 'captureStream' in HTMLCanvasElement.prototype,
+      run: (scene: NodeInstance, graph: Graph) => playSequence(sceneSequence(graph, scene), { title: nodeTitle(graph, scene), record: true }),
+    },
+  ],
   title: 'Scene',
   category: 'Story',
   color: '#5f3dc4',

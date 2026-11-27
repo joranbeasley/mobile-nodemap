@@ -225,8 +225,8 @@ export const css = /* css */ `
 .nm-card-edit:hover, .nm-card-edit:focus-visible { border-color: var(--_accent); }
 /* Zoomed out they can't be tapped: keep the row's place, hide the buttons. */
 .nm-overview .nm-card-row { visibility: hidden; }
-.nm-card-row .nm-card-action { margin-right: auto; }
-.nm-card-row .nm-card-action + .nm-card-action { margin-right: 0; }
+/* A card's actions (▶ ⬇ 🎬) on the left, its own buttons (ⓘ ✎) on the right. */
+.nm-card-row .nm-card-action:not(:has(+ .nm-card-action)) { margin-right: auto; }
 /* Links to other cards (chips) still jump. */
 .nm-node.nm-summary :is(input, select, textarea, button, label, summary):not([data-nm-live], [data-nm-open]) { pointer-events: none !important; }
 .nm-node.nm-summary :is(textarea, input) { resize: none; caret-color: transparent; }

@@ -190,7 +190,7 @@ export interface SequenceItem {
  * where a shot continues the one before), shots without a clip show their frame (or their
  * words) for their length, like an animatic. ⏮ ⏯ ⏭ and ✕; Esc or leaving full screen closes it.
  */
-export function playSequence(items: SequenceItem[], opts: { title?: string; fade?: number } = {}): void {
+export function playSequence(items: SequenceItem[], opts: { title?: string; fade?: number; record?: boolean } = {}): void {
   if (!items.length) return;
   const fade = opts.fade ?? 0.6;
   const box = document.createElement('div');
@@ -244,10 +244,13 @@ export function playSequence(items: SequenceItem[], opts: { title?: string; fade
   };
   const show = (to: number, cut: boolean) => {
     clearTimeout(timer);
-    if (to >= items.length) return done();
+    if (to >= items.length) return rec ? rec.finish() : done();
     i = Math.max(0, to);
-    const it = items[i];
-    cap.textContent = `${it.label} · ${i + 1}/${items.length}`;
+    const raw = items[i];
+    // Recording can only read clips this site serves (kept clips); others show as their still.
+    const it = rec && raw.video && !readable(raw.video) ? { ...raw, video: undefined } : raw;
+    cap.textContent = `${rec ? '● Recording · ' : ''}${it.label} · ${i + 1}/${items.length}`;
+    if (rec) rec.still(it.video ? undefined : it);
     for (const el of [...vids, still]) el.style.transition = cut ? 'none' : `opacity ${fade}s`;
     if (it.video) {
       layer = 1 - layer;
@@ -304,6 +307,7 @@ export function playSequence(items: SequenceItem[], opts: { title?: string; fade
   let shown = false;
   function done() {
     clearTimeout(timer);
+    rec?.cancel();
     document.removeEventListener('keydown', onKey);
     document.removeEventListener('fullscreenchange', onFull);
     for (const v of vids) (v.pause(), v.removeAttribute('src'), v.load());
@@ -328,9 +332,145 @@ export function playSequence(items: SequenceItem[], opts: { title?: string; fade
   other.muted = true;
   void other.play()?.catch?.(() => undefined);
   other.pause();
+  const rec = opts.record ? recorder() : undefined;
+  if (rec) for (const b of [prev, pause, next]) b.hidden = true; // the recording plays straight through
   if (box.requestFullscreen) void box.requestFullscreen().catch(() => undefined);
   show(0, true);
+
+  /**
+   * ⬇ Save video: what plays is drawn onto a canvas (crossfades too) and recorded with the
+   * clips' sound, in real time; at the end the file is offered to download or share.
+   */
+  function recorder() {
+    const W = 1280;
+    const H = 720;
+    const canvas = Object.assign(document.createElement('canvas'), { width: W, height: H });
+    const g2 = canvas.getContext('2d')!;
+    const img = new Image();
+    let stillItem: SequenceItem | undefined;
+    // The clips' sound, mixed: to the recording and still to the speakers.
+    const AC = (globalThis as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext }).AudioContext ?? (globalThis as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    const ac = AC ? new AC() : undefined;
+    const dest = ac?.createMediaStreamDestination();
+    if (ac && dest)
+      for (const v of vids) {
+        const src = ac.createMediaElementSource(v);
+        src.connect(dest);
+        src.connect(ac.destination);
+      }
+    // H.264 MP4 plays everywhere (iPhones too); else WebM, which browsers and VLC play. A plain
+    // "video/mp4" can mean VP9 inside MP4, which iPhones can't play, so it comes last.
+    const type =
+      ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a', 'video/mp4;codecs=avc1', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'].find((t) =>
+        globalThis.MediaRecorder?.isTypeSupported?.(t),
+      ) ?? '';
+    const stream = new MediaStream([...canvas.captureStream(30).getVideoTracks(), ...(dest?.stream.getAudioTracks() ?? [])]);
+    const mr = new MediaRecorder(stream, { ...(type ? { mimeType: type } : {}), videoBitsPerSecond: 5_000_000 });
+    const chunks: Blob[] = [];
+    mr.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    let keep = true;
+    const started = Date.now();
+    // Fit a picture into the frame (letterboxed), like the player shows it.
+    const fit = (el: CanvasImageSource, w: number, h: number) => {
+      if (!w || !h) return;
+      const k = Math.min(W / w, H / h);
+      g2.drawImage(el, (W - w * k) / 2, (H - h * k) / 2, w * k, h * k);
+    };
+    let raf = 0;
+    const frame = () => {
+      g2.globalAlpha = 1;
+      g2.fillStyle = '#000';
+      g2.fillRect(0, 0, W, H);
+      for (const v of vids) {
+        const a = Number(getComputedStyle(v).opacity);
+        if (a > 0.01 && v.readyState >= 2) ((g2.globalAlpha = a), fit(v, v.videoWidth, v.videoHeight));
+      }
+      const a = Number(getComputedStyle(still).opacity);
+      if (a > 0.01 && stillItem) {
+        g2.globalAlpha = a;
+        if (stillItem.image && img.complete && img.naturalWidth) fit(img, img.naturalWidth, img.naturalHeight);
+        else {
+          g2.fillStyle = '#fff';
+          g2.font = '500 40px system-ui, sans-serif';
+          g2.textAlign = 'center';
+          const lines = String(stillItem.text ?? stillItem.label).split('\n');
+          lines.forEach((l, k) => g2.fillText(l, W / 2, H / 2 + (k - (lines.length - 1) / 2) * 52, W - 120));
+        }
+      }
+      cap.textContent = cap.textContent!.replace(/^● Recording( \d+:\d\d)? · /, `● Recording ${elapsed(started)} · `);
+      raf = requestAnimationFrame(frame);
+    };
+    // Recording needs the page in front: if it goes to the background, stop and say so.
+    const onHide = () => {
+      if (document.visibilityState !== 'hidden') return;
+      cancel();
+      cap.textContent = 'Recording stopped: keep the screen on and the app in front while it records.';
+    };
+    document.addEventListener('visibilitychange', onHide);
+    const stopAll = () => {
+      cancelAnimationFrame(raf);
+      document.removeEventListener('visibilitychange', onHide);
+      if (mr.state !== 'inactive') mr.stop();
+    };
+    function cancel() {
+      keep = false;
+      stopAll();
+      void ac?.close();
+    }
+    mr.onstop = () => {
+      void ac?.close();
+      if (!keep) return;
+      const blob = new Blob(chunks, { type: (mr.mimeType || type || 'video/webm').split(';')[0] });
+      const ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
+      const name = `${(opts.title ?? 'preview').replace(/^Preview: /, '').replace(/[^\w .-]+/g, ' ').replace(/\s+/g, ' ').trim() || 'preview'}.${ext}`;
+      const url = URL.createObjectURL(blob);
+      // The end: the file, to download or share (where the phone can).
+      for (const v of vids) v.style.opacity = '0';
+      still.style.opacity = '0';
+      const end = document.createElement('div');
+      end.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;font:500 16px/1.4 system-ui,sans-serif;text-align:center;padding:24px;';
+      const preview = Object.assign(document.createElement('video'), { src: url, controls: true, playsInline: true });
+      preview.style.cssText = 'max-width:100%;max-height:55vh;border-radius:8px;background:#111;';
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;justify-content:center;';
+      const pill = 'padding:10px 18px;border-radius:999px;border:0;font:600 15px system-ui,sans-serif;cursor:pointer;text-decoration:none;';
+      const dl = Object.assign(document.createElement('a'), { href: url, download: name, textContent: '⬇ Download' });
+      dl.style.cssText = pill + 'background:#fff;color:#111;';
+      row.append(dl);
+      const file = new File([blob], name, { type: blob.type });
+      const nav = navigator as Navigator & { canShare?: (d: { files: File[] }) => boolean };
+      if (nav.canShare?.({ files: [file] })) {
+        const sh = Object.assign(document.createElement('button'), { type: 'button', textContent: '↗ Share' });
+        sh.style.cssText = pill + 'background:rgba(255,255,255,.18);color:#fff;';
+        sh.addEventListener('click', () => void navigator.share({ files: [file], title: name }).catch(() => undefined));
+        row.append(sh);
+      }
+      end.append(Object.assign(document.createElement('div'), { textContent: `${name} · ${(blob.size / 1048576).toFixed(1)} MB` }), preview, row);
+      box.append(end);
+      cap.textContent = '';
+      close.addEventListener('click', () => URL.revokeObjectURL(url));
+    };
+    mr.start(1000);
+    raf = requestAnimationFrame(frame);
+    return {
+      /** The still showing now (or none while a clip plays). */
+      still(it: SequenceItem | undefined) {
+        stillItem = it;
+        if (it?.image) img.src = it.image;
+      },
+      /** The sequence ended: stop recording; the file is offered. */
+      finish() {
+        clearTimeout(timer);
+        stopAll();
+        for (const v of vids) v.pause();
+      },
+      cancel,
+    };
+  }
 }
+
+/** Clips a page can read to record (its own site's, or local blobs and data). */
+const readable = (u: string) => !/^https?:\/\//i.test(u) || (typeof location !== 'undefined' && u.startsWith(location.origin + '/'));
 
 /** Play a clip full screen, with sound (from a tap, so browsers allow the sound). */
 export function playClip(url: string, poster?: string): void {
