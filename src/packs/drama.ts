@@ -113,6 +113,8 @@ const liveImages = new Map<string, Pending>();
 const IMAGE_PROGRESS = 'dr-image-progress';
 /** Dispatched on a picture or clip field to open its generate panel (the cards' ✨ / 🎬 buttons). */
 export const GENERATE_EVENT = 'dr-generate';
+/** Dispatched on a clip field to open ✏️ Change this clip. */
+export const EDIT_EVENT = 'dr-edit-clip';
 
 /**
  * A prompt laid out for reading on a phone: its parts under headings (style, characters,
@@ -1031,14 +1033,200 @@ export const clipFrameParam: ParamKind = {
           }),
         );
       } else if (getVideoGenerators().length) {
-        // The same button folds the panel away again.
-        const b = panel ? button('✕ Close', 'Close the clip panel', () => openGen()) : button('🎬 Generate clip', 'Generate a clip for this shot', () => openGen());
-        b.setAttribute('aria-expanded', String(!!panel));
+        // The same button folds its panel away again.
+        const b = panel && panelKind === 'gen' ? button('✕ Close', 'Close the clip panel', () => openGen()) : button('🎬 Generate clip', 'Generate a clip for this shot', () => ((panelKind = 'gen'), openGen()));
+        b.setAttribute('aria-expanded', String(!!panel && panelKind === 'gen'));
         wrap.append(b);
+        // A clip to change (a kept copy or a link), and a service that can.
+        const url = ctx.graph.nodes.get(ctx.node.id)?.params.clipUrl;
+        if (typeof url === 'string' && url && getVideoGenerators().some((g) => g.edit)) {
+          const e = panel && panelKind === 'edit' ? button('✕ Close', 'Close the change panel', () => openEdit()) : button('✏️ Change this clip', 'Change this clip: say what should be different', () => openEdit());
+          e.setAttribute('aria-expanded', String(!!panel && panelKind === 'edit'));
+          wrap.append(e);
+        }
       }
       wrap.append(status);
       if (panel) wrap.append(panel);
       if (history) wrap.append(history);
+    };
+
+    /**
+     * ✏️ Change this clip: say what should be different; the service keeps the rest (Kling O3
+     * edit takes up to 4 of the shot's pictures). The changed clip becomes the shot's clip; what
+     * made each one stays in 🕘 How these were made.
+     */
+    const openEdit = () => {
+      if (panel) {
+        const was = panelKind;
+        abort?.abort();
+        panel = undefined;
+        if (was === 'edit') return draw();
+      }
+      panelKind = 'edit';
+      const gen = getVideoGenerators().find((g) => g.edit && g.id === chosen?.id) ?? getVideoGenerators().find((g) => g.edit);
+      const url = ctx.graph.nodes.get(ctx.node.id)?.params.clipUrl;
+      if (!gen?.edit || typeof url !== 'string' || !url) return;
+      const ps = ctx.graph.nodes.get(ctx.node.id)!.params;
+      const seconds = Number(ps.clipSeconds) || Number(ps.duration) || 5;
+      const el = (tag: string, attrs: Record<string, string> = {}, text = '') => {
+        const x = document.createElement(tag);
+        for (const [k, v] of Object.entries(attrs)) x.setAttribute(k, v);
+        if (text) x.textContent = text;
+        return x;
+      };
+      const box = el('div', { class: 'dr-gen-panel dr-clip-panel dr-edit-panel', role: 'group', 'aria-label': `Change this clip with ${gen.name}` });
+      const models = gen.editModels ?? [];
+      const model = el('select', { 'aria-label': 'Model' }) as HTMLSelectElement;
+      for (const m of models) model.append(Object.assign(document.createElement('option'), { value: m.id, textContent: m.label }));
+      const hint = el('small', { class: 'dr-gen-refs-note' });
+      const say = el('textarea', { rows: '3', 'aria-label': 'What should change', placeholder: 'What should be different? e.g. The stage is empty: no chairs. Everything else stays.' }) as HTMLTextAreaElement;
+      const sound = el('label', { class: 'dr-clip-sound' });
+      const keep = el('input', { type: 'checkbox', 'aria-label': 'Keep the sound' }) as HTMLInputElement;
+      keep.checked = true;
+      sound.append(keep, ' keep the sound');
+      // The shot's pictures (cast first), to keep faces and costumes right: up to the model's limit.
+      let sug: ShotClipSuggestion | undefined;
+      try {
+        sug = (ctx.param as { video?: (node: NodeInstance, graph: Graph) => ShotClipSuggestion | undefined }).video?.(ctx.node, ctx.graph);
+      } catch {
+        sug = undefined;
+      }
+      const pics = (sug?.references ?? []).filter((r) => r.card && !/frame|storyboard/i.test(r.label));
+      const on = new Set<string>();
+      const strip = el('div', { class: 'dr-gen-refs' });
+      const price = el('small', { class: 'dr-gen-cost', role: 'status' });
+      const st = el('div', { class: 'dr-gen-status', role: 'status' });
+      const current = () => models.find((m) => m.id === model.value) ?? models[0];
+      const fit = () => {
+        const m = current();
+        hint.textContent = m?.hint ?? '';
+        const max = m?.maxReferences ?? 0;
+        // Too many on for this model: the first ones stay.
+        [...on].slice(max).forEach((x) => on.delete(x));
+        if (!on.size) pics.slice(0, max).forEach((r) => on.add(r.src));
+        strip.hidden = max === 0;
+        strip.querySelectorAll<HTMLElement>('.dr-gen-ref').forEach((b) => b.setAttribute('aria-pressed', String(on.has(b.dataset.src!))));
+        keep.disabled = !m?.audio;
+        const e = gen.editEstimate?.({ model: m?.id, seconds });
+        price.textContent = e ? `About ${e.unit === 'USD' ? `$${e.amount.toFixed(2)}` : `${e.amount} credits`} for this ${Math.round(seconds)} s clip (${e.basis})` : '';
+        if (m?.minSeconds && seconds < m.minSeconds) price.textContent += ` · this model needs clips of at least ${m.minSeconds} s`;
+        if (m?.maxSeconds && seconds > m.maxSeconds) price.textContent += ` · this model takes clips of up to ${m.maxSeconds} s`;
+      };
+      for (const r of pics) {
+        const b = el('button', { type: 'button', class: 'dr-gen-ref', title: r.label, 'aria-label': r.label, 'aria-pressed': 'false' }) as HTMLButtonElement;
+        b.dataset.src = r.src;
+        b.append(el('img', { src: r.src, alt: '' }), el('span', {}, r.label));
+        b.addEventListener('click', () => {
+          const max = current()?.maxReferences ?? 0;
+          if (on.has(r.src)) on.delete(r.src);
+          else if (on.size < max) on.add(r.src);
+          else return void (st.textContent = `${current()?.label} takes up to ${max} pictures: switch one off first.`);
+          b.setAttribute('aria-pressed', String(on.has(r.src)));
+        });
+        strip.append(b);
+      }
+      model.addEventListener('change', fit);
+      const go = el('button', { type: 'button', class: 'dr-gen-go' }, `✏️ Change it with ${gen.name}`) as HTMLButtonElement;
+      const cancel = el('button', { type: 'button', class: 'dr-gen-cancel' }, 'Cancel') as HTMLButtonElement;
+      cancel.addEventListener('click', () => openEdit());
+      const row = el('div', { class: 'dr-gen-row' });
+      row.append(go, cancel);
+      go.addEventListener('click', async () => {
+        if (gen.key && !gen.key.get()) return void (st.textContent = `Add your ${gen.key.label} first (in 🎬 Generate clip).`);
+        const words = say.value.trim();
+        if (!words) return void (st.textContent = 'Say what should change first.');
+        const m = current();
+        st.textContent = '';
+        const e = gen.editEstimate?.({ model: m?.id, seconds });
+        if (!(await confirmSpend(go, gen.name, Promise.resolve(e && { amount: e.amount, unit: e.unit }), gen.balance?.()))) return;
+        const sent = pics.filter((r) => on.has(r.src) && (m?.maxReferences ?? 0) > 0);
+        // The model ties pictures to the words by @Image1…, and the clip by @Video1: say which is which.
+        const prompt = [
+          words,
+          ...(m?.id.startsWith('kling') ? [`Change only that in @Video1; keep everything else as it is: the people, their positions, the camera, the timing${keep.checked ? ' and the sound' : ''}.`] : []),
+          ...(sent.length ? [`Pictures: ${sent.map((r, i) => `@Image${i + 1} is ${r.label}`).join('; ')}.`] : []),
+        ].join('\n');
+        abort = new AbortController();
+        go.disabled = true;
+        making = { text: `Asking ${gen.name}…`, since: Date.now() };
+        share();
+        draw();
+        let logged = false;
+        const record = (result?: string[]) => {
+          if (logged) return;
+          logged = true;
+          logGeneration({
+            at: Date.now(),
+            kind: 'clip',
+            node: ctx.node.id,
+            param: ctx.param.name,
+            service: gen.name,
+            model: m?.label,
+            prompt,
+            references: sent.map((r) => ({ label: r.label, ...(linkOnly(r.src) ? { src: r.src } : {}) })),
+            settings: { change: true, from: linkOnly(url), duration: Math.round(seconds), sound: keep.checked && !keep.disabled },
+            ...(result ? { result } : {}),
+            ...(e ? { cost: `about ${e.unit === 'USD' ? `$${e.amount.toFixed(2)}` : `${e.amount} credits`}` } : {}),
+          });
+        };
+        let submitted = false;
+        try {
+          const refs = await Promise.all(sent.map((r) => referencePicture(r.src)));
+          const result = await gen.edit!({
+            video: url,
+            prompt,
+            references: refs,
+            model: m?.id,
+            keepAudio: keep.checked && !keep.disabled,
+            signal: abort.signal,
+            onProgress: (t, pc) => {
+              st.textContent = pc != null ? `${t} ${Math.round(pc)}%` : t;
+              progress(t, pc);
+            },
+            onSubmitted: (job) => {
+              record();
+              submitted = true;
+              collecting.add(`${ctx.node.id}:${job.startedAt}`);
+              ctx.graph.setParam(ctx.node.id, 'clipJob', job);
+            },
+          });
+          const clip = result.videos[0];
+          if (!clip) throw new Error(`${gen.name} returned no clip`);
+          record([clip]);
+          await collect(clip, result.cost ?? (e ? `about ${e.unit === 'USD' ? `$${e.amount.toFixed(2)}` : `${e.amount} credits`}` : ''), abort.signal);
+          panel = undefined;
+          draw();
+        } catch (err) {
+          if ((err as Error).name === 'AbortError') return;
+          if (submitted && (err as { code?: string }).code === 'pending') {
+            status.textContent = (err as Error).message;
+            panel = undefined;
+            return draw();
+          }
+          if (submitted) ctx.graph.setParam(ctx.node.id, 'clipJob', null);
+          st.textContent = (err as Error).message || 'Something went wrong';
+          go.disabled = false;
+        } finally {
+          making = undefined;
+          share();
+          if (wrap.isConnected) draw();
+        }
+      });
+      box.append(
+        el('small', { class: 'dr-gen-refs-note' }, 'Say what should be different; the rest of the clip stays.'),
+        say,
+        model,
+        hint,
+        ...(pics.length ? [strip, el('small', { class: 'dr-gen-refs-note' }, 'Pictures to keep faces, costumes and places right (tap to switch).')] : []),
+        sound,
+        price,
+        row,
+        st,
+      );
+      fit();
+      panel = box;
+      draw();
+      if (globalThis.matchMedia?.('(pointer: fine)').matches) say.focus({ preventScroll: true });
     };
 
     // A clip being generated is kept on the shot (clipJob) until it's collected, so a closed
@@ -1130,6 +1318,8 @@ export const clipFrameParam: ParamKind = {
 
     // 🎬 Generate clip: the shot's own Seedance prompt and pictures, sent to a video service.
     let panel: HTMLElement | undefined;
+    /** Which panel is open: 🎬 a new clip, or ✏️ a change to this one. */
+    let panelKind: 'gen' | 'edit' = 'gen';
     /** The clip being made, shown as a placeholder in the field. */
     let making: Pending | undefined;
     const progress = (text: string, percent?: number) => {
@@ -1148,9 +1338,11 @@ export const clipFrameParam: ParamKind = {
     };
     const openGen = () => {
       if (panel) {
+        const was = panelKind;
         abort?.abort();
         panel = undefined;
-        return draw();
+        if (was === 'gen') return draw();
+        panelKind = 'gen';
       }
       const gen = chosen;
       if (!gen) return;
@@ -1428,7 +1620,8 @@ export const clipFrameParam: ParamKind = {
       if (next !== value) ((value = next), draw());
     };
     // A card's 🎬 Clip button opens this field in a sheet, with its panel open.
-    wrap.addEventListener(GENERATE_EVENT, () => !panel && !jobOf() && openGen());
+    wrap.addEventListener(GENERATE_EVENT, () => !panel && !jobOf() && ((panelKind = 'gen'), openGen()));
+    wrap.addEventListener(EDIT_EVENT, () => !panel && !jobOf() && openEdit());
     // On the board the field shows more of the shot than its last frame (a job, the first frame,
     // the length): follow every change to the shot.
     if (ctx.place !== 'sheet') {

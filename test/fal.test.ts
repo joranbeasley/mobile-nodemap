@@ -180,6 +180,21 @@ describe('fal video (Seedance)', () => {
     expect(await ask({ amount: 30, unit: 'credits' }, 12, 'Meshy')).toMatch(/That’s more than your balance\.$/);
   });
 
+  it('changes a clip with Kling O3 edit or Lucy, uploading this site’s own clip first', async () => {
+    const fal = fakeFal({ video: { url: 'https://v3.fal.media/files/changed.mp4' } });
+    const gen = falVideoGenerator({ apiKey: 'k', fetch: fal.fetch, pollMs: 1 });
+    expect(gen.editModels!.map((m) => m.id)).toEqual(['kling-o3-pro-edit', 'kling-o3-standard-edit', 'lucy-edit-pro']);
+    expect(gen.editEstimate!({ model: 'kling-o3-pro-edit', seconds: 5 })!.amount).toBe(0.84);
+    const res = await gen.edit!({ video: 'api/clips/abc.mp4', prompt: 'No chairs.', references: ['https://cdn.test/theo.jpg', 'https://cdn.test/hall.jpg'], model: 'kling-o3-pro-edit', keepAudio: true });
+    expect(res.videos).toEqual(['https://v3.fal.media/files/changed.mp4']);
+    await gen.edit!({ video: 'https://v3.fal.media/files/first.mp4', prompt: 'Make it night.', references: ['https://cdn.test/theo.jpg'], model: 'lucy-edit-pro' });
+    const [kl, lu] = fal.posts();
+    expect(kl.url).toBe('https://queue.fal.run/fal-ai/kling-video/o3/pro/video-to-video/edit');
+    expect(kl.body).toEqual({ prompt: 'No chairs.', video_url: expect.stringMatching(/^https:\/\/v3\.fal\.media\/files\/up-/), image_urls: ['https://cdn.test/theo.jpg', 'https://cdn.test/hall.jpg'], keep_audio: true });
+    expect(lu.url).toBe('https://queue.fal.run/decart/lucy-edit/pro');
+    expect(lu.body).toEqual({ prompt: 'Make it night.', video_url: 'https://v3.fal.media/files/first.mp4', resolution: '720p', enhance_prompt: false }); // words only
+  });
+
   it('prices sound where it costs more, and Veo’s 8-second reference clips', () => {
     const gen = falVideoGenerator({ apiKey: 'k' });
     expect(gen.estimate!({ model: 'kling-o3-pro', duration: 5 })!.amount).toBe(0.56); // 5 × $0.112
@@ -452,6 +467,56 @@ describe('🎬 Generate clip on a shot', () => {
     ta.value = 'Storyboard frame, wide shot.\nAction: Theo bows.';
     toggle.click();
     expect(sheet.querySelector('.dr-gen-panel .dr-review-shot')!.textContent).toContain('Theo bows.');
+    editor.closePalette();
+    editor.destroy();
+  });
+
+  it('changes a clip: what should differ, the shot’s pictures, the cost, and the new clip on the shot', async () => {
+    let asked: import('../src/index').VideoEditRequest | undefined;
+    const saved: GenerationRecord[] = [];
+    setGenerationLog({ save: (r) => void saved.push(r), list: async () => [] });
+    setVideoGenerators([{
+      id: 'fake', name: 'Fake', models: [{ id: 'm', label: 'M' }],
+      async generate() {
+        return { videos: [] };
+      },
+      editModels: [{ id: 'kling-edit', label: 'Kling edit', maxReferences: 2, audio: true, hint: 'up to 2 pictures' }, { id: 'words', label: 'Words only', maxReferences: 0 }],
+      editEstimate: ({ seconds }) => ({ amount: 0.168 * seconds, unit: 'USD', basis: 'a guess' }),
+      async edit(req) {
+        asked = req;
+        return { videos: ['https://v/changed.mp4'] };
+      },
+    }]);
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      throw new TypeError('offline');
+    }) as typeof fetch;
+    const { g, editor } = mount();
+    g.setParam('s1b', 'clipUrl', 'https://v/first.mp4');
+    g.setParam('s1b', 'lastFrame', 'data:image/jpeg;base64,RU5E');
+    g.setParam('s1b', 'clipSeconds', 5);
+    await editor.setView('shots');
+    editor.openFieldSheet('s1b', 'lastFrame', '🎬 Clip');
+    await tick(360);
+    const field = () => inSheet('lastFrame');
+    [...field().querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === '✏️ Change this clip')!.click();
+    const panel = field().querySelector<HTMLElement>('.dr-edit-panel')!;
+    expect(panel.querySelector('.dr-gen-cost')!.textContent).toBe('About $0.84 for this 5 s clip (a guess)');
+    // The shot's pictures (cast, place, props), the first 2 on.
+    const pics = [...panel.querySelectorAll<HTMLElement>('.dr-gen-ref')];
+    expect(pics.filter((b) => b.getAttribute('aria-pressed') === 'true')).toHaveLength(2);
+    panel.querySelector<HTMLTextAreaElement>('textarea')!.value = 'The stage is empty: no chairs.';
+    panel.querySelector<HTMLButtonElement>('.dr-gen-go')!.click();
+    await pressConfirm();
+    await tick(30);
+    expect(asked).toMatchObject({ video: 'https://v/first.mp4', model: 'kling-edit', keepAudio: true });
+    expect(asked!.references).toHaveLength(2);
+    expect(asked!.prompt).toMatch(/^The stage is empty: no chairs\.\nChange only that in @Video1; keep everything else as it is.*\nPictures: @Image1 is .+; @Image2 is .+\.$/s);
+    // The changed clip is the shot's now, and what made it is kept.
+    expect(g.nodes.get('s1b')!.params.clipUrl).toBe('https://v/changed.mp4');
+    expect(saved[0]).toMatchObject({ kind: 'clip', node: 's1b', model: 'Kling edit', settings: { change: true, from: 'https://v/first.mp4' }, result: ['https://v/changed.mp4'] });
+    globalThis.fetch = realFetch;
+    setGenerationLog(null);
     editor.closePalette();
     editor.destroy();
   });

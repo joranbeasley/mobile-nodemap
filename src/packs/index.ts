@@ -10,6 +10,6 @@ export type { SeedanceOptions, SeedanceScript, SeedanceAsset, SeedanceShot, Seed
 export { drama2Pack, drama2Engine, drama2View, drama2Lists, toDrama, fromDrama, refParam, refsParam, wardrobeParam, nodeTitle, refsOf, referrers, sceneSequence, wearerOf, outfitsOf, dressOf, castOf, sceneOfShot, episodeOfScene, type Dress, type Wardrobe, D2 } from './drama2.js';
 export type { Drama2List, Drama2Link } from './drama2.js';
 export { setImageGenerator, setImageGenerators, getImageGenerator, getImageGenerators, meshyImageGenerator, MESHY_IMAGE_MODELS } from './image-generation.js';
-export { setVideoGenerators, getVideoGenerators, type VideoGenerator, type VideoRequest, type VideoResult, type VideoModel, type VideoEstimate, type VideoJob } from './video-generation.js';
-export { falVideoGenerator, falImageGenerator, FAL_VIDEO_MODELS, FAL_IMAGE_MODELS, FAL_PRICE_BASIS, type FalOptions } from './fal.js';
+export { setVideoGenerators, getVideoGenerators, type VideoGenerator, type VideoRequest, type VideoResult, type VideoModel, type VideoEstimate, type VideoJob, type VideoEditRequest, type VideoEditModel } from './video-generation.js';
+export { falVideoGenerator, falImageGenerator, FAL_VIDEO_MODELS, FAL_VIDEO_EDIT_MODELS, FAL_IMAGE_MODELS, FAL_PRICE_BASIS, type FalOptions } from './fal.js';
 export type { ImageGenerator, ImageRequest, ImageResult } from './image-generation.js';

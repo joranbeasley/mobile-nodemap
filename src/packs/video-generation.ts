@@ -36,6 +36,36 @@ export interface VideoRequest {
   onSubmitted?: (job: VideoJob) => void;
 }
 
+/** Change an existing clip: what to change, the clip, and pictures to work from. */
+export interface VideoEditRequest {
+  /** The clip to change (a link the service can fetch, or this site's own, which is uploaded). */
+  video: string;
+  /** What should change (the service is told to keep the rest). */
+  prompt: string;
+  /** Pictures to work from (the prompt can call them @Image1…), where the model takes them. */
+  references?: string[];
+  model?: string;
+  /** Keep the clip's sound, where the model can. */
+  keepAudio?: boolean;
+  signal?: AbortSignal;
+  onProgress?: (status: string, percent?: number) => void;
+  onSubmitted?: (job: VideoJob) => void;
+}
+
+/** A model that changes clips. */
+export interface VideoEditModel {
+  id: string;
+  label: string;
+  hint?: string;
+  maxReferences?: number;
+  /** Can keep the clip's sound. */
+  audio?: boolean;
+  /** Clips it takes (seconds), and the smallest height (pixels). */
+  minSeconds?: number;
+  maxSeconds?: number;
+  minHeight?: number;
+}
+
 /** A clip being made on a service: enough to collect it later. */
 export interface VideoJob {
   /** The generator's id. */
@@ -100,6 +130,11 @@ export interface VideoGenerator {
   estimate?(req: { model?: string; duration?: number; resolution?: string; aspect?: string; audio?: boolean; references?: number }): VideoEstimate | undefined;
   /** What's left on the account, in the estimate's unit (undefined when it can't be read). */
   balance?(opts?: { signal?: AbortSignal }): Promise<number | undefined>;
+  /** Models that change an existing clip (✏️ Change this clip). */
+  editModels?: VideoEditModel[];
+  edit?(req: VideoEditRequest): Promise<VideoResult>;
+  /** What changing a clip this long will probably cost. */
+  editEstimate?(req: { model?: string; seconds: number }): VideoEstimate | undefined;
   /** Where to see prices and make clips by hand. */
   site?: string;
 }

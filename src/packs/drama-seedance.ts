@@ -298,7 +298,12 @@ export function seedanceShot(graph: Graph, shotId: string, opts: SeedanceOptions
     const d = oneLine(String(l.params.description ?? ''));
     // The view this shot uses (its picked picture's, else the first's), named and described.
     const view = viewSentence(pictureView(l, referenceImages(l, node).picked));
-    lines.push(`Setting: ${dramaName(l)}${r.length ? ` (${r.join(', ')})` : ''}, ${l.params.setting === 'EXT' ? 'exterior' : 'interior'}, ${TIME[scene?.time ?? 'DAY'] ?? 'day'}.${d ? ` ${sentence(d)}` : ''}${view ? ` ${view}` : ''}`);
+    // Several pictures of the place: each token with the view it shows, where named.
+    const named = imageList(l.params.images)
+      .map((src) => ({ src, tag: refs.findIndex((x) => x.src === src) }))
+      .filter((x) => x.tag >= 0)
+      .map((x) => `@Image${x.tag + 1}${r.length > 1 && pictureView(l, x.src)?.name ? ` ${pictureView(l, x.src)!.name}` : ''}`);
+    lines.push(`Setting: ${dramaName(l)}${named.length ? ` (${named.join(', ')})` : ''}, ${l.params.setting === 'EXT' ? 'exterior' : 'interior'}, ${TIME[scene?.time ?? 'DAY'] ?? 'day'}.${d ? ` ${sentence(d)}` : ''}${view ? ` ${view}` : ''}`);
   }
   if (x.props.length) lines.push(`Props: ${x.props.map((p) => `${dramaName(p)}${refsOf(p).length ? ` (${refsOf(p).join(', ')})` : ''}`).join(', ')}.`);
   if (scene?.description) lines.push(`Scene context: ${sentence(scene.description)}`);
@@ -307,7 +312,8 @@ export function seedanceShot(graph: Graph, shotId: string, opts: SeedanceOptions
   if (x.characters.length) action.push(`On screen: ${and(x.characters.map(dramaName))}.`);
   if (x.description) action.push(sentence(x.description));
   const frames = continues ? [] : x.images.map((src) => refs.find((r) => r.src === src)).filter((r): r is SeedanceAsset => !!r);
-  if (frames.length) action.push(`Match the composition of ${frames.map((f) => `@Image${refs.indexOf(f) + 1}`).join(' and ')}.`);
+  // Every token says what it is: the model ties pictures to the prompt by @ImageN only.
+  if (frames.length) action.push(`Match the composition of ${frames.map((f) => `@Image${refs.indexOf(f) + 1}`).join(' and ')} (${frames.length > 1 ? 'the storyboard frames' : 'the storyboard frame'} for this shot).`);
   const at = (src?: string) => {
     const i = src ? refs.findIndex((r) => r.src === src) : -1;
     return i >= 0 ? `@Image${i + 1}` : undefined;

@@ -133,7 +133,7 @@ describe('Seedance export', () => {
     expect(shot.prompt).toContain('Maya is @Image1, stage manager');
     expect(shot.prompt).toContain('Setting: School hall (@Image5, @Image7), interior, day.');
     expect(shot.prompt).toContain('Shot (0–8 s): Wide shot, slow dolly-in.');
-    expect(shot.prompt).toContain('Match the composition of @Image6.');
+    expect(shot.prompt).toContain('Match the composition of @Image6 (the storyboard frame for this shot).');
     expect(shot.prompt).toContain('35mm film look'); // the season's style
     expect(shot.markdown).toMatch(/^# Ep 1 · Scene 1 · Shot 1: Seedance shot/);
     expect(shot.markdown).toContain('| @Image1 | ![Maya (character)](images/01-maya.jpg)');

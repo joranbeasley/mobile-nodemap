@@ -170,6 +170,16 @@ export const FAL_VIDEO_MODELS: FalVideoModel[] = [
     perSecond: { '480p': 0.05, '768p': 0.08, '1080p': 0.16 },
   },
 ];
+/**
+ * Models that change a clip on fal (✏️ Change this clip): Kling O3's video edit (your words and up
+ * to 4 pictures; keeps the sound) and Decart's Lucy Edit Pro (words only). fal's listed prices.
+ */
+export const FAL_VIDEO_EDIT_MODELS = [
+  { id: 'kling-o3-pro-edit', label: 'Kling O3 Pro edit', endpoint: 'fal-ai/kling-video/o3/pro/video-to-video/edit', perSecond: 0.168, maxReferences: 4, audio: true, minSeconds: 3, maxSeconds: 15, minHeight: 720, hint: 'Changes what you say and keeps the rest; up to 4 pictures; clips of 3–15 s at 720p or more' },
+  { id: 'kling-o3-standard-edit', label: 'Kling O3 Standard edit', endpoint: 'fal-ai/kling-video/o3/standard/video-to-video/edit', perSecond: 0.126, maxReferences: 4, audio: true, minSeconds: 3, maxSeconds: 15, minHeight: 720, hint: 'Cheaper; clips of 3–15 s at 720p or more' },
+  { id: 'lucy-edit-pro', label: 'Lucy Edit Pro', endpoint: 'decart/lucy-edit/pro', perSecond: 0.15, maxReferences: 0, audio: false, hint: 'Words only (clothes, setting, objects); any clip; 720p out' },
+];
+
 /** Where the prices come from (each model's https://fal.ai/models/<endpoint>/llms.txt, Nov 2026). They change: fal bills what it bills. */
 export const FAL_PRICE_BASIS = "fal's listed price";
 
@@ -379,6 +389,24 @@ export function falVideoGenerator(opts: FalOptions & { model?: string } = {}): V
       return { amount: Math.round(rate * seconds * 100) / 100, unit: 'USD', basis: FAL_PRICE_BASIS, ...(seconds !== duration ? { seconds } : {}) };
     },
     balance: ({ signal } = {}) => fal.balance(signal),
+    editModels: FAL_VIDEO_EDIT_MODELS.map(({ endpoint, perSecond, ...m }) => (void endpoint, void perSecond, m)),
+    editEstimate({ model, seconds }) {
+      const m = FAL_VIDEO_EDIT_MODELS.find((x) => x.id === model) ?? FAL_VIDEO_EDIT_MODELS[0];
+      return { amount: Math.round(m.perSecond * Math.max(1, seconds) * 100) / 100, unit: 'USD', basis: FAL_PRICE_BASIS };
+    },
+    async edit(req) {
+      const m = FAL_VIDEO_EDIT_MODELS.find((x) => x.id === req.model) ?? FAL_VIDEO_EDIT_MODELS[0];
+      req.onProgress?.('Sending the clip to fal…');
+      const video = await fal.fileUrl(req.video, req.signal);
+      const refs = await Promise.all((req.references ?? []).slice(0, m.maxReferences).map((r) => fal.fileUrl(r, req.signal)));
+      const input =
+        m.id === 'lucy-edit-pro'
+          ? { prompt: req.prompt, video_url: video, resolution: '720p', enhance_prompt: false }
+          : { prompt: req.prompt, video_url: video, ...(refs.length ? { image_urls: refs } : {}), keep_audio: req.keepAudio ?? true };
+      const job = await fal.submit(m.endpoint, input, req.signal);
+      req.onSubmitted?.(job);
+      return clipOf(await fal.wait(job, req.signal, req.onProgress));
+    },
     key: { help: 'From fal.ai → Dashboard → Keys. Kept in this browser only and sent only to fal. Billed by fal.', ...fal.key },
     async generate(req: VideoRequest) {
       const m = pick(req.model);
