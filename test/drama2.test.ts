@@ -576,6 +576,28 @@ describe('Editor views', () => {
     editor.destroy();
   });
 
+  it('moves a shot into a scene when it’s dropped on the scene’s box', () => {
+    const g = load();
+    const shots = view('shots');
+    const groups = () => shots.groups!(g);
+    const box = (id: string) => groups().find((x) => x.id === id)!;
+    // Out of its scene: in the last box.
+    g.setParam('sc4', 'shots', (g.nodes.get('sc4')!.params.shots as string[]).filter((x) => x !== 's4b'));
+    expect(box('').nodes).toEqual(['s4b']);
+    // Dropped on scene 3: its next shot.
+    shots.onDrop!('s4b', box('sc3'), box(''), g);
+    expect(g.nodes.get('sc3')!.params.shots).toEqual(['s3a', 's3b', 's4b']);
+    expect(g.nodes.get('s4b')!.params.number).toBe('3');
+    expect(groups().some((x) => x.id === '' && x.nodes.length)).toBe(false);
+    // From one scene to another: it leaves the first.
+    shots.onDrop!('s4b', box('sc2'), box('sc3'), g);
+    expect(g.nodes.get('sc3')!.params.shots).toEqual(['s3a', 's3b']);
+    expect((g.nodes.get('sc2')!.params.shots as string[]).at(-1)).toBe('s4b');
+    // Into "Not in a scene": out of its scene.
+    shots.onDrop!('s4b', { id: '', title: 'Not in a scene', nodes: [] }, box('sc2'), g);
+    expect(g.nodes.get('sc2')!.params.shots).not.toContain('s4b');
+  });
+
   it('jumps to a linked node in its view, and back', async () => {
     const { el, editor } = mount();
     await editor.setView('shots');

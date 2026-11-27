@@ -96,7 +96,7 @@ export interface EditorEvents extends Record<string, unknown> {
 type Gesture =
   | { kind: 'pan'; sx: number; sy: number; vx: number; vy: number; moved: boolean; timer?: ReturnType<typeof setTimeout> }
   | { kind: 'pinch'; dist: number; mx: number; my: number; vp: Viewport }
-  | { kind: 'node'; id: string; sx: number; sy: number; nx: number; ny: number; moved: boolean; vx?: number; vy?: number }
+  | { kind: 'node'; id: string; sx: number; sy: number; nx: number; ny: number; moved: boolean; vx?: number; vy?: number; hold?: ReturnType<typeof setTimeout> }
   | { kind: 'wire'; anchor: Anchor; sx: number; sy: number; moved: boolean; detached?: Edge }
   | { kind: 'edge'; id: string; sx: number; sy: number; moved: boolean; vx: number; vy: number };
 
@@ -1151,6 +1151,9 @@ export class NodeEditor extends Emitter<EditorEvents> {
   private onOpenLink = (e: Event): void => {
     const t = (e.target as Element | null)?.closest?.<HTMLElement>('[data-nm-open]');
     if (!t) return;
+    // Zoomed out, a tap on a card zooms to it: the small links on it (chips) wait until then.
+    // Group headers and a card's copies are links at any zoom.
+    if (this.isOverview && t.closest('.nm-node:not(.nm-copy)')) return;
     e.preventDefault();
     e.stopPropagation();
     this.closePalette();
@@ -1582,6 +1585,15 @@ export class NodeEditor extends Emitter<EditorEvents> {
   }
 
   private groupLayer?: HTMLElement;
+  /** The boxes as laid out (map units), and which box each card is in: for dragging between them. */
+  private groupBoxes: { group: import('../core/graph-type.js').ViewGroup; el: HTMLElement; x: number; y: number; w: number; h: number }[] = [];
+  private groupOf = new Map<string, string>();
+
+  /** The box under a point on the screen, if any. */
+  private groupAt(clientX: number, clientY: number) {
+    const p = this.screenToWorld(clientX, clientY);
+    return this.groupBoxes.find((b) => p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h);
+  }
 
   /**
    * A grid in boxes: each group's cards in rows inside a box with a header (tap it to open the
@@ -1633,6 +1645,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
       this.viewportEl.prepend(this.groupLayer);
     }
     this.groupLayer.replaceChildren();
+    this.groupBoxes = [];
+    this.groupOf.clear();
     const placed = new Set<string>();
     const boxW = cols * (colW + COL_GAP) - COL_GAP + PAD * 2;
     let y = 0;
@@ -1651,9 +1665,11 @@ export class NodeEditor extends Emitter<EditorEvents> {
       const head = h('div', { class: 'nm-group-head', ...(g.open ? { 'data-nm-open': g.open, role: 'link', title: `Open ${g.title}` } : {}) }, h('strong', {}, g.title), ...(g.subtitle ? [h('span', {}, g.subtitle)] : []));
       box.append(head);
       this.groupLayer.append(box);
+      this.groupBoxes.push({ group: g, el: box, x: -PAD, y: top, w: boxW, h: y - top });
       for (const s of slots) {
         if (!placed.has(s.id)) {
           placed.add(s.id);
+          this.groupOf.set(s.id, g.id);
           pos[s.id] = { x: s.x - PAD, y: s.y };
           continue;
         }
@@ -3016,7 +3032,16 @@ export class NodeEditor extends Emitter<EditorEvents> {
     } else if (nodeEl) {
       const n = this.graph.nodes.get(nodeEl.dataset.id!)!;
       // On boards (grid and rows views) cards don't move: dragging one pans, so the map is easy to grab.
-      this.gesture = { kind: 'node', id: n.id, nx: n.x, ny: n.y, ...(this.gridded || this.ro ? { vx: this.vp.x, vy: this.vp.y } : {}), ...base };
+      const ng: Gesture & { kind: 'node' } = { kind: 'node', id: n.id, nx: n.x, ny: n.y, ...(this.gridded || this.ro ? { vx: this.vp.x, vy: this.vp.y } : {}), ...base };
+      this.gesture = ng;
+      // …except where the view takes drops between its boxes: press and hold a card to pick it up.
+      if (this.gridded && !this.ro && this.view?.onDrop && this.groupBoxes.length)
+        ng.hold = setTimeout(() => {
+          if (this.gesture !== ng || ng.moved) return;
+          ng.vx = ng.vy = undefined;
+          this.records.get(ng.id)?.el.classList.add('nm-dragging', 'nm-picked');
+          (navigator as Navigator & { vibrate?: (ms: number) => boolean }).vibrate?.(15);
+        }, 450);
     } else if (edgeHit) {
       this.gesture = { kind: 'edge', id: (edgeHit as SVGElement).dataset.edge!, vx: this.vp.x, vy: this.vp.y, ...base };
     } else {
@@ -3058,6 +3083,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
     if (!g.moved && Math.hypot(dx, dy) > TAP) {
       g.moved = true;
       if (g.kind === 'pan') clearTimeout(g.timer);
+      if (g.kind === 'node') clearTimeout(g.hold); // moved before the hold: a pan
       if (g.kind === 'node' && g.vx === undefined) this.records.get(g.id)?.el.classList.add('nm-dragging');
       if (g.kind === 'wire') this.beginWire(g);
     }
@@ -3065,7 +3091,14 @@ export class NodeEditor extends Emitter<EditorEvents> {
 
     if (g.kind === 'pan' || g.kind === 'edge') this.setViewport({ x: g.vx + dx, y: g.vy + dy });
     else if (g.kind === 'node' && g.vx !== undefined) this.setViewport({ x: g.vx + dx, y: g.vy! + dy });
-    else if (g.kind === 'node') this.graph.moveNode(g.id, Math.round(g.nx + dx / this.vp.k), Math.round(g.ny + dy / this.vp.k));
+    else if (g.kind === 'node') {
+      this.graph.moveNode(g.id, Math.round(g.nx + dx / this.vp.k), Math.round(g.ny + dy / this.vp.k));
+      // Over another group's box (where the view takes drops): light it up.
+      if (this.view?.onDrop && this.groupBoxes.length) {
+        const over = this.groupAt(e.clientX, e.clientY);
+        for (const b of this.groupBoxes) b.el.classList.toggle('nm-group-drop', b === over && b.group.id !== this.groupOf.get(g.id));
+      }
+    }
     else if (g.kind === 'wire') {
       const from = this.portPos(g.anchor, g.anchor.dir);
       const to = this.screenToWorld(e.clientX, e.clientY);
@@ -3102,7 +3135,18 @@ export class NodeEditor extends Emitter<EditorEvents> {
         if (!g.moved) this.select({ edge: g.id });
         break;
       case 'node':
-        this.records.get(g.id)?.el.classList.remove('nm-dragging');
+        clearTimeout(g.hold);
+        this.records.get(g.id)?.el.classList.remove('nm-dragging', 'nm-picked');
+        // Dropped in another group's box: the view changes the map (a shot into a scene).
+        if (g.moved && g.vx === undefined && this.view?.onDrop && this.groupBoxes.length) {
+          for (const b of this.groupBoxes) b.el.classList.remove('nm-group-drop');
+          const to = this.groupAt(e.clientX, e.clientY);
+          const fromId = this.groupOf.get(g.id);
+          if (to && to.group.id !== fromId) {
+            const from = this.groupBoxes.find((b) => b.group.id === fromId)?.group;
+            this.view.onDrop(g.id, to.group, from, this.graph);
+          }
+        }
         if (g.moved && this.gridded && g.vx === undefined) this.scheduleViewLayout();
         if (g.moved) {
           this.scheduleRoute();

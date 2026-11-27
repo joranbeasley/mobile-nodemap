@@ -87,6 +87,11 @@ export interface EditorView {
    * Tapping a header opens `open` (e.g. the scene, on its own tab).
    */
   groups?: (graph: Graph) => ViewGroup[];
+  /**
+   * A card dragged from one group's box into another's (e.g. a shot into a scene): change the
+   * map to match (`from` is undefined for a card in no group). The view lays itself out again.
+   */
+  onDrop?: (nodeId: string, to: ViewGroup, from: ViewGroup | undefined, graph: Graph) => void;
   /** After a node is added in this view: link it to what was selected, number it, etc. */
   onAdd?: (node: NodeInstance, ctx: { graph: Graph; selected?: NodeInstance }) => void;
 }

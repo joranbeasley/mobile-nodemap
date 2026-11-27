@@ -123,6 +123,7 @@ views: [
 | `rows(graph)` | Rows layout: node ids per row, in order. Nodes left out go in a last row. |
 | `order(graph)` | Grid layout: node ids in order (default: by `types`, then as added). |
 | `groups(graph)` | Grid layout in boxes: `[{ id, title, subtitle?, nodes, open?, color? }]` (`ViewGroup`). Each group's cards in rows inside a box with a header (tap it to open `open`, on its own tab); the same column count for every box. A card in several groups shows in each: a faded copy after the first, which goes to the card. Cards in no group go in a last box. |
+| `onDrop(nodeId, to, from, graph)` | Grouped grid: a card dropped into another group's box. On boards, dragging a card pans; with `onDrop`, **press and hold** a card (about half a second) to pick it up, drag it over a box (it lights up) and let go. `from` is undefined for a card in no group. The view lays itself out again. |
 | `onAdd(node, { graph, selected })` | After + adds a node in this view, link it to what was selected (a shot to the selected scene), number it, and so on. |
 
 Grid and rows views lay themselves out:

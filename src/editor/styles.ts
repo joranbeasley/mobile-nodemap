@@ -186,6 +186,10 @@ export const css = /* css */ `
 .nm-group-head strong { font-family: var(--_font); font-weight: 700; font-size: 36px; line-height: 1.15; color: var(--nm-group, var(--_accent)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nm-group-head span { font-family: var(--_font); font-size: 22px; line-height: 1.3; color: var(--_muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nm-group-head:hover strong { text-decoration: underline; }
+/* A card picked up (press and hold) to drop into another box. */
+.nm-node.nm-picked { box-shadow: 0 12px 32px rgb(0 0 0 / .28); transform-origin: center; z-index: 10; outline: 3px solid var(--_accent); }
+/* The box a dragged card would go into. */
+.nm-group.nm-group-drop { border-style: dashed; border-color: var(--nm-group, var(--_accent)); background: color-mix(in srgb, var(--nm-group, var(--_accent)) 14%, transparent); }
 /* A card shown again in another group: a faded copy that goes to the card. */
 .nm-groups .nm-copy { opacity: .55; pointer-events: auto; cursor: pointer; }
 .nm-groups .nm-copy * { pointer-events: none !important; }

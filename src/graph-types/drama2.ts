@@ -91,6 +91,22 @@ export const drama2Graph = defineGraphType({
           }),
           { id: '', title: 'Not in a scene', nodes: ofType(g, D2.shot).filter((s) => !referrers(g, s.id, D2.scene, 'shots').length).map((s) => s.id) },
         ],
+        // A shot dragged into a scene's box joins it (numbered next there), leaving the scene it
+        // came from; into "Not in a scene", it leaves its scene.
+        onDrop: (id, to, from, graph) => {
+          const shot = graph.nodes.get(id);
+          if (!shot) return;
+          if (from?.id) {
+            const sc = graph.nodes.get(from.id);
+            if (sc) graph.setParam(sc.id, 'shots', refsOf(graph, sc, 'shots').map((s) => s.id).filter((x) => x !== id));
+          }
+          const target = to.id ? graph.nodes.get(to.id) : undefined;
+          if (target?.type === D2.scene) {
+            const shots = refsOf(graph, target, 'shots');
+            graph.setParam(shot.id, 'number', String(nextNumber(shots)));
+            graph.setParam(target.id, 'shots', [...shots.map((s) => s.id), id]);
+          }
+        },
         onAdd: (node, { graph, selected }) => addShotTo(graph, node, selected),
       },
       {
