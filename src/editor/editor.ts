@@ -1911,7 +1911,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
 
   /** On a look-only card: shows its details (which don't open on tap). */
   private detailsButton(id: string, label: string, icon = 'ⓘ'): HTMLElement {
-    const b = h('button', { type: 'button', class: 'nm-card-edit nm-card-details', 'data-nm-live': '', 'aria-label': label, title: label }, icon);
+    const b = h('button', { type: 'button', class: 'nm-card-edit nm-card-details', 'data-nm-live': '', 'aria-label': label, title: label }, `${icon} ${label}`);
     b.addEventListener('click', (e) => {
       e.stopPropagation();
       this.select({ node: id });
@@ -1922,7 +1922,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
 
   /** ✎ Edit on a look-only card: the way into its Edit sheet. */
   private editButton(id: string): HTMLElement {
-    const b = h('button', { type: 'button', class: 'nm-card-edit nm-card-pencil', 'data-nm-live': '', 'aria-label': 'Edit', title: 'Edit' }, '✎');
+    const b = h('button', { type: 'button', class: 'nm-card-edit nm-card-pencil', 'data-nm-live': '', 'aria-label': 'Edit', title: 'Edit' }, '✎ Edit');
     b.addEventListener('click', (e) => {
       e.stopPropagation();
       this.select({ node: id });
@@ -1968,8 +1968,6 @@ export class NodeEditor extends Emitter<EditorEvents> {
         h('span', { class: 'nm-title' }, this.titleOf(node)),
         h('span', { class: 'nm-cat' }, def?.category ?? ''),
         ...(def?.subgraph ? [this.enterButton(node.id)] : []),
-        ...(def?.editOnCard === false && def.details ? [this.detailsButton(node.id, def.detailsLabel ?? 'Details', def.detailsIcon)] : []),
-        ...(def?.editOnCard === false && !this.ro ? [this.editButton(node.id)] : []),
       ),
     );
     const body = h('div', { class: 'nm-body' });
@@ -2016,6 +2014,13 @@ export class NodeEditor extends Emitter<EditorEvents> {
       body.append(row);
     }
     el.append(body, h('div', { class: 'nm-view' }), h('div', { class: 'nm-error' }));
+    // A look-only card's buttons, on their own row under it (the header is all title).
+    if (def?.editOnCard === false) {
+      const row = h('div', { class: 'nm-card-row' });
+      if (def.details) row.append(this.detailsButton(node.id, def.detailsLabel ?? 'Details', def.detailsIcon));
+      if (!this.ro) row.append(this.editButton(node.id));
+      if (row.childElementCount) el.append(row);
+    }
     // Many ports on one edge (top to bottom) would crowd their labels: show only the linked ones until selected.
     if (Math.max(outPorts.length, inPorts.length) >= 4) el.classList.add('nm-dense');
     // A listener on each port makes browsers with touch adjustment snap taps to ports, not nearby inputs.
