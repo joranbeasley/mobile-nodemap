@@ -1123,7 +1123,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
   /** Anything marked data-nm-open (a link in a node view, a reference chip) jumps to that node. */
   private onOpenLink = (e: Event): void => {
     const t = (e.target as Element | null)?.closest?.<HTMLElement>('[data-nm-open]');
-    if (!t) return;
+    // On a look-only card the whole card is one target (its Edit sheet).
+    if (!t || t.closest('.nm-summary')) return;
     e.preventDefault();
     e.stopPropagation();
     this.closePalette();
@@ -2006,6 +2007,13 @@ export class NodeEditor extends Emitter<EditorEvents> {
     } else this.viewportEl.append(el);
     this.records.set(node.id, { el, w: 180, h: 80, portsKey: this.portsKey(node), offsets: new Map() });
     el.hidden = !this.inView(node);
+    // Look-only cards: edited in their sheet. Their fields can't take focus either.
+    const summary = def?.editOnCard === false;
+    el.classList.toggle('nm-summary', summary);
+    if (summary)
+      el.querySelectorAll<HTMLInputElement>('input, select, textarea, button').forEach((x) => {
+        if (!x.closest('[data-nm-live]')) x.tabIndex = -1;
+      });
     if (this.ro) {
       // View only: fields can't change. Links, expanders and image viewers keep working.
       el.querySelectorAll<HTMLInputElement>('input, select, textarea, button').forEach((x) => {
@@ -2728,12 +2736,13 @@ export class NodeEditor extends Emitter<EditorEvents> {
   private onDown(e: PointerEvent): void {
     let t = e.target as Element;
     // Links and expanders marked live work even before their node is selected.
-    if (!this.isOverview && t.closest?.('[data-nm-open], [data-nm-live]')) return;
+    if (!this.isOverview && t.closest?.('[data-nm-live]')) return;
+    if (!this.isOverview && t.closest?.('[data-nm-open]') && !t.closest('.nm-summary')) return;
     // In the overview a node is one big target: its fields and ports don't respond.
     const nodeOf = t.closest<HTMLElement>('.nm-node');
-    // A node's fields only respond once it is selected (and never in the overview): until
-    // then the whole node is one target, so a tap selects it however small its fields are.
-    const inert = nodeOf && (this.isOverview || !nodeOf.classList.contains('nm-selected')) && !t.closest('.nm-port');
+    // A node's fields only respond once it is selected (and never in the overview, nor on a
+    // look-only card): until then the whole node is one target, so a tap selects it however small its fields are.
+    const inert = nodeOf && (this.isOverview || !nodeOf.classList.contains('nm-selected') || nodeOf.classList.contains('nm-summary')) && !t.closest('.nm-port');
     if (inert && !t.closest('.nm-sheet, .nm-toolbar, .nm-hud, .nm-card')) {
       if (t.closest('input, select, textarea, button, summary, label')) e.preventDefault();
       t = nodeOf!;
@@ -2898,7 +2907,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
             const again = this.lastTap?.id === g.id && now - this.lastTap.t < 350;
             this.lastTap = { id: g.id, t: now };
             this.select({ node: g.id });
-            if (again) this.openNodeEditor(g.id);
+            // A look-only card is edited in its sheet: one tap opens it.
+            if (again || this.records.get(g.id)?.el.classList.contains('nm-summary')) this.openNodeEditor(g.id);
             // Nodes with details (e.g. custom nodes) show them on tap.
             else if (this.registry.get(this.graph.nodes.get(g.id)!.type)?.details) this.showDetails(g.id);
           }

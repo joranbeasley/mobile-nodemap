@@ -519,6 +519,8 @@ const shotNode = defineNode({
   flavor: 'transform',
   width: 260,
   description: 'One camera set-up: one location, any characters',
+  // Its card is for looking: a tap opens the Edit sheet, where shots are edited.
+  editOnCard: false,
   caption: (n) => `Shot ${String(n.params.number ?? '').trim() || '?'} · ${n.params.framing ?? 'Medium'}`,
   params: [
     // A shot's card is a summary (its title says the number and framing); tap it twice for the rest.
@@ -539,7 +541,7 @@ const shotNode = defineNode({
         ? {
             ...p,
             video: (node: NodeInstance, graph: Graph) => shotClipSuggestion(toDrama(graph), node.id),
-            card: (q: Record<string, unknown>) => !!(q.lastFrame || q.clipUrl) || q.clipJob !== undefined,
+            card: (q: Record<string, unknown>) => !!(q.lastFrame || q.clipUrl || q.clipJob),
             // With a clip, the card shows it big (first frame, ▶ to play), with where and who.
             compact: true,
             summary: (node: NodeInstance, graph: Graph) =>
@@ -923,6 +925,20 @@ const css = `
 .dr2-list summary { cursor: pointer; font-weight: 600; padding: 4px 0; list-style-position: inside; }
 .dr2-list summary span { color: var(--_muted); font-weight: 500; margin-left: 2px; }
 /* Shot cards are the most numerous: keep them short (two lines of description, small frames). */
+/* They're for looking (edited in the sheet): no editing controls, the description as plain text. */
+.nm-node.nm-summary :is(.dr2-x, .dr2-pick, .dr2-mv, .dr2-wearer, .dr-add, .dr-gen, .dr-rm, .dr-mv) { display: none !important; }
+.nm-node.nm-summary .nm-field textarea { border-color: transparent; background: transparent; padding-inline: 0; overflow: hidden; }
+/* No label column: a small icon per row says what it is (as on those cards), and lighter chips. */
+.nm-node.nm-summary .nm-field { grid-template-columns: 1fr; padding-inline: 12px; }
+.nm-node.nm-summary .nm-field > span:first-child { display: none; }
+.nm-node.nm-summary .dr2-refs { gap: 4px; }
+.nm-node.nm-summary .dr2-refs::before { width: 16px; flex: none; text-align: center; font-size: 12px; color: var(--_muted); }
+.nm-node.nm-summary [data-param="location"].dr2-refs::before, .nm-node.nm-summary [data-param="location"] .dr2-refs::before { content: '⌂'; }
+.nm-node.nm-summary [data-param="characters"].dr2-refs::before, .nm-node.nm-summary [data-param="characters"] .dr2-refs::before { content: '☺'; }
+.nm-node.nm-summary [data-param="props"].dr2-refs::before, .nm-node.nm-summary [data-param="props"] .dr2-refs::before { content: '✦'; }
+.nm-node.nm-summary .dr2-chip { border-color: transparent; background: color-mix(in srgb, var(--_accent) 7%, var(--_node)); }
+.nm-node.nm-summary .dr2-chip button { padding: 3px 8px; font-size: 12px; }
+.nm-node.nm-summary .nm-field textarea { font-size: 12px; color: var(--_muted); line-height: 1.4; min-height: 0; padding-block: 2px; field-sizing: content; height: auto; max-height: 2.9em; }
 .nm-node[data-type="drama2/shot"] .nm-field { padding-block: 1px; }
 .nm-node[data-type="drama2/shot"] .nm-field textarea { min-height: 0; height: 2.9em; max-height: 2.9em; resize: none; }
 .nm-node[data-type="drama2/shot"] .dr-thumb { width: 48px; height: 32px; }

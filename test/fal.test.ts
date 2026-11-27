@@ -469,7 +469,7 @@ describe('🎬 clips that finish while the page is away', () => {
     await tick(20);
     expect(g.nodes.get('s1b')!.params.clipJob).toBeNull();
     expect(inSheet('lastFrame').textContent).toMatch(/The clip didn't finish on Fake: Content policy/);
-    expect(card().querySelector('.dr-clip-making')).toBeNull();
+    expect(card()).toBeNull(); // nothing being made, no clip: the card has no clip box
     editor.closePalette();
     editor.destroy();
   });

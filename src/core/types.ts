@@ -156,6 +156,11 @@ export interface NodeType {
    *   caption: (n) => `Shot ${n.params.number}`
    */
   caption?: (node: NodeInstance) => string;
+  /**
+   * `false`: its card is for looking only (fields don't respond, links don't jump); a tap on it,
+   * zoomed in, opens its Edit sheet. Elements marked `data-nm-live` (a play button) still work.
+   */
+  editOnCard?: boolean;
   /** Short text, an emoji or an inline `<svg>` shown in the header and the add menu. */
   icon?: string;
   /** Extra search words for the add menu. */

@@ -411,7 +411,13 @@ describe('Editor views', () => {
   it('jumps to a linked node in its view, and back', async () => {
     const { el, editor } = mount();
     await editor.setView('shots');
-    const chip = el.querySelector<HTMLButtonElement>('.nm-node[data-id="s1a"] [data-nm-open="hall"]')!;
+    // A shot card is for looking: its chips don't jump (a tap opens its sheet)…
+    el.querySelector<HTMLButtonElement>('.nm-node[data-id="s1a"] [data-nm-open="hall"]')!.click();
+    expect(editor.currentView).toBe('shots');
+    // …its Edit sheet's do.
+    editor.openNodeEditor('s1a');
+    await new Promise((r) => setTimeout(r, 360)); // the sheet's guard against the opening tap
+    const chip = document.querySelector<HTMLButtonElement>('.nm-edit [data-nm-open="hall"]')!;
     expect(chip.textContent).toBe('School hall');
     chip.click();
     await new Promise((r) => setTimeout(r, 30));

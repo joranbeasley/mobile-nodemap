@@ -432,7 +432,11 @@ export const clipFrameParam: ParamKind = {
       if (busy) {
         fig.classList.add('dr-clip-making');
         fig.append(pendingTile('dr-clip-tile dr-clip-over', busy));
-      } else if (url) fig.append(button('▶', 'Play the clip full screen, with sound', () => playClip(url, poster || undefined), 'dr-clip-play'));
+      } else if (url) {
+        const play = button('▶', 'Play the clip full screen, with sound', () => playClip(url, poster || undefined), 'dr-clip-play');
+        play.dataset.nmLive = ''; // works on a look-only card
+        fig.append(play);
+      }
       wrap.append(fig);
       const line = (ctx.param as { summary?: (node: NodeInstance, graph: Graph) => string }).summary?.(ctx.node, ctx.graph);
       if (line) wrap.append(Object.assign(document.createElement('div'), { className: 'dr-clip-sum', textContent: line }));
@@ -2192,7 +2196,7 @@ const css = `
 @keyframes dr-pulse { 50% { outline-color: color-mix(in srgb, var(--_accent) 30%, transparent); } }
 .dr-clip-play { all: unset; position: absolute; inset: 0; margin: auto; width: 56px; height: 56px; border-radius: 50%; background: rgba(0,0,0,.55); color: #fff;
   font-size: 22px; display: none; place-items: center; cursor: pointer; box-shadow: 0 2px 12px rgba(0,0,0,.4); }
-.nm-root:not(.nm-overview) .nm-node.nm-selected .dr-clip-play { display: grid; }
+.nm-root:not(.nm-overview) .nm-node:is(.nm-selected, .nm-summary) .dr-clip-play { display: grid; }
 .dr-clip-sum { margin-top: 5px; font-size: 12px; color: var(--_muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dr-gen-panel { box-sizing: border-box; min-width: 0; max-width: 100%; }
 .dr-gen-panel :is(select, textarea, input:not([type=checkbox])) { box-sizing: border-box; max-width: 100%; }

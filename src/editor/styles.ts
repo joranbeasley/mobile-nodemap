@@ -217,6 +217,10 @@ export const css = /* css */ `
 .nm-views button:focus-visible { outline: 2px solid var(--_accent); outline-offset: 2px; }
 /* Links to other nodes, and expanders marked live, work before their node is selected. */
 .nm-node [data-nm-open], .nm-node [data-nm-live], .nm-node [data-nm-live] summary { pointer-events: auto !important; cursor: pointer; }
+/* Look-only cards (edited in their sheet): nothing on them responds but what's marked live. */
+.nm-node.nm-summary { cursor: pointer; }
+.nm-node.nm-summary :is(input, select, textarea, button, label, summary, [data-nm-open]):not([data-nm-live]) { pointer-events: none !important; }
+.nm-node.nm-summary :is(textarea, input) { resize: none; caret-color: transparent; }
 .nm-toolbar { position: absolute; right: max(12px, env(safe-area-inset-right, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; gap: 6px; z-index: 4;
   background: var(--_node); border: 1px solid var(--_border); border-radius: 14px; padding: 5px; box-shadow: var(--_shadow); }
 .nm-btn { appearance: none; border: 0; background: transparent; color: var(--_text); min-width: 44px; height: 44px; border-radius: 10px;
