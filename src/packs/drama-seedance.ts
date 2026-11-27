@@ -1,6 +1,6 @@
 import type { Graph } from '../core/graph.js';
 import type { NodeInstance } from '../core/types.js';
-import { dramaName, episodeInfo, imageList, previousShot, sceneInfo, setShotClipSuggester, shotCostumes, shotInfo, type EpisodeInfo, type SceneInfo } from './drama.js';
+import { cardId, dramaName, episodeInfo, imageList, previousShot, referenceImages, sceneInfo, setShotClipSuggester, shotCostumes, shotInfo, type EpisodeInfo, type SceneInfo } from './drama.js';
 
 /**
  * Export a production for Seedance video generation, one generation per shot.
@@ -66,6 +66,8 @@ export interface SeedanceAsset {
   src: string;
   /** What it shows, e.g. "Maya (character)". */
   label: string;
+  /** The card it comes from, for a card's picture (characters, places, props, costumes). */
+  card?: string;
 }
 
 /** One shot = one Seedance generation, packed as its own zip. */
@@ -216,12 +218,18 @@ export function seedanceShot(graph: Graph, shotId: string, opts: SeedanceOptions
   const title = [cfg.episode ? `Ep ${Number(cfg.episode.params.number ?? 1)}` : '', scene ? `Scene ${scene.number}` : '', `Shot ${x.number}`].filter(Boolean).join(' · ');
 
   // Candidates in priority order: who and where first, then the shot's frames, then extra angles.
-  type Cand = { src: string; name: string; label: string };
+  type Cand = { src: string; name: string; label: string; card?: string };
   const cands: Cand[] = [];
   const first: Cand[] = [];
   const rest: Cand[] = [];
+  // Each card's picture picked for this shot (else its first) leads; its other pictures follow as
+  // extra views, unless one was picked: then only that one goes.
   const add = (n: NodeInstance, kind: string, name = dramaName(n)) => {
-    imageList(n.params.images).forEach((src, i) => (i ? rest : first).push({ src, name, label: `${dramaName(n)} (${kind}${i ? `, view ${i + 1}` : ''})` }));
+    const r = referenceImages(n, node);
+    if (!r.picked) return;
+    const card = cardId(n.id);
+    first.push({ src: r.picked, name, label: `${dramaName(n)} (${kind})`, card });
+    if (!r.explicit) r.all.filter((src) => src !== r.picked).forEach((src) => rest.push({ src, name, label: `${dramaName(n)} (${kind}, view ${r.all.indexOf(src) + 1})`, card }));
   };
   // What each character wears in this shot: the scene's costumes, or the shot's own.
   const costumes = shotCostumes(graph, shotId);
@@ -252,7 +260,7 @@ export function seedanceShot(graph: Graph, shotId: string, opts: SeedanceOptions
     if (seen.has(c.src)) continue;
     seen.add(c.src);
     const n = refs.length < cfg.maxImages ? refs.length + 1 : refs.length + dropped.length + 1;
-    const a = { path: `images/${pad(n)}-${slug(c.name)}.${extOf(c.src)}`, src: c.src, label: c.label };
+    const a = { path: `images/${pad(n)}-${slug(c.name)}.${extOf(c.src)}`, src: c.src, label: c.label, ...(c.card ? { card: c.card } : {}) };
     (refs.length < cfg.maxImages ? refs : dropped).push(a);
   }
   const refsOf = (n: NodeInstance) => imageList(n.params.images).map((src) => refs.find((r) => r.src === src)).filter((r): r is SeedanceAsset => !!r).map((r) => `@Image${refs.indexOf(r) + 1}`);
@@ -678,7 +686,11 @@ setShotClipSuggester((graph, shotId) => {
   const first = node.params.continues && shot.refs[0]?.label.endsWith('(first frame)') ? shot.refs[0].src : undefined;
   return {
     prompt: shot.prompt,
-    references: shot.refs.map((r) => ({ src: r.src, label: r.label })),
+    references: shot.refs.map((r) => {
+      // Which card it's from, and what else that card has, so people can pick another.
+      const all = r.card ? imageList(graph.nodes.get(r.card)?.params.images) : [];
+      return { src: r.src, label: r.label, ...(r.card ? { card: r.card } : {}), ...(all.length > 1 ? { choices: all } : {}) };
+    }),
     firstFrame: first,
     duration: shot.duration,
     aspect: settingsFor(graph, node, {}).aspect,

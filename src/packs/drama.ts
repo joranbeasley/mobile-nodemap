@@ -1,6 +1,6 @@
 import { defineNode, definePack, type GraphEngine } from '../core/registry.js';
 import type { Graph } from '../core/graph.js';
-import type { NodeInstance, NodeResult, NodeType, ParamKind, PortTypeDef } from '../core/types.js';
+import type { ChooseOptions, NodeInstance, NodeResult, NodeType, ParamKind, PortTypeDef } from '../core/types.js';
 import { saveDramaFile, seedancePack, seedanceScript } from './drama-seedance.js';
 import { getImageGenerators, type ImageGenerator } from './image-generation.js';
 import { getVideoGenerators, type VideoGenerator, type VideoJob } from './video-generation.js';
@@ -58,6 +58,41 @@ type ClipKeeper = (url: string, info: { shotId: string }) => Promise<string>;
 let clipKeeper: ClipKeeper | null = null;
 export function setClipKeeper(fn: ClipKeeper | null): void {
   clipKeeper = fn;
+}
+
+/**
+ * The ⇄ switch on a reference from a card with several pictures: pick which one to send. The
+ * choice is remembered on the node being generated for (`referencePicks`, card → picture).
+ */
+function referenceSwitch(r: Reference, ctx: { node: NodeInstance; graph: Graph; choose?: (o: ChooseOptions) => Promise<string | undefined> }, onPick: (src: string) => void): HTMLElement | undefined {
+  const choices = r.choices;
+  if (!r.card || !choices || choices.length < 2) return undefined;
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'dr-gen-pick';
+  const label = () => {
+    const i = choices.indexOf(r.src);
+    b.textContent = `⇄ ${i + 1}/${choices.length}`;
+    b.setAttribute('aria-label', `Choose which of ${choices.length} pictures to send for ${r.label}`);
+  };
+  label();
+  b.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    let next: string | undefined;
+    if (ctx.choose) {
+      const id = await ctx.choose({
+        title: `Which picture for ${r.label}?`,
+        items: choices.map((src, i) => ({ id: String(i), label: `Picture ${i + 1}`, hint: src === r.src ? 'sending this one' : undefined, image: src })),
+      });
+      if (id !== undefined) next = choices[Number(id)];
+    } else next = choices[(choices.indexOf(r.src) + 1) % choices.length];
+    if (!next || next === r.src) return;
+    onPick(next);
+    label();
+    const node = ctx.graph.nodes.get(ctx.node.id);
+    if (node) ctx.graph.setParam(node.id, 'referencePicks', { ...((node.params.referencePicks as Record<string, string>) ?? {}), [r.card!]: next });
+  });
+  return b;
 }
 
 /** Service links already offered to the keeper on this page. */
@@ -260,7 +295,7 @@ export async function lastFrameOf(file: Blob, max = 1280): Promise<string> {
 export interface ShotClipSuggestion {
   prompt: string;
   /** In order: the prompt calls them @Image1, @Image2… */
-  references: { src: string; label: string }[];
+  references: Reference[];
   /** The previous clip's last frame, for a shot that carries on from it. */
   firstFrame?: string;
   duration: number;
@@ -529,15 +564,43 @@ export const clipFrameParam: ParamKind = {
       const on = new Set(refs.map((r) => r.src));
       if (refs.length) {
         const strip = el('div', { class: 'dr-gen-refs', role: 'group', 'aria-label': 'Reference pictures' });
+        // A card's first reference is its main picture (it gets the ⇄ switch); any others are extra views.
+        const views = new Map<string, { r: Reference; b: HTMLButtonElement; im: HTMLImageElement }[]>();
         refs.forEach((r, i) => {
           const b = el('button', { type: 'button', class: 'dr-gen-ref', title: r.label, 'aria-label': r.label, 'aria-pressed': 'true' }) as HTMLButtonElement;
-          b.append(el('img', { src: r.src, alt: '' }), el('span', {}, `@Image${i + 1} ${r.label}`));
+          const im = el('img', { src: r.src, alt: '' }) as HTMLImageElement;
+          b.append(im, el('span', {}, `@Image${i + 1} ${r.label}`));
           b.addEventListener('click', () => {
             if (on.has(r.src)) on.delete(r.src);
             else on.add(r.src);
             b.setAttribute('aria-pressed', String(on.has(r.src)));
           });
-          strip.append(b);
+          const lead = !!r.card && !views.has(r.card);
+          if (r.card && !lead) views.get(r.card)!.push({ r, b, im });
+          else if (r.card) views.set(r.card, []);
+          // Same @Image number, another of the card's pictures: the prompt stays right. Once a
+          // picture is picked, only it is sent for that card (as in the export): its extra views go off.
+          const sw = lead
+            ? referenceSwitch(r, ctx, (src) => {
+                const old = r.src;
+                const wasOn = on.has(old);
+                on.delete(old);
+                for (const v of views.get(r.card!)!) {
+                  if (v.r.src === src) v.im.src = v.r.src = old;
+                  on.delete(v.r.src);
+                  on.delete(src);
+                  v.b.setAttribute('aria-pressed', 'false');
+                }
+                if (wasOn) on.add(src);
+                r.src = src;
+                im.src = src;
+              })
+            : undefined;
+          if (sw) {
+            const w = el('span', { class: 'dr-gen-refwrap' });
+            w.append(b, sw);
+            strip.append(w);
+          } else strip.append(b);
         });
         box.append(strip, el('small', { class: 'dr-gen-refs-note' }, 'Sent in this order; the prompt calls them @Image1, @Image2… Switching one off renumbers the rest, so edit the prompt to match.'));
       }
@@ -764,10 +827,15 @@ export const imagesParam: ParamKind = {
         (refNote.textContent = chosen.size
           ? `${chosen.size} reference picture${chosen.size > 1 ? 's' : ''} sent with the prompt (up to ${maxRefs}). Tap to switch one off or on.`
           : `No reference pictures: text only. Tap one to send it (up to ${maxRefs}).`);
-      for (const r of refChoices) {
+      for (const r of refChoices as Reference[]) {
         const b = el('button', { type: 'button', class: 'dr-gen-ref', title: r.label, 'aria-label': r.label, 'aria-pressed': String(chosen.has(r.src)) }) as HTMLButtonElement;
-        const im = el('img', { src: r.src, alt: '' });
+        const im = el('img', { src: r.src, alt: '' }) as HTMLImageElement;
         b.append(im, el('span', {}, r.label));
+        const sw = referenceSwitch(r, ctx, (src) => {
+          if (chosen.delete(r.src)) chosen.add(src);
+          r.src = src;
+          im.src = src;
+        });
         b.addEventListener('click', () => {
           if (chosen.has(r.src)) chosen.delete(r.src);
           else if (chosen.size >= maxRefs) return void (status.textContent = `${gen.name} takes up to ${maxRefs} reference pictures: switch one off first.`);
@@ -775,7 +843,11 @@ export const imagesParam: ParamKind = {
           b.setAttribute('aria-pressed', String(chosen.has(r.src)));
           noteRefs();
         });
-        refs.append(b);
+        if (sw) {
+          const w = el('span', { class: 'dr-gen-refwrap' });
+          w.append(b, sw);
+          refs.append(w);
+        } else refs.append(b);
       }
       noteRefs();
       // What it will cost, and what's left: re-checked when the model or the references change.
@@ -1451,7 +1523,33 @@ export interface DramaImagePrompt {
   prompt: string;
   aspect: string;
   /** Pictures of what is in it (most important first): who is on screen, where, what they wear and hold. */
-  references: { src: string; label: string }[];
+  references: Reference[];
+}
+
+/** A reference picture: from which card, and the other pictures that card has to choose from. */
+export interface Reference {
+  src: string;
+  label: string;
+  /** The card it comes from (character, location, prop…), when it's one of a card's pictures. */
+  card?: string;
+  /** All that card's pictures, when it has more than one (people can pick which to send). */
+  choices?: string[];
+}
+
+/** A card's id without a costume copy's "@character" (Drama boards copy outfits per wearer). */
+export const cardId = (id: string) => id.split('@')[0];
+
+/**
+ * Which of a card's pictures a target (the shot or card being generated for) sends as a
+ * reference: the one picked for it (`referencePicks`, card id → picture), else the first.
+ * `explicit`: a pick was made, so the card's other pictures stay out.
+ */
+export function referenceImages(card: NodeInstance, target?: NodeInstance): { picked: string | undefined; all: string[]; explicit: boolean } {
+  const all = imageList(card.params.images);
+  const picks = target?.params.referencePicks as Record<string, string> | undefined;
+  const p = picks?.[cardId(card.id)];
+  const explicit = !!p && all.includes(p);
+  return { picked: explicit ? p : all[0], all, explicit };
 }
 
 /**
@@ -1461,11 +1559,12 @@ export interface DramaImagePrompt {
  * costumes. Outfits and objects take none (they are drawn on their own). The first picture of
  * each card is used.
  */
-export function dramaImageReferences(graph: Graph, n: NodeInstance): { src: string; label: string }[] {
-  const out: { src: string; label: string }[] = [];
+export function dramaImageReferences(graph: Graph, n: NodeInstance): Reference[] {
+  const out: Reference[] = [];
   const add = (node: NodeInstance | undefined, label: string) => {
-    const src = node && imageList(node.params.images)[0];
-    if (src && !out.some((r) => r.src === src)) out.push({ src, label });
+    if (!node) return;
+    const r = referenceImages(node, n);
+    if (r.picked && !out.some((x) => x.src === r.picked)) out.push({ src: r.picked, label, card: cardId(node.id), ...(r.all.length > 1 ? { choices: r.all } : {}) });
   };
   const castAndPlaces = (characters: NodeInstance[], locations: NodeInstance[], costumes: Map<string, NodeInstance>, props: NodeInstance[] = []) => {
     // A character in costume: their portrait is for the face and hair, the costume for the clothes.
@@ -1911,6 +2010,10 @@ const css = `
 .dr-clip-sound { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
 .dr-clip-watch { text-decoration: none; }
 .dr-clip-job { font-size: 12px; color: var(--_text); }
+.dr-gen-refwrap { flex: none; display: flex; flex-direction: column; align-items: stretch; gap: 2px; }
+.dr-gen-pick { all: unset; box-sizing: border-box; cursor: pointer; text-align: center; font: 600 10px/1 var(--_font); color: var(--_accent);
+  padding: 4px 2px; border: 1px solid var(--_border); border-radius: 6px; background: var(--_node); }
+.dr-gen-pick:hover, .dr-gen-pick:focus-visible { border-color: var(--_accent); }
 .dr-clip-video { flex-basis: 100%; width: 100%; max-width: 320px; aspect-ratio: 16 / 9; border-radius: 6px; background: #000; display: block; }
 /* Placeholders while a picture or clip is being made. --pc: percent done (0: unknown, moving). */
 .dr-pending { position: relative; flex: none; box-sizing: border-box; border-radius: 6px; overflow: hidden; color: var(--_text);

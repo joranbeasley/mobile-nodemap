@@ -11,6 +11,7 @@ import {
   setVideoGenerators,
   setImageGenerators,
   shotClipSuggestion,
+  dramaImageReferences,
   setClipKeeper,
   FAL_VIDEO_MODELS,
   type VideoGenerator,
@@ -245,6 +246,52 @@ describe('🎬 Generate clip on a shot', () => {
     expect(field().querySelector<HTMLAnchorElement>('.dr-clip-watch')!.href).toBe('https://v/clip.mp4');
     expect(field().textContent).toMatch(/Clip ready · \$0\.70\. Its last frame couldn’t be taken here/);
     globalThis.fetch = realFetch;
+    editor.destroy();
+  });
+
+  it('lets people pick which of a card’s pictures to send, and remembers it on the shot', async () => {
+    let asked: VideoRequest | undefined;
+    setVideoGenerators([{ id: 'fake', name: 'Fake', models: [{ id: 'm', label: 'M', minDuration: 4, maxDuration: 15, aspects: ['16:9'], resolutions: ['720p'] }], defaultModel: 'm', async generate(req) {
+      asked = req;
+      return { videos: [] };
+    } }]);
+    const { g, el, editor } = mount();
+    const A = 'data:image/png;base64,QQ==', B = 'data:image/png;base64,Qg==';
+    g.setParam('hall', 'images', [A, B]);
+    // Unpicked: the first leads, the second goes along as another view.
+    expect(seedanceShot(toDrama(g), 's1b').refs.filter((r) => r.card === 'hall').map((r) => r.src)).toEqual([A, B]);
+    await editor.setView('shots');
+    const field = () => el.querySelector<HTMLElement>('.nm-node[data-id="s1b"] [data-param="lastFrame"]')!;
+    [...field().querySelectorAll('button')].find((b) => b.textContent === '🎬 Generate clip')!.click();
+    const panel = field().querySelector<HTMLElement>('.dr-clip-panel')!;
+    const sw = [...panel.querySelectorAll<HTMLButtonElement>('.dr-gen-pick')];
+    expect(sw.map((b) => b.textContent)).toEqual(['⇄ 1/2']); // on the hall’s main picture, not its extra view
+    sw[0].click();
+    await tick(10);
+    const sheet = document.querySelector<HTMLElement>('.nm-choose')!;
+    expect([...sheet.querySelectorAll('.nm-sheet-item')].map((b) => b.textContent)).toEqual([expect.stringContaining('Picture 1'), expect.stringContaining('Picture 2')]);
+    await tick(360);
+    sheet.querySelectorAll<HTMLButtonElement>('.nm-sheet-item')[1].click();
+    await tick(10);
+    expect(g.nodes.get('s1b')!.params.referencePicks).toEqual({ hall: B });
+    expect(field().querySelector('.dr-clip-panel')).toBe(panel); // still open
+    expect(sw[0].textContent).toBe('⇄ 2/2');
+    // The hall's extra view goes off (picked: only that picture is sent), showing the other picture.
+    const view = panel.querySelector<HTMLElement>('.dr-gen-ref[aria-label="School hall (location, view 2)"]')!;
+    expect(view.getAttribute('aria-pressed')).toBe('false');
+    expect(view.querySelector('img')!.getAttribute('src')).toBe(A);
+    panel.querySelector<HTMLButtonElement>('.dr-gen-go')!.click();
+    await tick(30);
+    expect(asked!.references).toContain(B);
+    expect(asked!.references).not.toContain(A);
+    // Picked: only that picture goes, from now on.
+    const refs = seedanceShot(toDrama(g), 's1b').refs.filter((r) => r.card === 'hall');
+    expect(refs.map((r) => r.src)).toEqual([B]);
+    const pic = dramaImageReferences(toDrama(g), toDrama(g).nodes.get('s1b')!).find((r) => r.card === 'hall')!;
+    expect(pic).toMatchObject({ src: B, choices: [A, B] });
+    // A picture that's gone falls back to the first.
+    g.setParam('hall', 'images', [A]);
+    expect(dramaImageReferences(toDrama(g), toDrama(g).nodes.get('s1b')!).find((r) => r.card === 'hall')).toEqual({ src: A, label: expect.any(String), card: 'hall' });
     editor.destroy();
   });
 

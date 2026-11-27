@@ -121,7 +121,7 @@ describe('Image prompts from drama cards', () => {
     const g = Graph.fromJSON(dramaGraph.examples![0].graph, dramaGraph.createRegistry());
     const first = (id: string) => (g.nodes.get(id)!.params.images as string[])[0];
     const shot = dramaImageReferences(g, g.nodes.get('s1b')!);
-    expect(shot[0]).toEqual({ src: first('theo'), label: 'Theo' });
+    expect(shot[0]).toEqual({ src: first('theo'), label: 'Theo', card: 'theo' });
     expect(shot.map((r) => r.label)).toContain('School hall (location)');
     expect(dramaImagePrompt(g, g.nodes.get('s1b')!)!.references).toEqual(shot);
     // Outfits take no reference people (a face would end up on the dress form); nor do characters.
