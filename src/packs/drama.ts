@@ -49,6 +49,20 @@ function pendingTile(cls: string, p: Pending): HTMLElement {
   return t;
 }
 
+/**
+ * Where finished clips are kept. A service's links expire, and pages often can't read videos from
+ * another site (so the last frame can't be taken): a host can copy each clip somewhere of its own
+ * and return that URL. Without one, the service's link is used as it is.
+ */
+type ClipKeeper = (url: string, info: { shotId: string }) => Promise<string>;
+let clipKeeper: ClipKeeper | null = null;
+export function setClipKeeper(fn: ClipKeeper | null): void {
+  clipKeeper = fn;
+}
+
+/** Service links already offered to the keeper on this page. */
+const keepTried = new Set<string>();
+
 /** Clips being collected right now (shot id + job start), so redraws don't ask twice. */
 const collecting = new Set<string>();
 
@@ -308,8 +322,12 @@ export const clipFrameParam: ParamKind = {
       }
       const url = ctx.graph.nodes.get(ctx.node.id)?.params.clipUrl;
       if (typeof url === 'string' && url) {
-        const watch = Object.assign(document.createElement('a'), { href: url, target: '_blank', rel: 'noopener', className: 'dr-clip-btn dr-clip-watch', textContent: '▶ Watch clip' });
-        wrap.append(watch);
+        // The clip itself, playable in the card (playing needs no permission from the other site).
+        const video = Object.assign(document.createElement('video'), { src: url, controls: true, playsInline: true, preload: 'metadata', className: 'dr-clip-video' });
+        video.dataset.nmLive = ''; // plays before the card is selected
+        if (value) video.poster = value;
+        const save = Object.assign(document.createElement('a'), { href: url, download: 'clip.mp4', target: '_blank', rel: 'noopener', className: 'dr-clip-btn dr-clip-watch', textContent: '⬇ Download' });
+        wrap.append(video, save);
       }
       const job = jobOf();
       if (making || job) wrap.append(pendingTile('dr-clip-tile', making ?? { text: `Generating on ${job!.service}`, since: job!.startedAt }));
@@ -337,16 +355,30 @@ export const clipFrameParam: ParamKind = {
     };
     /** A finished clip: keep its link and its last frame, and forget the job. */
     const collect = async (clip: string, spent: string, signal?: AbortSignal) => {
-      ctx.graph.setParam(ctx.node.id, 'clipUrl', clip);
       ctx.graph.setParam(ctx.node.id, 'clipJob', null);
+      // Keep a copy where the host says (it lasts, and this page can read it), else the service's link.
+      let kept = clip;
+      let copied = false;
+      if (clipKeeper) {
+        status.textContent = 'Saving a copy of the clip…';
+        try {
+          kept = await clipKeeper(clip, { shotId: ctx.node.id });
+          copied = kept !== clip;
+        } catch (err) {
+          if ((err as Error).name === 'AbortError') throw err;
+        }
+      }
+      ctx.graph.setParam(ctx.node.id, 'clipUrl', kept);
+      draw();
       try {
-        value = await lastFrameOf(await (await fetch(clip, { signal })).blob());
+        value = await lastFrameOf(await (await fetch(kept, { signal, credentials: 'same-origin' })).blob());
         ctx.set(value);
-        status.textContent = `Clip ready${spent ? ` · ${spent}` : ''}. Its link may expire: download it to keep it.`;
+        status.textContent = `Clip ready${spent ? ` · ${spent}` : ''}.${copied ? '' : ' Its link may expire: download it to keep it.'}`;
       } catch (err) {
         if ((err as Error).name === 'AbortError') throw err;
         status.textContent = `Clip ready${spent ? ` · ${spent}` : ''}. Its last frame couldn’t be taken here: download it and add it with 🎞.`;
       }
+      draw();
     };
     /** Ask the service about a clip sent earlier, and collect it if it's done. */
     const collectJob = async () => {
@@ -384,7 +416,15 @@ export const clipFrameParam: ParamKind = {
     };
     document.addEventListener('visibilitychange', onVisible);
     queueMicrotask(() => {
-      if (jobOf()) void collectJob();
+      if (jobOf()) return void collectJob();
+      const url = ctx.graph.nodes.get(ctx.node.id)?.params.clipUrl;
+      const here = typeof location !== 'undefined' ? location.origin : '';
+      const away = typeof url === 'string' && /^https?:\/\//i.test(url) && !url.startsWith(here);
+      // Once per clip per page visit: a link that can't be kept (expired, say) isn't retried on every redraw.
+      if (clipKeeper && away && !keepTried.has(url as string)) {
+        keepTried.add(url as string);
+        void collect(url as string, '').catch(() => undefined);
+      }
     });
 
     // 🎬 Generate clip: the shot's own Seedance prompt and pictures, sent to a video service.
@@ -1871,6 +1911,7 @@ const css = `
 .dr-clip-sound { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
 .dr-clip-watch { text-decoration: none; }
 .dr-clip-job { font-size: 12px; color: var(--_text); }
+.dr-clip-video { flex-basis: 100%; width: 100%; max-width: 320px; aspect-ratio: 16 / 9; border-radius: 6px; background: #000; display: block; }
 /* Placeholders while a picture or clip is being made. --pc: percent done (0: unknown, moving). */
 .dr-pending { position: relative; flex: none; box-sizing: border-box; border-radius: 6px; overflow: hidden; color: var(--_text);
   background: color-mix(in srgb, var(--_accent) 10%, var(--_node)); border: 1.5px dashed color-mix(in srgb, var(--_accent) 55%, var(--_border)); }

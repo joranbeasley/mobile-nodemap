@@ -11,6 +11,7 @@ import {
   setVideoGenerators,
   setImageGenerators,
   shotClipSuggestion,
+  setClipKeeper,
   FAL_VIDEO_MODELS,
   type VideoGenerator,
   type VideoRequest,
@@ -398,6 +399,64 @@ describe('placeholders while generating', () => {
     expect(tile()).toBeNull();
     expect(g.nodes.get('s1b')!.params.clipUrl).toBe('https://v/clip.mp4');
     globalThis.fetch = realFetch;
+    editor.destroy();
+  });
+});
+
+describe('keeping clips', () => {
+  const mount = () => {
+    const g = Graph.fromJSON(drama2Graph.examples![0].graph, drama2Graph.createRegistry());
+    const el = document.createElement('div');
+    document.body.append(el);
+    const editor = new NodeEditor(el, { graph: g, registry: g.registry!, views: drama2Graph.editor!.views });
+    return { g, el, editor };
+  };
+  afterEach(() => setClipKeeper(null));
+
+  it('keeps a copy of a finished clip where the host says, and plays it in the card', async () => {
+    const kept: string[] = [];
+    setClipKeeper(async (url, info) => {
+      kept.push(`${info.shotId} ${url}`);
+      return 'https://app.test/api/clips/abc.mp4';
+    });
+    setVideoGenerators([{ id: 'fake', name: 'Fake', models: [], async generate() {
+      return { videos: [] };
+    }, async resume() {
+      return { videos: ['https://v3.fal.media/files/clip.mp4'] };
+    } }]);
+    const realFetch = globalThis.fetch;
+    const fetched: string[] = [];
+    globalThis.fetch = (async (u: string) => {
+      fetched.push(String(u));
+      throw new TypeError('offline');
+    }) as typeof fetch;
+    const { g, el, editor } = mount();
+    g.setParam('s1b', 'clipJob', { service: 'fake', startedAt: 1, request: 'r' });
+    await editor.setView('shots');
+    await tick(30);
+    expect(kept).toEqual(['s1b https://v3.fal.media/files/clip.mp4']);
+    expect(g.nodes.get('s1b')!.params.clipUrl).toBe('https://app.test/api/clips/abc.mp4');
+    expect(fetched).toEqual(['https://app.test/api/clips/abc.mp4']); // the last frame comes from the copy
+    const video = el.querySelector<HTMLVideoElement>('.nm-node[data-id="s1b"] video.dr-clip-video')!;
+    expect(video.getAttribute('src')).toBe('https://app.test/api/clips/abc.mp4');
+    globalThis.fetch = realFetch;
+    editor.destroy();
+  });
+
+  it('keeps a clip still on the service when its shot is shown, once', async () => {
+    let asked = 0;
+    setClipKeeper(async () => {
+      asked++;
+      throw new Error('expired');
+    });
+    const { g, editor } = mount();
+    g.setParam('s1c', 'clipUrl', 'https://v3.fal.media/files/old.mp4');
+    await editor.setView('shots');
+    await tick(30);
+    g.setParam('s1c', 'description', 'redraw'); // a redraw doesn't ask again
+    await tick(30);
+    expect(asked).toBe(1);
+    expect(g.nodes.get('s1c')!.params.clipUrl).toBe('https://v3.fal.media/files/old.mp4'); // kept as it was
     editor.destroy();
   });
 });
