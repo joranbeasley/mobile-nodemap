@@ -408,6 +408,20 @@ describe('Editor views', () => {
     editor.destroy();
   });
 
+  it('edits shots in their sheet, from ✎ Edit on the card', async () => {
+    const { el, editor } = mount();
+    await editor.setView('shots');
+    const card = el.querySelector<HTMLElement>('.nm-node[data-id="s1a"]')!;
+    expect(card.classList.contains('nm-summary')).toBe(true);
+    card.querySelector<HTMLButtonElement>('.nm-card-edit')!.click();
+    expect(document.querySelector('.nm-edit')!.getAttribute('aria-label')).toBe('Edit Shot 1 · Wide');
+    editor.closePalette();
+    // Other cards edit in place, without the button.
+    await editor.setView('cast');
+    expect(el.querySelector('.nm-node[data-id="maya"] .nm-card-edit')).toBeNull();
+    editor.destroy();
+  });
+
   it('jumps to a linked node in its view, and back', async () => {
     const { el, editor } = mount();
     await editor.setView('shots');

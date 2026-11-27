@@ -1909,6 +1909,17 @@ export class NodeEditor extends Emitter<EditorEvents> {
     }
   }
 
+  /** ✎ Edit on a look-only card: the way into its Edit sheet. */
+  private editButton(id: string): HTMLElement {
+    const b = h('button', { type: 'button', class: 'nm-card-edit', 'data-nm-live': '', 'aria-label': 'Edit', title: 'Edit' }, '✎ Edit');
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.select({ node: id });
+      this.openNodeEditor(id);
+    });
+    return b;
+  }
+
   private portsKey(node: NodeInstance): string {
     const f = (ps: PortDef[]) => ps.map((p) => `${p.name}:${p.type}`).join(',');
     // Which conditional params show is part of the node's shape too: a change rebuilds it.
@@ -1946,6 +1957,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
         h('span', { class: 'nm-title' }, this.titleOf(node)),
         h('span', { class: 'nm-cat' }, def?.category ?? ''),
         ...(def?.subgraph ? [this.enterButton(node.id)] : []),
+        ...(def?.editOnCard === false && !this.ro ? [this.editButton(node.id)] : []),
       ),
     );
     const body = h('div', { class: 'nm-body' });
@@ -2907,8 +2919,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
             const again = this.lastTap?.id === g.id && now - this.lastTap.t < 350;
             this.lastTap = { id: g.id, t: now };
             this.select({ node: g.id });
-            // A look-only card is edited in its sheet: one tap opens it.
-            if (again || this.records.get(g.id)?.el.classList.contains('nm-summary')) this.openNodeEditor(g.id);
+            // A double tap opens the Edit sheet (look-only cards also have ✎ Edit); a single tap only selects.
+            if (again) this.openNodeEditor(g.id);
             // Nodes with details (e.g. custom nodes) show them on tap.
             else if (this.registry.get(this.graph.nodes.get(g.id)!.type)?.details) this.showDetails(g.id);
           }

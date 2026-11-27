@@ -157,8 +157,8 @@ export interface NodeType {
    */
   caption?: (node: NodeInstance) => string;
   /**
-   * `false`: its card is for looking only (fields don't respond, links don't jump); a tap on it,
-   * zoomed in, opens its Edit sheet. Elements marked `data-nm-live` (a play button) still work.
+   * `false`: its card is for looking only (fields don't respond, links don't jump); its ✎ Edit
+   * button (shown zoomed in) or a double tap opens its Edit sheet. Elements marked `data-nm-live` (a play button) still work.
    */
   editOnCard?: boolean;
   /** Short text, an emoji or an inline `<svg>` shown in the header and the add menu. */
