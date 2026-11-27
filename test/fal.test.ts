@@ -14,6 +14,8 @@ import {
   dramaImageReferences,
   setClipKeeper,
   confirmSpend,
+  setGenerationLog,
+  type GenerationRecord,
   FAL_VIDEO_MODELS,
   type VideoGenerator,
   type VideoRequest,
@@ -424,6 +426,60 @@ describe('🎬 Generate clip on a shot', () => {
     expect(sheet.getAttribute('aria-label')).toBe('✨ Picture · Theo');
     expect(sheet.querySelector('.dr-gen-panel')).not.toBeNull();
     editor.closePalette();
+    editor.destroy();
+  });
+
+  it('keeps what made each picture and clip, and shows it in the sheet', async () => {
+    const saved: GenerationRecord[] = [];
+    setGenerationLog({ save: (r) => void saved.push(r), list: async (node, param) => saved.filter((r) => r.node === node && r.param === param).reverse() });
+    setImageGenerators([{ id: 'img', name: 'Img', maxReferences: 9, async generate() {
+      return { images: ['https://img.test/new.png'], credits: 3 };
+    } }]);
+    setVideoGenerators([{ id: 'fake', name: 'Fake', models: [{ id: 'm', label: 'Model M' }], async generate(req) {
+      req.onSubmitted?.({ service: 'fake', startedAt: 1, request: 'r' });
+      return { videos: ['https://v/clip.mp4'] };
+    } }]);
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      throw new TypeError('offline');
+    }) as typeof fetch;
+    const { editor } = mount();
+    await editor.setView('shots');
+    // A picture: ✨ Frame on shot 2.
+    editor.openFieldSheet('s1b', 'images', '✨ Frame', 'dr-generate');
+    await tick(360);
+    let sheet = [...document.querySelectorAll<HTMLElement>('.nm-field-sheet')].pop()!;
+    sheet.querySelector<HTMLButtonElement>('.dr-gen-go')!.click();
+    await pressConfirm();
+    await tick(30);
+    expect(saved[0]).toMatchObject({ kind: 'image', node: 's1b', param: 'images', service: 'Img', settings: { aspect: '16:9' }, cost: '3 credits' });
+    expect(saved[0].prompt).toMatch(/^Storyboard frame/);
+    expect(saved[0].references.length).toBeGreaterThan(0);
+    editor.closePalette();
+    // A clip: kept when the service accepts it.
+    editor.openFieldSheet('s1b', 'lastFrame', '🎬 Clip', 'dr-generate');
+    await tick(360);
+    sheet = [...document.querySelectorAll<HTMLElement>('.nm-field-sheet')].pop()!;
+    sheet.querySelector<HTMLButtonElement>('.dr-clip-panel .dr-gen-go')!.click();
+    await pressConfirm();
+    await tick(30);
+    expect(saved).toHaveLength(2);
+    expect(saved[1]).toMatchObject({ kind: 'clip', node: 's1b', param: 'lastFrame', service: 'Fake', model: 'Model M' });
+    expect(saved[1].prompt).toBe(seedanceShot(toDrama(editor.graph), 's1b').prompt);
+    // Shown in the sheet, newest first, with the prompt laid out.
+    editor.closePalette();
+    editor.openFieldSheet('s1b', 'images', '✨ Frame');
+    sheet = [...document.querySelectorAll<HTMLElement>('.nm-field-sheet')].pop()!;
+    const h = sheet.querySelector<HTMLDetailsElement>('.dr-history')!;
+    h.open = true;
+    h.dispatchEvent(new Event('toggle'));
+    await tick(5);
+    expect(h.querySelectorAll('.dr-history-item')).toHaveLength(1);
+    expect(h.querySelector('.dr-history-item summary')!.textContent).toMatch(/Img · 16:9 · 3 credits$/);
+    expect(h.querySelector('.dr-history-item .dr-review')).not.toBeNull();
+    editor.closePalette();
+    globalThis.fetch = realFetch;
+    setGenerationLog(null);
     editor.destroy();
   });
 

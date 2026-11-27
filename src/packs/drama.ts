@@ -230,6 +230,87 @@ export function confirmSpend(
   });
 }
 
+/**
+ * What made a picture or a clip: the exact prompt, the reference pictures, the service, model
+ * and settings, and the result. The host keeps these (Drama Club: for 7 days).
+ */
+export interface GenerationRecord {
+  at: number;
+  kind: 'image' | 'clip';
+  /** The node and field it was made for. */
+  node: string;
+  param: string;
+  service: string;
+  model?: string;
+  prompt: string;
+  /** In the order sent (@Image1…); `src` only for links (not pictures held inline). */
+  references: { label: string; src?: string }[];
+  settings?: Record<string, unknown>;
+  /** What came back (links), when known. */
+  result?: string[];
+  cost?: string;
+}
+export interface GenerationLog {
+  save(record: GenerationRecord): void | Promise<void>;
+  /** Newest first. */
+  list(node: string, param: string): Promise<GenerationRecord[]>;
+}
+let generationLog: GenerationLog | null = null;
+/** Where records of what made each picture and clip go (none: not kept). */
+export function setGenerationLog(log: GenerationLog | null): void {
+  generationLog = log;
+}
+/** A link worth keeping in a record (pictures held inline are too big, and on the card anyway). */
+const linkOnly = (src: string | undefined) => (src && !src.startsWith('data:') && !src.startsWith('blob:') ? src : undefined);
+const logGeneration = (r: GenerationRecord) => {
+  try {
+    void Promise.resolve(generationLog?.save(r)).catch(() => undefined);
+  } catch {
+    /* a log that fails mustn't stop the work */
+  }
+};
+
+/**
+ * 🕘 How these were made: the field's records (newest first), each with its time, service,
+ * model and settings, the result, and the prompt laid out to read (promptReview).
+ */
+function generationHistory(node: string, param: string): HTMLElement | undefined {
+  if (!generationLog) return undefined;
+  const d = document.createElement('details');
+  d.className = 'dr-history';
+  d.append(Object.assign(document.createElement('summary'), { textContent: '🕘 How these were made (last 7 days)' }));
+  const body = document.createElement('div');
+  d.append(body);
+  d.addEventListener('toggle', async () => {
+    if (!d.open || body.dataset.loaded) return;
+    body.dataset.loaded = '1';
+    body.textContent = 'Loading…';
+    try {
+      const list = await generationLog!.list(node, param);
+      body.textContent = list.length ? '' : 'Nothing generated here in the last 7 days.';
+      for (const r of list) {
+        const item = document.createElement('details');
+        item.className = 'dr-history-item';
+        const when = new Date(r.at).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+        const sets = Object.entries(r.settings ?? {})
+          .filter(([, v]) => v != null && v !== '' && v !== false)
+          .map(([k, v]) => (v === true ? k : k === 'duration' ? `${v} s` : String(v)))
+          .join(' · ');
+        const sum = document.createElement('summary');
+        const pic = r.result?.[0] && r.kind === 'image' ? r.result[0] : undefined;
+        if (pic) sum.append(Object.assign(document.createElement('img'), { src: pic, alt: '' }));
+        sum.append(`${when} · ${r.service}${r.model ? ` · ${r.model}` : ''}${sets ? ` · ${sets}` : ''}${r.cost ? ` · ${r.cost}` : ''}`);
+        item.append(sum, promptReview(r.prompt, r.references.map((x) => ({ src: x.src ?? '', label: x.label })).filter((x) => x.src)));
+        if (r.references.some((x) => !x.src)) item.append(Object.assign(document.createElement('small'), { textContent: `Pictures sent: ${r.references.map((x, i) => `${i + 1}. ${x.label}`).join('; ')}` }));
+        body.append(item);
+      }
+    } catch (err) {
+      body.textContent = `Couldn’t load them: ${(err as Error).message}`;
+    }
+  });
+  return d;
+}
+
 /** Clips whose first frame was already looked for on this page. */
 const posterTried = new Set<string>();
 
@@ -882,6 +963,7 @@ export const clipFrameParam: ParamKind = {
           .catch(() => undefined);
       }
     };
+    const history = ctx.place === 'sheet' ? generationHistory(ctx.node.id, ctx.param.name) : undefined;
     /** Tell the shot's other views (its card) how the clip this field is making is going. */
     let shared: Pending | undefined;
     const share = () => {
@@ -936,6 +1018,7 @@ export const clipFrameParam: ParamKind = {
       }
       wrap.append(status);
       if (panel) wrap.append(panel);
+      if (history) wrap.append(history);
     };
 
     // A clip being generated is kept on the shot (clipJob) until it's collected, so a closed
@@ -1241,7 +1324,27 @@ export const clipFrameParam: ParamKind = {
             referencePicture(src).catch((err) => {
               throw new Error(`A reference picture couldn’t be prepared (${(err as Error).message}). Switch it off and try again.`);
             });
-          const picked = await Promise.all(refs.filter((r) => on.has(r.src)).map((r) => ready(r.src)));
+          const sentRefs = refs.filter((r) => on.has(r.src));
+          const picked = await Promise.all(sentRefs.map((r) => ready(r.src)));
+          let logged = false;
+          const record = (result?: string[]) => {
+            if (logged) return;
+            logged = true;
+            const q = quote();
+            logGeneration({
+              at: Date.now(),
+              kind: 'clip',
+              node: ctx.node.id,
+              param: ctx.param.name,
+              service: gen.name,
+              model: gen.models.find((x) => x.id === model.value)?.label ?? model.value,
+              prompt: prompt.value.trim(),
+              references: sentRefs.map((r) => ({ label: r.label, ...(linkOnly(r.src) ? { src: r.src } : {}) })),
+              settings: { duration: Number(dur.value), aspect: aspect.value, resolution: res.value, sound: audio.checked && !audio.disabled },
+              ...(result ? { result } : {}),
+              ...(q ? { cost: `about ${money(q)}` } : {}),
+            });
+          };
           const first = s?.firstFrame && on.has(s.firstFrame) ? await ready(s.firstFrame) : undefined;
           st.textContent = `Asking ${gen.name}…`;
           const result = await gen.generate({
@@ -1260,6 +1363,7 @@ export const clipFrameParam: ParamKind = {
             },
             // Accepted: keep the job on the shot, so the clip can be collected even if this page can't wait.
             onSubmitted: (job) => {
+              record(); // accepted: what made it is kept, even if this page can't wait for it
               submitted = true;
               collecting.add(`${ctx.node.id}:${job.startedAt}`);
               ctx.graph.setParam(ctx.node.id, 'clipJob', job);
@@ -1268,6 +1372,7 @@ export const clipFrameParam: ParamKind = {
           });
           const clip = result.videos[0];
           if (!clip) throw new Error(`${gen.name} returned no clip`);
+          record([clip]);
           const e = quote();
           st.textContent = 'Taking the last frame…';
           await collect(clip, result.cost ?? (e ? `about ${money(e)}` : ''), abort.signal);
@@ -1667,6 +1772,19 @@ export const imagesParam: ParamKind = {
             if (k.copied) kept++;
           }
           if (!added.length) throw new Error(`${gen.name} returned no picture`);
+          logGeneration({
+            at: Date.now(),
+            kind: 'image',
+            node: ctx.node.id,
+            param: ctx.param.name,
+            service: gen.name,
+            model: gen.models?.find((x) => x.id === model.value)?.label ?? (gen.models?.length ? model.value : undefined),
+            prompt: prompt.value.trim() + legend,
+            references: picked.map((r) => ({ label: r.label, ...(linkOnly(r.src) ? { src: r.src } : {}) })),
+            settings: { aspect: aspect.value },
+            result: added.map(linkOnly).filter((x): x is string => !!x),
+            ...(result.credits != null ? { cost: `${result.credits} credits` } : {}),
+          });
           note = `Added ${added.length} from ${gen.name}${result.credits != null ? ` · ${result.credits} credits` : ''}${result.balance != null ? ` · ${result.balance.toLocaleString()} left` : ''}${kept < added.length ? ' · linked, not copied: the link expires' : ''}`;
           making = undefined;
           share(); // the card stops showing it, even if this sheet has closed
@@ -1709,6 +1827,7 @@ export const imagesParam: ParamKind = {
     };
     // A card's ✨ Picture button opens this field in a sheet, with its panel open.
     wrap.addEventListener(GENERATE_EVENT, () => !panel && openPanel());
+    const history = ctx.place === 'sheet' ? generationHistory(ctx.node.id, ctx.param.name) : undefined;
     /** Tell the node's other views (its card, when this is a sheet) how the picture is going. */
     const liveKey = `${ctx.node.id}:${ctx.param.name}`;
     let shared: Pending | undefined;
@@ -1792,6 +1911,8 @@ export const imagesParam: ParamKind = {
           wrap.append(g);
         }
       }
+      // In the sheet: how its pictures were made (the last 7 days); made once, so it stays open.
+      if (history) wrap.append(history);
       // On the board, a field can offer its own ✨ (e.g. ✨ Frame beside a shot's frames): it opens
       // the field in a sheet with the generate panel, like the cards' ✨ / 🎬 buttons.
       const cardLabel = (p as { cardGenerate?: string }).cardGenerate;
@@ -2767,6 +2888,13 @@ const css = `
 .dr-clip small { flex-basis: 100%; color: var(--_muted); font-size: 11px; }
 .dr-clip small:empty { display: none; }
 .dr-clip-panel { flex-basis: 100%; }
+.dr-history { flex-basis: 100%; font-size: 13px; color: var(--_text); }
+.dr-history > summary { cursor: pointer; color: var(--_muted); padding: 6px 0; }
+.dr-history-item { border-top: 1px solid var(--_border); padding: 6px 0; }
+.dr-history-item > summary { cursor: pointer; display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.dr-history-item > summary img { width: 44px; height: 32px; object-fit: cover; border-radius: 4px; flex: none; }
+.dr-history-item .dr-review { margin-top: 8px; }
+.dr-history-item small { display: block; color: var(--_muted); margin-top: 4px; }
 /* The prompt, laid out to read on a phone. */
 .dr-review { display: flex; flex-direction: column; gap: 10px; font: 14px/1.5 var(--_font); color: var(--_text); }
 .dr-review-part { border-left: 3px solid var(--_border); padding: 2px 0 2px 10px; }
