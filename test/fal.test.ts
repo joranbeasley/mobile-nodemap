@@ -107,6 +107,53 @@ describe('fal video (Seedance)', () => {
     expect(gen.estimate!({ model: 'nope' })).toBeUndefined();
   });
 
+  it('keeps waiting through lost connections, hands over the job, and can resume it later', async () => {
+    let failures = 2;
+    let polls = 0;
+    const calls: string[] = [];
+    const json = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as Response;
+    const fetch = (async (url: string, init: RequestInit = {}) => {
+      calls.push(url);
+      if (init.method === 'POST')
+        return json({ request_id: 'req-9', status_url: 'https://evil.test/steal', response_url: 'https://queue.fal.run/bytedance/seedance-2.0/requests/req-9' });
+      if (url.endsWith('/status')) {
+        if (failures-- > 0) throw new TypeError('Failed to fetch'); // the phone slept
+        return json(++polls < 2 ? { status: 'IN_PROGRESS' } : { status: 'COMPLETED' });
+      }
+      return json({ video: { url: 'https://v3.fal.media/files/clip.mp4' } });
+    }) as unknown as typeof globalThis.fetch;
+    const gen = falVideoGenerator({ apiKey: 'k', fetch, pollMs: 1 });
+    const jobs: any[] = [];
+    const progress: string[] = [];
+    const res = await gen.generate({ prompt: 'x', onSubmitted: (j) => jobs.push(j), onProgress: (t) => progress.push(t) });
+    expect(res.videos).toEqual(['https://v3.fal.media/files/clip.mp4']);
+    expect(progress).toContain('Lost touch with fal; trying again…');
+    // The job: no key in it, and only fal's own URLs (the off-fal status URL was ignored).
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({ service: 'fal', request: 'req-9', status: 'https://queue.fal.run/bytedance/seedance-2.0/requests/req-9/status', result: 'https://queue.fal.run/bytedance/seedance-2.0/requests/req-9' });
+    expect(JSON.stringify(jobs[0])).not.toContain('k-');
+    expect(calls.some((u) => u.includes('evil.test'))).toBe(false);
+    // Later, from the saved job: no second submit.
+    polls = 0;
+    const again = await gen.resume!(jobs[0]);
+    expect(again.videos).toEqual(['https://v3.fal.media/files/clip.mp4']);
+    expect(calls.filter((u) => u.endsWith('/text-to-video'))).toHaveLength(1);
+    // Jobs that aren't fal's are refused.
+    await expect(gen.resume!({ ...jobs[0], status: 'https://evil.test/x' })).rejects.toThrow('not on fal');
+    await expect(gen.resume!({ service: 'other', startedAt: 0 })).rejects.toThrow('not on fal');
+  });
+
+  it('says a job is still pending (rather than failed) when it runs out of time', async () => {
+    const json = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as Response;
+    const g2 = falVideoGenerator({
+      apiKey: 'k',
+      pollMs: 1,
+      timeoutMs: 5,
+      fetch: (async (_u: string, init: RequestInit = {}) => json(init.method === 'POST' ? { request_id: 'r' } : { status: 'IN_QUEUE' })) as unknown as typeof fetch,
+    });
+    await expect(g2.generate({ prompt: 'x' })).rejects.toMatchObject({ code: 'pending' });
+  });
+
   it('refuses SVG drawings (fal can’t read them) before uploading anything', async () => {
     const fal = fakeFal({ video: { url: 'https://v/c.mp4' } });
     const gen = falVideoGenerator({ apiKey: 'k', fetch: fal.fetch, pollMs: 1 });
@@ -224,6 +271,68 @@ describe('🎬 Generate clip on a shot', () => {
     service().dispatchEvent(new Event('change'));
     expect(field().querySelector('.dr-gen-panel')!.getAttribute('aria-label')).toBe('Generate an image with FAL');
     expect(localStorage.getItem('nodemap:image-generator')).toBe('fal');
+    editor.destroy();
+  });
+});
+
+describe('🎬 clips that finish while the page is away', () => {
+  const mount = () => {
+    const g = Graph.fromJSON(drama2Graph.examples![0].graph, drama2Graph.createRegistry());
+    const el = document.createElement('div');
+    document.body.append(el);
+    const editor = new NodeEditor(el, { graph: g, registry: g.registry!, views: drama2Graph.editor!.views });
+    return { g, el, editor };
+  };
+  const job = { service: 'fake', startedAt: Date.UTC(2026, 10, 27, 6, 30), request: 'r1' };
+
+  it('shows a clip being made, collects it when it is ready, and forgets the job', async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      throw new TypeError('offline');
+    }) as typeof fetch;
+    let asked = 0;
+    setVideoGenerators([{ id: 'fake', name: 'Fake', models: [], async generate() {
+      return { videos: [] };
+    }, async resume(j) {
+      asked++;
+      expect(j).toMatchObject(job);
+      return { videos: ['https://v/done.mp4'] };
+    } }]);
+    const { g, el, editor } = mount();
+    g.setParam('s1b', 'clipJob', job);
+    await editor.setView('shots');
+    await tick(20);
+    expect(asked).toBe(1);
+    expect(g.nodes.get('s1b')!.params.clipUrl).toBe('https://v/done.mp4');
+    expect(g.nodes.get('s1b')!.params.clipJob).toBeNull();
+    const field = el.querySelector<HTMLElement>('.nm-node[data-id="s1b"] [data-param="lastFrame"]')!;
+    expect(field.textContent).toMatch(/Clip ready/);
+    expect(field.querySelector('.dr-clip-job')).toBeNull();
+    globalThis.fetch = realFetch;
+    editor.destroy();
+  });
+
+  it('keeps a job that is still running, and drops one that failed', async () => {
+    let outcome: 'pending' | 'failed' = 'pending';
+    setVideoGenerators([{ id: 'fake', name: 'Fake', models: [], async generate() {
+      return { videos: [] };
+    }, async resume() {
+      throw outcome === 'pending' ? Object.assign(new Error('Still generating on Fake.'), { code: 'pending' }) : new Error('Content policy');
+    } }]);
+    const { g, el, editor } = mount();
+    g.setParam('s1b', 'clipJob', job);
+    await editor.setView('shots');
+    await tick(20);
+    const field = () => el.querySelector<HTMLElement>('.nm-node[data-id="s1b"] [data-param="lastFrame"]')!;
+    expect(g.nodes.get('s1b')!.params.clipJob).toEqual(job);
+    expect(field().querySelector('.dr-clip-job')!.textContent).toMatch(/^⏳ Generating on fake since/);
+    expect(field().textContent).toMatch(/Still generating on Fake/);
+    expect([...field().querySelectorAll('button')].some((b) => b.textContent === '🎬 Generate clip')).toBe(false); // one at a time
+    outcome = 'failed';
+    [...field().querySelectorAll('button')].find((b) => b.textContent === 'Check now')!.click();
+    await tick(20);
+    expect(g.nodes.get('s1b')!.params.clipJob).toBeNull();
+    expect(field().textContent).toMatch(/The clip didn't finish on Fake: Content policy/);
     editor.destroy();
   });
 });

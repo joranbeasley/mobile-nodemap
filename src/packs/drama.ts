@@ -3,7 +3,10 @@ import type { Graph } from '../core/graph.js';
 import type { NodeInstance, NodeResult, NodeType, ParamKind, PortTypeDef } from '../core/types.js';
 import { saveDramaFile, seedancePack, seedanceScript } from './drama-seedance.js';
 import { getImageGenerators, type ImageGenerator } from './image-generation.js';
-import { getVideoGenerators, type VideoGenerator } from './video-generation.js';
+import { getVideoGenerators, type VideoGenerator, type VideoJob } from './video-generation.js';
+
+/** Clips being collected right now (shot id + job start), so redraws don't ask twice. */
+const collecting = new Set<string>();
 
 /** The generator people last chose (per kind), remembered in this browser. */
 function preferred<T extends { id: string }>(kind: string, list: T[]): T | null {
@@ -264,10 +267,77 @@ export const clipFrameParam: ParamKind = {
         const watch = Object.assign(document.createElement('a'), { href: url, target: '_blank', rel: 'noopener', className: 'dr-clip-btn dr-clip-watch', textContent: '▶ Watch clip' });
         wrap.append(watch);
       }
-      if (getVideoGenerators().length) wrap.append(button('🎬 Generate clip', 'Generate a clip for this shot', () => openGen()));
+      const job = jobOf();
+      if (job) {
+        const since = new Date(job.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        wrap.append(
+          Object.assign(document.createElement('span'), { className: 'dr-clip-job', textContent: `⏳ Generating on ${job.service} since ${since}` }),
+          button('Check now', 'Check on the clip being generated', () => void collectJob()),
+          button('Forget', 'Stop waiting for this clip', () => {
+            ctx.graph.setParam(ctx.node.id, 'clipJob', null);
+            status.textContent = 'Stopped waiting. If it finishes, it stays in your account on the service.';
+            draw();
+          }),
+        );
+      } else if (getVideoGenerators().length) wrap.append(button('🎬 Generate clip', 'Generate a clip for this shot', () => openGen()));
       wrap.append(status);
       if (panel) wrap.append(panel);
     };
+
+    // A clip being generated is kept on the shot (clipJob) until it's collected, so a closed
+    // page, a sleeping phone or another device can still pick it up.
+    const jobOf = (): VideoJob | undefined => {
+      const j = ctx.graph.nodes.get(ctx.node.id)?.params.clipJob as VideoJob | null | undefined;
+      return j && typeof j === 'object' && typeof j.service === 'string' ? j : undefined;
+    };
+    /** A finished clip: keep its link and its last frame, and forget the job. */
+    const collect = async (clip: string, spent: string, signal?: AbortSignal) => {
+      ctx.graph.setParam(ctx.node.id, 'clipUrl', clip);
+      ctx.graph.setParam(ctx.node.id, 'clipJob', null);
+      try {
+        value = await lastFrameOf(await (await fetch(clip, { signal })).blob());
+        ctx.set(value);
+        status.textContent = `Clip ready${spent ? ` · ${spent}` : ''}. Its link may expire: download it to keep it.`;
+      } catch (err) {
+        if ((err as Error).name === 'AbortError') throw err;
+        status.textContent = `Clip ready${spent ? ` · ${spent}` : ''}. Its last frame couldn’t be taken here: download it and add it with 🎞.`;
+      }
+    };
+    /** Ask the service about a clip sent earlier, and collect it if it's done. */
+    const collectJob = async () => {
+      const job = jobOf();
+      if (!job) return;
+      const gen = getVideoGenerators().find((g) => g.id === job.service);
+      if (!gen?.resume) return void (status.textContent = `This clip is being made on ${job.service}, which isn't set up here.`);
+      if (gen.key && !gen.key.get()) return void (status.textContent = `Add your ${gen.key.label} to collect this clip.`);
+      const k = `${ctx.node.id}:${job.startedAt}`;
+      if (collecting.has(k)) return;
+      collecting.add(k);
+      status.textContent = 'Checking on the clip…';
+      try {
+        const r = await gen.resume(job, { onProgress: (t) => (status.textContent = t) });
+        if (!r.videos[0]) throw new Error(`${gen.name} returned no clip`);
+        await collect(r.videos[0], r.cost ?? '');
+      } catch (err) {
+        if ((err as { code?: string }).code === 'pending') status.textContent = (err as Error).message;
+        else {
+          ctx.graph.setParam(ctx.node.id, 'clipJob', null);
+          status.textContent = `The clip didn't finish on ${gen.name}: ${(err as Error).message}`;
+        }
+      } finally {
+        collecting.delete(k);
+        if (wrap.isConnected) draw();
+      }
+    };
+    // Check when the shot is shown, and again when the page comes back from the background.
+    const onVisible = () => {
+      if (!wrap.isConnected) return document.removeEventListener('visibilitychange', onVisible);
+      if (document.visibilityState === 'visible' && jobOf()) void collectJob();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    queueMicrotask(() => {
+      if (jobOf()) void collectJob();
+    });
 
     // 🎬 Generate clip: the shot's own Seedance prompt and pictures, sent to a video service.
     let panel: HTMLElement | undefined;
@@ -386,13 +456,21 @@ export const clipFrameParam: ParamKind = {
       const go = el('button', { type: 'button', class: 'dr-gen-go' }, `🎬 Generate with ${gen.name}`) as HTMLButtonElement;
       const cancel = el('button', { type: 'button', class: 'dr-gen-cancel' }, 'Cancel') as HTMLButtonElement;
       const st = el('div', { class: 'dr-gen-status', role: 'status' });
-      cancel.addEventListener('click', () => openGen());
+      cancel.addEventListener('click', () => {
+        // Already sent? It still finishes on the service: the field keeps the job and collects it.
+        if (jobOf()) status.textContent = 'Still generating: it will be collected when it’s ready.';
+        openGen();
+        // After the cancelled wait has let go of it.
+        setTimeout(() => jobOf() && void collectJob(), 50);
+      });
       go.addEventListener('click', async () => {
         if (gen.key && !gen.key.get()) return void (st.textContent = `Add your ${gen.key.label} first.`);
         if (!prompt.value.trim()) return void (st.textContent = 'Write a prompt first.');
         abort = new AbortController();
         go.disabled = true;
         st.textContent = `Asking ${gen.name}…`;
+        let submitted = false;
+        let jobKey = '';
         try {
           // Pictures the service can read: drawings (SVG) and oversized pictures become JPEGs, as in ✨.
           st.textContent = 'Preparing pictures…';
@@ -410,28 +488,34 @@ export const clipFrameParam: ParamKind = {
             audio: audio.checked && !audio.disabled,
             signal: abort.signal,
             onProgress: (t) => (st.textContent = t),
+            // Accepted: keep the job on the shot, so the clip can be collected even if this page can't wait.
+            onSubmitted: (job) => {
+              submitted = true;
+              collecting.add(`${ctx.node.id}:${job.startedAt}`);
+              ctx.graph.setParam(ctx.node.id, 'clipJob', job);
+              jobKey = `${ctx.node.id}:${job.startedAt}`;
+            },
           });
           const clip = result.videos[0];
           if (!clip) throw new Error(`${gen.name} returned no clip`);
           const e = quote();
-          const spent = result.cost ?? (e ? `about ${money(e)}` : '');
-          ctx.graph.setParam(ctx.node.id, 'clipUrl', clip);
-          // Keep its last frame, as if the clip had been added by hand.
           st.textContent = 'Taking the last frame…';
-          try {
-            value = await lastFrameOf(await (await fetch(clip, { signal: abort.signal })).blob());
-            ctx.set(value);
-            status.textContent = `Clip ready${spent ? ` · ${spent}` : ''}. Its link may expire: download it to keep it.`;
-          } catch (err) {
-            if ((err as Error).name === 'AbortError') throw err;
-            status.textContent = `Clip ready${spent ? ` · ${spent}` : ''}. Its last frame couldn’t be taken here: download it and add it with 🎞.`;
-          }
+          await collect(clip, result.cost ?? (e ? `about ${money(e)}` : ''), abort.signal);
           panel = undefined;
           draw();
         } catch (err) {
           if ((err as Error).name === 'AbortError') return;
+          if (submitted && (err as { code?: string }).code === 'pending') {
+            // Still on the service: the field shows it and collects it later.
+            status.textContent = (err as Error).message;
+            panel = undefined;
+            return draw();
+          }
+          if (submitted) ctx.graph.setParam(ctx.node.id, 'clipJob', null);
           st.textContent = (err as Error).message || 'Something went wrong';
           go.disabled = false;
+        } finally {
+          if (jobKey) collecting.delete(jobKey);
         }
       });
       box.append(row(go, cancel, ...(gen.site ? [el('a', { href: gen.site, target: '_blank', rel: 'noopener', class: 'dr-gen-cancel dr-gen-link' }, 'Prices')] : [])), st);
@@ -1706,6 +1790,7 @@ const css = `
 .dr-clip-panel .dr-clip-dur input[type=number] { width: 52px !important; min-width: 0; }
 .dr-clip-sound { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
 .dr-clip-watch { text-decoration: none; }
+.dr-clip-job { font-size: 12px; color: var(--_text); }
 .dr-gen-link { text-decoration: none; display: inline-block; }
 .dr-file { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 0; }
 .dr-status { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--_text); }

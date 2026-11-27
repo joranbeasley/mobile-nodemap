@@ -10,7 +10,27 @@
  * Model inputs follow the types fal publishes in @fal-ai/client (types/endpoints.d.ts).
  */
 import type { ImageGenerator } from './image-generation.js';
-import type { VideoGenerator, VideoModel, VideoRequest } from './video-generation.js';
+import type { VideoGenerator, VideoJob, VideoModel, VideoRequest } from './video-generation.js';
+
+/** A fal queue request: where to ask for its status and its result. */
+export interface FalJob extends VideoJob {
+  service: 'fal';
+  endpoint: string;
+  request: string;
+  status: string;
+  result: string;
+}
+
+/** Only follow URLs on fal's own servers (fal.run, fal.ai), over https. */
+const onFal = (u: unknown): u is string => {
+  try {
+    const url = new URL(String(u));
+    return url.protocol === 'https:' && /(^|\.)(fal\.run|fal\.ai)$/.test(url.hostname);
+  } catch {
+    return false;
+  }
+};
+const pending = (message: string) => Object.assign(new Error(message), { code: 'pending' });
 
 type FetchLike = typeof fetch;
 type Key = NonNullable<VideoGenerator['key']>;
@@ -158,26 +178,62 @@ function falClient(opts: FalOptions) {
     return uploaded.get(src)!;
   };
 
-  /** Submit, wait in the queue, and return the result. */
-  const run = async (endpoint: string, input: Record<string, unknown>, signal?: AbortSignal, onStatus?: (s: string) => void) => {
+  /** Send a job to fal's queue. A second submit would be a second (billed) job, so this happens once. */
+  const submit = async (endpoint: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<FalJob> => {
     const submitted = await call(`${queue}/${endpoint}`, { method: 'POST', signal, body: JSON.stringify(input) });
     const id = submitted.request_id;
     if (!id) throw new Error('fal did not return a request');
-    // Status and result live under the app (owner/alias), not the full endpoint path.
+    // Status and result live under the app (owner/alias), not the full endpoint path. Use the URLs
+    // fal returns when they are on fal's own servers.
     const app = endpoint.split('/').slice(0, 2).join('/');
-    const statusUrl: string = submitted.status_url ?? `${queue}/${app}/requests/${id}/status`;
-    const resultUrl: string = submitted.response_url ?? `${queue}/${app}/requests/${id}`;
-    const until = Date.now() + (opts.timeoutMs ?? 15 * 60_000);
+    return {
+      service: 'fal',
+      startedAt: Date.now(),
+      endpoint,
+      request: String(id),
+      status: onFal(submitted.status_url) ? submitted.status_url : `${queue}/${app}/requests/${id}/status`,
+      result: onFal(submitted.response_url) ? submitted.response_url : `${queue}/${app}/requests/${id}`,
+    };
+  };
+
+  /**
+   * Wait for a job and return its result. Losing touch with fal (a phone asleep, a tab in the
+   * background, a dropped connection) doesn't end the wait: it tries again, backing off. Running
+   * out of time rejects with code 'pending': the job may still finish, so keep it.
+   */
+  const wait = async (job: FalJob, signal?: AbortSignal, onStatus?: (s: string) => void, timeoutMs = opts.timeoutMs ?? 15 * 60_000) => {
+    if (!onFal(job.status) || !onFal(job.result)) throw new Error('That job is not on fal');
+    const until = Date.now() + timeoutMs;
+    let retry = opts.pollMs ?? 3000;
+    const tryCall = async (url: string) => {
+      for (;;) {
+        try {
+          const r = await call(url, { signal });
+          retry = opts.pollMs ?? 3000;
+          return r;
+        } catch (err) {
+          if ((err as { code?: string }).code !== 'blocked') throw err;
+          if (Date.now() > until) throw pending('Lost touch with fal. The clip may still finish: it will be collected when fal can be reached.');
+          onStatus?.('Lost touch with fal; trying again…');
+          await sleep(retry, signal);
+          retry = Math.min(retry * 2, 30_000);
+        }
+      }
+    };
     for (;;) {
-      const st = await call(statusUrl, { signal });
+      const st = await tryCall(job.status);
       if (st.status === 'COMPLETED') break;
       onStatus?.(st.status === 'IN_QUEUE' ? `In fal's queue${typeof st.queue_position === 'number' ? ` (${st.queue_position} ahead)` : ''}…` : 'Generating…');
-      if (Date.now() > until) throw new Error('fal is taking too long; the request may still finish on fal');
+      if (Date.now() > until) throw pending('Still generating on fal. It will be collected when it is ready.');
       await sleep(opts.pollMs ?? 3000, signal);
     }
-    return call(resultUrl, { signal });
+    return tryCall(job.result);
   };
-  return { key, run, fileUrl };
+
+  /** Submit, wait in the queue, and return the result. */
+  const run = async (endpoint: string, input: Record<string, unknown>, signal?: AbortSignal, onStatus?: (s: string) => void) =>
+    wait(await submit(endpoint, input, signal), signal, onStatus);
+  return { key, run, submit, wait, fileUrl };
 }
 
 const nearest = (values: string[] | undefined, want: string | undefined, fallback: string) => {
@@ -190,6 +246,12 @@ const nearest = (values: string[] | undefined, want: string | undefined, fallbac
   const r = want ? ratio(want) : NaN;
   if (!Number.isNaN(r)) return [...values].sort((a, b) => Math.abs(ratio(a) - r) - Math.abs(ratio(b) - r))[0];
   return values.includes(fallback) ? fallback : values[0];
+};
+
+const clipOf = (out: Record<string, any>) => {
+  const url = out?.video?.url;
+  if (!url) throw new Error('fal returned no clip');
+  return { videos: [url as string] };
 };
 
 /**
@@ -238,10 +300,14 @@ export function falVideoGenerator(opts: FalOptions & { model?: string } = {}): V
         endpoint = m.endpoints.text;
         input = base;
       }
-      const out = await fal.run(endpoint, input, req.signal, req.onProgress);
-      const url = out?.video?.url;
-      if (!url) throw new Error('fal returned no clip');
-      return { videos: [url] };
+      const job = await fal.submit(endpoint, input, req.signal);
+      req.onSubmitted?.(job);
+      return clipOf(await fal.wait(job, req.signal, req.onProgress));
+    },
+    async resume(job, { signal, onProgress } = {}) {
+      if (job.service !== 'fal') throw new Error('That job is not on fal');
+      // A short look: the caller tries again later if it isn't ready.
+      return clipOf(await fal.wait(job as FalJob, signal, onProgress, 2 * 60_000));
     },
   };
 }

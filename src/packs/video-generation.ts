@@ -29,6 +29,20 @@ export interface VideoRequest {
   signal?: AbortSignal;
   /** What it's doing, e.g. "In queue (3 ahead)", "Generating…". */
   onProgress?: (status: string) => void;
+  /**
+   * The service accepted the job. Keep it (it holds no key): if waiting is cut short (the page
+   * closes, the phone sleeps, the connection drops), `resume(job)` collects the clip later.
+   */
+  onSubmitted?: (job: VideoJob) => void;
+}
+
+/** A clip being made on a service: enough to collect it later. */
+export interface VideoJob {
+  /** The generator's id. */
+  service: string;
+  /** When it was sent (ms since 1970). */
+  startedAt: number;
+  [k: string]: unknown;
 }
 
 export interface VideoResult {
@@ -73,6 +87,11 @@ export interface VideoGenerator {
   /** An API key the person gives once; the host decides where it is kept. */
   key?: { label: string; help?: string; get(): string | null | undefined; set(value: string): void };
   generate(req: VideoRequest): Promise<VideoResult>;
+  /**
+   * Wait for a job sent earlier and return its clip. Rejects with `code: 'pending'` when it is
+   * still running (or the service can't be reached yet): keep the job and try again later.
+   */
+  resume?(job: VideoJob, opts?: { signal?: AbortSignal; onProgress?: (status: string) => void }): Promise<VideoResult>;
   /** What a clip with these settings will probably cost; undefined when unknown. */
   estimate?(req: { model?: string; duration?: number; resolution?: string; aspect?: string }): VideoEstimate | undefined;
   /** Where to see prices and make clips by hand. */
