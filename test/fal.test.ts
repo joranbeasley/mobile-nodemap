@@ -589,6 +589,37 @@ describe('placeholders while generating', () => {
     editor.destroy();
   });
 
+  it('shows a picture being made from its sheet on the card too, until it lands', async () => {
+    let finish!: (v: { images: string[] }) => void;
+    let report!: (pc: number) => void;
+    setImageGenerators([{ id: 'meshy', name: 'Meshy', async generate(req) {
+      report = (pc) => req.onProgress?.(pc);
+      return new Promise((r) => (finish = r));
+    } }]);
+    const { g, el, editor } = mount();
+    await editor.setView('cast');
+    // ✨ Picture beside Theo's pictures: the sheet, with the panel open.
+    el.querySelector<HTMLButtonElement>('.nm-node[data-id="theo"] [data-param="images"] .dr-gen-card')!.click();
+    await tick(360); // the sheet's guard against the opening tap
+    const sheet = [...document.querySelectorAll<HTMLElement>('.nm-field-sheet')].pop()!;
+    sheet.querySelector<HTMLButtonElement>('.dr-gen-go')!.click();
+    await pressConfirm();
+    await tick();
+    const onCard = () => el.querySelector<HTMLElement>('.nm-node[data-id="theo"] [data-param="images"] .dr-pending.dr-making');
+    expect(onCard()).not.toBeNull();
+    report(42);
+    expect(onCard()!.getAttribute('aria-label')).toBe('Generating with Meshy 42%');
+    // Closing the sheet doesn't stop it, nor the card showing it.
+    editor.closePalette();
+    report(70);
+    expect(onCard()!.getAttribute('aria-label')).toBe('Generating with Meshy 70%');
+    finish({ images: ['data:image/png;base64,TkVX'] });
+    await tick(30);
+    expect(onCard()).toBeNull();
+    expect((g.nodes.get('theo')!.params.images as string[]).at(-1)).toBe('data:image/png;base64,TkVX');
+    editor.destroy();
+  });
+
   it('shows a clip being made where it will go, with what the service says and the time', async () => {
     let finish!: (v: { videos: string[] }) => void;
     setVideoGenerators([{ id: 'fal', name: 'fal', models: [{ id: 'm', label: 'M', minDuration: 4, maxDuration: 15 }], async generate(req) {

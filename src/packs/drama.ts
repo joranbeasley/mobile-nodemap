@@ -108,6 +108,9 @@ const keepTried = new Set<string>();
  */
 const liveClips = new Map<string, Pending>();
 const CLIP_PROGRESS = 'dr-clip-progress';
+/** Pictures being made from this page, by `node:param`: the field making it shares, the card shows. */
+const liveImages = new Map<string, Pending>();
+const IMAGE_PROGRESS = 'dr-image-progress';
 /** Dispatched on a picture or clip field to open its generate panel (the cards' ✨ / 🎬 buttons). */
 export const GENERATE_EVENT = 'dr-generate';
 
@@ -1235,6 +1238,7 @@ export const imagesParam: ParamKind = {
       cancel.addEventListener('click', () => {
         abort?.abort();
         making = undefined;
+        share(); // the card stops showing it, even if this sheet has closed
         closePanel();
         draw();
       });
@@ -1281,10 +1285,12 @@ export const imagesParam: ParamKind = {
           if (!added.length) throw new Error(`${gen.name} returned no picture`);
           note = `Added ${added.length} from ${gen.name}${result.credits != null ? ` · ${result.credits} credits` : ''}${result.balance != null ? ` · ${result.balance.toLocaleString()} left` : ''}${kept < added.length ? ' · linked, not copied: the link expires' : ''}`;
           making = undefined;
+          share(); // the card stops showing it, even if this sheet has closed
           closePanel();
           commit([...list, ...added]);
         } catch (err) {
           making = undefined;
+          share(); // the card stops showing it, even if this sheet has closed
           draw();
           if ((err as Error).name === 'AbortError') return;
           status.textContent = (err as Error).message || 'Something went wrong';
@@ -1319,7 +1325,31 @@ export const imagesParam: ParamKind = {
     };
     // A card's ✨ Picture button opens this field in a sheet, with its panel open.
     wrap.addEventListener(GENERATE_EVENT, () => !panel && openPanel());
+    /** Tell the node's other views (its card, when this is a sheet) how the picture is going. */
+    const liveKey = `${ctx.node.id}:${ctx.param.name}`;
+    let shared: Pending | undefined;
+    let sending = false;
+    const share = () => {
+      if (making === shared) return;
+      shared = making;
+      if (making) liveImages.set(liveKey, making);
+      else liveImages.delete(liveKey);
+      sending = true; // not to itself
+      try {
+        document.dispatchEvent(new CustomEvent(IMAGE_PROGRESS, { detail: liveKey }));
+      } finally {
+        sending = false;
+      }
+    };
+    if (ctx.place !== 'sheet') {
+      const onProgress = (e: Event) => {
+        if (!wrap.isConnected) return document.removeEventListener(IMAGE_PROGRESS, onProgress);
+        if ((e as CustomEvent).detail === liveKey && !making && !sending) draw();
+      };
+      document.addEventListener(IMAGE_PROGRESS, onProgress);
+    }
     const draw = () => {
+      share();
       const gen = chosenGen;
       wrap.replaceChildren();
       list.forEach((src, i) => {
@@ -1359,7 +1389,9 @@ export const imagesParam: ParamKind = {
         }
         wrap.append(t);
       });
-      if (making) wrap.append(pendingTile('dr-thumb', making));
+      // Being made: here, or (on the card) from the sheet that's making it.
+      const busy = making ?? (ctx.place !== 'sheet' ? liveImages.get(liveKey) : undefined);
+      if (busy) wrap.append(pendingTile('dr-thumb dr-making', busy));
       if (list.length < max) {
         const add = document.createElement('label');
         add.className = 'dr-add';
@@ -2369,6 +2401,8 @@ const css = `
 .dr-clip-len { position: absolute; bottom: 6px; right: 6px; font: 600 11px/1 var(--_font); color: #fff; background: rgba(0,0,0,.6); padding: 3px 6px; border-radius: 4px; }
 /* Being made: the picture dimmed under the status, the time and a moving bar; the frame pulses. */
 .dr-clip-card.dr-clip-making { outline: 2px solid var(--_accent); outline-offset: 2px; animation: dr-pulse 1.6s ease-in-out infinite; }
+/* A picture being made, on a card: its placeholder pulses too. */
+.nm-node .dr-pending.dr-thumb.dr-making { outline: 2px solid var(--_accent); outline-offset: 1px; animation: dr-pulse 1.6s ease-in-out infinite; }
 .dr-clip-card .dr-pending.dr-clip-over { position: absolute; inset: 0; max-width: none; border: 0; border-radius: 0; background: rgba(12, 14, 24, .66); color: #fff; }
 .dr-clip-card .dr-pending.dr-clip-over .dr-pending-label { color: #fff; font-size: 13px; }
 .dr-clip-card .dr-pending.dr-clip-over .dr-pending-time { color: #fff; opacity: .8; }
