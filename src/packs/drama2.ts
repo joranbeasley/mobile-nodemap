@@ -2,7 +2,7 @@ import type { VoiceTrack } from './voices.js';
 import { defineNode, definePack, type GraphEngine } from '../core/registry.js';
 import { Graph } from '../core/graph.js';
 import type { GraphJSON, NodeInstance, NodeResult, NodeType, ParamKind } from '../core/types.js';
-import { DRAMA_DETAILS, GENERATE_EVENT, VOICE_NAMES, audioParam, playSequence, type SequenceItem, viewsParam, SHOT_CLIP_PARAMS, clipFrameParam, dramaImagePrompt, shotClipSuggestion, FRAMINGS, MOVES, TIMES, appearances, dramaEngine, dramaPack, dramaView, imagesParam, sceneInfo, episodeInfo } from './drama.js';
+import { DRAMA_DETAILS, GENERATE_EVENT, audioParam, voicePickParam, playSequence, type SequenceItem, viewsParam, SHOT_CLIP_PARAMS, clipFrameParam, dramaImagePrompt, shotClipSuggestion, FRAMINGS, MOVES, TIMES, appearances, dramaEngine, dramaPack, dramaView, imagesParam, sceneInfo, episodeInfo } from './drama.js';
 import { getVideoGenerators } from './video-generation.js';
 
 /**
@@ -458,7 +458,7 @@ const characterNode = defineNode({
     sheetOnly({ name: 'actor', label: 'played by', kind: 'text', default: '', placeholder: 'Cast member' }),
     // Their voice: described (goes into every clip prompt), and what 🎙 Fix voices changes it to.
     sheetOnly(text('voice', 'voice', 'e.g. Soft, slightly hoarse teenage voice, South London accent; fast when nervous', false, 'Repeated word for word in every clip they speak in')),
-    sheetOnly({ name: 'voiceName', label: 'fixed voice', kind: 'select', options: ['', ...VOICE_NAMES], default: '', description: 'A ready-made voice 🎙 Fix voices changes their lines to (ElevenLabs, on fal).' }),
+    sheetOnly({ name: 'voiceName', label: 'fixed voice', kind: 'voice-pick', default: '', description: 'A ready-made voice 🎙 Fix voices changes their lines to (ElevenLabs, on fal). Picking one plays a line in it.' }),
     sheetOnly({ name: 'voiceSample', label: 'or their own voice', kind: 'audio', default: '', description: 'A 10–20 second recording of the actor: 🎙 Fix voices matches their lines to it instead.' }),
   ],
   onCreate: (n) => void (n.label ??= 'New character'),
@@ -1044,7 +1044,7 @@ const nodes: NodeType[] = [characterNode, propNode, locationNode, shotNode, scen
 export const drama2Pack = definePack({
   id: 'nodemap/drama2',
   title: 'Drama boards',
-  paramKinds: [imagesParam, clipFrameParam, viewsParam, audioParam, refParam, refsParam, wardrobeParam],
+  paramKinds: [imagesParam, clipFrameParam, viewsParam, audioParam, voicePickParam, refParam, refsParam, wardrobeParam],
   nodes,
   css: (dramaPack.css ?? '') + css,
 });

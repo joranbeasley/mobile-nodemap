@@ -1901,6 +1901,83 @@ export const VOICE_NAMES = ['Aria', 'Roger', 'Sarah', 'Laura', 'Charlie', 'Georg
  * A short voice recording (the actor reading a few lines): picked from the phone's files, played
  * back here, kept with the card (up to 2 MB). 🎙 Fix voices can match a character's lines to it.
  */
+/** Samples already made, by voice and line (each costs a fraction of a cent; made once a visit). */
+const voiceSamples = new Map<string, Promise<string>>();
+/** A sample line in a ready-made voice (made once, then replayed). */
+export function voiceSample(voice: string, line: string): Promise<string> {
+  const tools = getVoiceTools();
+  if (!tools?.speak) return Promise.reject(new Error('Hearing voices needs a fal key (account menu → AI service keys…)'));
+  const k = `${voice}\n${line}`;
+  let p = voiceSamples.get(k);
+  if (!p) {
+    p = tools.speak(line, voice);
+    voiceSamples.set(k, p);
+    p.catch(() => voiceSamples.delete(k));
+  }
+  return p;
+}
+
+/**
+ * A character's fixed voice: one of the ready-made voices, played (a line in their name) as soon
+ * as it's picked, and again with ▶.
+ */
+export const voicePickParam: ParamKind = {
+  kind: 'voice-pick',
+  render(ctx) {
+    const wrap = document.createElement('div');
+    wrap.className = 'dr-audio';
+    const sel = document.createElement('select');
+    sel.dataset.key = ctx.key;
+    for (const v of ['', ...VOICE_NAMES]) sel.append(Object.assign(document.createElement('option'), { value: v, textContent: v || '— none —' }));
+    sel.value = typeof ctx.value === 'string' ? ctx.value : '';
+    const hear = Object.assign(document.createElement('button'), { type: 'button', className: 'dr-clip-btn', textContent: '▶ Hear' });
+    hear.setAttribute('aria-label', 'Hear this voice');
+    const note = document.createElement('small');
+    const player = Object.assign(document.createElement('audio'), { hidden: true });
+    const line = () => `Hi, I'm ${ctx.node.label || 'here'}. This is how I'll sound in every scene.`;
+    const play = async () => {
+      const voice = sel.value;
+      if (!voice) return;
+      // Started inside the tap, so the phone lets it play once the sample arrives.
+      void player.play().catch(() => undefined);
+      hear.disabled = true;
+      note.textContent = `Making a sample of ${voice}…`;
+      try {
+        const url = await voiceSample(voice, line());
+        if (sel.value !== voice) return;
+        player.src = url;
+        await player.play();
+        note.textContent = '';
+      } catch (e) {
+        note.textContent = (e as Error).name === 'NotAllowedError' ? 'Tap ▶ Hear to play it.' : (e as Error).message;
+      } finally {
+        hear.disabled = !sel.value;
+      }
+    };
+    const sync = () => {
+      hear.disabled = !sel.value;
+      hear.hidden = !getVoiceTools()?.speak;
+    };
+    sel.addEventListener('change', () => {
+      ctx.set(sel.value);
+      player.pause();
+      sync();
+      void play();
+    });
+    hear.addEventListener('click', () => void play());
+    sync();
+    wrap.append(sel, hear, note, player);
+    (wrap as HTMLElement & { setVoice?: (v: unknown) => void }).setVoice = (v) => {
+      const next = typeof v === 'string' ? v : '';
+      if (document.activeElement !== sel && next !== sel.value) ((sel.value = next), sync());
+    };
+    return wrap;
+  },
+  update(el, v) {
+    (el as HTMLElement & { setVoice?: (v: unknown) => void }).setVoice?.(v);
+  },
+};
+
 export const audioParam: ParamKind = {
   kind: 'audio',
   render(ctx) {

@@ -37,6 +37,8 @@ export interface VoiceTools {
   transcribe(audio: string, opts?: { signal?: AbortSignal; onProgress?: (status: string) => void }): Promise<SpokenWord[]>;
   /** The whole voices track in another voice, timing kept. */
   convert(audio: string, to: TargetVoice, opts?: { signal?: AbortSignal; onProgress?: (status: string) => void }): Promise<string>;
+  /** A short line read in a ready-made voice (to hear what it sounds like). */
+  speak?(text: string, voice: string, opts?: { signal?: AbortSignal }): Promise<string>;
   /** About what a clip this long, with this many voices to change, will cost. */
   estimate?(seconds: number, voices: number): VideoEstimate | undefined;
 }

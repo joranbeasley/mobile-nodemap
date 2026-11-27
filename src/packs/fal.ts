@@ -553,6 +553,13 @@ export function falVoiceTools(opts: FalOptions = {}): VoiceTools {
       if (!u) throw new Error('fal returned no audio');
       return u;
     },
+    // A sample line: ElevenLabs text to speech ($0.10 per 1,000 characters, so well under a cent).
+    async speak(text, voice, o = {}) {
+      const out = await run('fal-ai/elevenlabs/tts/multilingual-v2', { text, voice }, o);
+      const u = url(out.audio);
+      if (!u) throw new Error('fal returned no audio');
+      return u;
+    },
     // Demucs $0.0007/s, transcription $0.03/min, the voice changer $0.30/min per voice changed.
     estimate(seconds, voices) {
       const s = Math.max(1, seconds);

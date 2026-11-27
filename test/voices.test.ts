@@ -12,6 +12,7 @@ import {
   setVideoGenerators,
   setGenerationLog,
   sceneSequence,
+  voicePickParam,
   type VoiceTools,
   type VoiceTrack,
   type GenerationRecord,
@@ -73,6 +74,7 @@ function fakeFal() {
     'fal-ai/elevenlabs/speech-to-text': { text: '', words: [{ type: 'word', text: 'Hi', start: 0, end: 0.4, speaker_id: 'speaker_0' }, { type: 'spacing', text: ' ', start: 0.4, end: 0.5 }] },
     'fal-ai/elevenlabs/voice-changer': { audio: { url: 'https://v3.fal.media/files/changed.mp3' } },
     'fal-ai/chatterbox/speech-to-speech': { audio: { url: 'https://v3.fal.media/files/cloned.wav' } },
+    'fal-ai/elevenlabs/tts/multilingual-v2': { audio: { url: 'https://v3.fal.media/files/said.mp3' } },
   };
   let last = '';
   const fetch = (async (url: string, init: RequestInit = {}) => {
@@ -107,6 +109,8 @@ describe('fal voice tools', () => {
     expect(cb.url).toBe('https://queue.fal.run/fal-ai/chatterbox/speech-to-speech');
     expect(cb.body).toMatchObject({ source_audio_url: 'https://v3.fal.media/files/vocals.mp3', target_voice_audio_url: expect.stringMatching(/^https:\/\/v3\.fal\.media\/files\/up-/) });
     expect(t.estimate!(60, 2)!.amount).toBe(0.67); // 0.042 + 0.03 + 0.60
+    expect(await t.speak!('Hi', 'Lily')).toBe('https://v3.fal.media/files/said.mp3');
+    expect(fal.posts().at(-1)).toMatchObject({ url: 'https://queue.fal.run/fal-ai/elevenlabs/tts/multilingual-v2', body: { text: 'Hi', voice: 'Lily' } });
   });
 });
 
@@ -179,5 +183,26 @@ describe('🎙 Fix voices on a shot', () => {
     expect(sceneSequence(g, g.nodes.get('sc1')!)[0].voices).toEqual(track);
     editor.closePalette();
     editor.destroy();
+  });
+});
+
+describe('picking a fixed voice', () => {
+  it('plays a line in it straight away, made once and replayed', async () => {
+    const said: string[] = [];
+    setVoiceTools({ id: 'f', name: 'F', separate: async () => ({ vocals: '', background: [] }), transcribe: async () => [], convert: async () => '', speak: async (text, voice) => (said.push(`${voice}: ${text}`), `data:audio/mpeg;base64,${btoa(voice)}`) });
+    let value: unknown = '';
+    const el = voicePickParam.render({ param: { name: 'voiceName', kind: 'voice-pick' }, node: { id: 'maya', type: 't', label: 'Maya', params: {} }, value, set: (v: unknown) => (value = v), key: 'k' } as never);
+    document.body.append(el);
+    const sel = el.querySelector('select')!;
+    expect([...sel.options].map((o) => o.value)).toContain('Lily');
+    sel.value = 'Lily';
+    sel.dispatchEvent(new Event('change'));
+    await tick();
+    expect(value).toBe('Lily');
+    expect(el.querySelector('audio')!.src).toBe(`data:audio/mpeg;base64,${btoa('Lily')}`);
+    el.querySelector<HTMLButtonElement>('button')!.click();
+    await tick();
+    expect(said).toEqual(["Lily: Hi, I'm Maya. This is how I'll sound in every scene."]); // once
+    el.remove();
   });
 });
