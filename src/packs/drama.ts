@@ -709,7 +709,8 @@ export const clipFrameParam: ParamKind = {
       box.append(row(go, cancel, ...(gen.site ? [el('a', { href: gen.site, target: '_blank', rel: 'noopener', class: 'dr-gen-cancel dr-gen-link' }, 'Prices')] : [])), st);
       panel = box;
       draw();
-      prompt.focus({ preventScroll: true });
+      // Not on touch screens: focusing would pop up the keyboard over the panel.
+      if (globalThis.matchMedia?.('(pointer: fine)').matches) prompt.focus({ preventScroll: true });
     };
     // Changes from elsewhere (undo, another device's save) redraw it.
     (wrap as HTMLElement & { setClip?: (v: unknown) => void }).setClip = (v) => {
@@ -1030,7 +1031,8 @@ export const imagesParam: ParamKind = {
       panel.append(prompt, row, ...(refChoices.length ? [refs, refNote] : []), cost, keyRow, buttons, status);
       void showCost();
       wrap.append(panel);
-      prompt.focus({ preventScroll: true });
+      // Not on touch screens: focusing would pop up the keyboard over the panel.
+      if (globalThis.matchMedia?.('(pointer: fine)').matches) prompt.focus({ preventScroll: true });
     };
     const draw = () => {
       const gen = chosenGen;
