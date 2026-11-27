@@ -177,6 +177,18 @@ export const css = /* css */ `
 /* Layers that pan and zoom with the map (editor.addLayer), wire labels and pulses. */
 .nm-layer { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
 .nm-layer-above { z-index: 5; }
+/* Boxes around groups of cards (a scene around its shots): behind the cards. */
+.nm-groups { z-index: 0; }
+.nm-group { position: absolute; box-sizing: border-box; border: 2px solid color-mix(in srgb, var(--nm-group, var(--_accent)) 40%, transparent); border-radius: 18px;
+  background: color-mix(in srgb, var(--nm-group, var(--_accent)) 5%, transparent); }
+.nm-group-head { position: absolute; left: 0; right: 0; top: 0; height: 104px; box-sizing: border-box; padding: 12px 22px; display: flex; flex-direction: column; justify-content: center; gap: 2px;
+  pointer-events: auto; cursor: pointer; border-radius: 16px 16px 0 0; color: var(--_text); overflow: hidden; }
+.nm-group-head strong { font-family: var(--_font); font-weight: 700; font-size: 36px; line-height: 1.15; color: var(--nm-group, var(--_accent)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nm-group-head span { font-family: var(--_font); font-size: 22px; line-height: 1.3; color: var(--_muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nm-group-head:hover strong { text-decoration: underline; }
+/* A card shown again in another group: a faded copy that goes to the card. */
+.nm-groups .nm-copy { opacity: .55; pointer-events: auto; cursor: pointer; }
+.nm-groups .nm-copy * { pointer-events: none !important; }
 .nm-edge-label { position: absolute; left: 0; top: 0; white-space: nowrap; padding: 2px 7px; border-radius: 999px; font: 600 11px/1.3 var(--_font);
   background: var(--_node); color: var(--nm-port-color, var(--_text)); border: 1px solid color-mix(in srgb, var(--nm-port-color, var(--_border)) 50%, var(--_border)); }
 .nm-pulse { fill: var(--_accent); filter: drop-shadow(0 0 4px currentColor); }

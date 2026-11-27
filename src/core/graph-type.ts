@@ -48,6 +48,19 @@ export type ViewLayout = (
   ctx: { graph: Graph; width: number },
 ) => Record<string, { x: number; y: number }>;
 
+/** A box of cards in a grid view (see `EditorView.groups`). */
+export interface ViewGroup {
+  id: string;
+  title: string;
+  subtitle?: string;
+  /** Card ids in the box, in order. */
+  nodes: string[];
+  /** Tapping the header opens this node (on its own tab, zoomed to it). */
+  open?: string;
+  /** The box's colour (e.g. the scene type's). */
+  color?: string;
+}
+
 /**
  * A tab in the editor: which node types it shows (and its + button adds) and how they are
  * laid out. With views, the map is a set of boards rather than one canvas.
@@ -68,6 +81,12 @@ export interface EditorView {
   rows?: (graph: Graph) => string[][];
   /** Grid layout: node ids in order. Default: by `types` order, then as added. */
   order?: (graph: Graph) => string[];
+  /**
+   * Grid layout in boxes: each group's cards in a box with a header (a scene around its shots).
+   * A card in several groups shows in each (a copy after the first, which opens the card).
+   * Tapping a header opens `open` (e.g. the scene, on its own tab).
+   */
+  groups?: (graph: Graph) => ViewGroup[];
   /** After a node is added in this view: link it to what was selected, number it, etc. */
   onAdd?: (node: NodeInstance, ctx: { graph: Graph; selected?: NodeInstance }) => void;
 }

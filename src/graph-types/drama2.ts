@@ -1,7 +1,7 @@
 import { defineGraphType } from '../core/graph-type.js';
 import type { Graph } from '../core/graph.js';
 import type { NodeInstance } from '../core/types.js';
-import { D2, drama2Engine, drama2Pack, fromDrama, referrers, refsOf } from '../packs/drama2.js';
+import { D2, drama2Engine, drama2Pack, fromDrama, nodeTitle, referrers, refsOf } from '../packs/drama2.js';
 import { dramaGraph } from './drama.js';
 
 const list = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
@@ -74,6 +74,23 @@ export const drama2Graph = defineGraphType({
         layout: 'grid',
         // Story order: by episode and scene, then shot number; shots not in a scene last.
         order: (g) => scenesInOrder(g).flatMap((sc) => shotsOf(g, sc).map((s) => s.id)),
+        // Each scene a box around its shots (a shot in two scenes shows in both); tap its header
+        // to open the scene on the Scenes tab. Shots in no scene go in a last box.
+        groups: (g) => [
+          ...scenesInOrder(g).map((sc) => {
+            const ep = referrers(g, sc.id, D2.episode, 'scenes')[0];
+            const words = String(sc.params.description ?? '').trim();
+            return {
+              id: sc.id,
+              title: nodeTitle(g, sc),
+              subtitle: [ep ? nodeTitle(g, ep) : '', words].filter(Boolean).join(' — '),
+              nodes: shotsOf(g, sc).map((s) => s.id),
+              open: sc.id,
+              color: '#5f3dc4',
+            };
+          }),
+          { id: '', title: 'Not in a scene', nodes: ofType(g, D2.shot).filter((s) => !referrers(g, s.id, D2.scene, 'shots').length).map((s) => s.id) },
+        ],
         onAdd: (node, { graph, selected }) => addShotTo(graph, node, selected),
       },
       {

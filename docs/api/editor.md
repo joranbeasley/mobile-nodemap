@@ -122,6 +122,7 @@ views: [
 | `layout` | `'grid'`: cards in the number of columns that makes the whole grid, zoomed out, fill the screen best. The count is chosen when the view opens, is tidied, the screen changes size or cards are added or removed, and kept while cards are edited. The view opens zoomed out to show it all; tap a card to zoom in. `'rows'`: one row per group, its first card heading the row. `'flow'` (default): the usual layered layout. Or your own function `(nodes, { graph, width }) => positions` (`ViewLayout`). |
 | `rows(graph)` | Rows layout: node ids per row, in order. Nodes left out go in a last row. |
 | `order(graph)` | Grid layout: node ids in order (default: by `types`, then as added). |
+| `groups(graph)` | Grid layout in boxes: `[{ id, title, subtitle?, nodes, open?, color? }]` (`ViewGroup`). Each group's cards in rows inside a box with a header (tap it to open `open`, on its own tab); the same column count for every box. A card in several groups shows in each: a faded copy after the first, which goes to the card. Cards in no group go in a last box. |
 | `onAdd(node, { graph, selected })` | After + adds a node in this view, link it to what was selected (a shot to the selected scene), number it, and so on. |
 
 Grid and rows views lay themselves out:

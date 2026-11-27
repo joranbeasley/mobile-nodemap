@@ -554,6 +554,28 @@ describe('Editor views', () => {
     editor.destroy();
   });
 
+  it('boxes shots by scene; a shot in two scenes shows in both; a box header opens its scene', async () => {
+    const { g, el, editor } = mount();
+    await editor.setView('shots');
+    g.setParam('sc2', 'shots', [...(g.nodes.get('sc2')!.params.shots as string[]), 's1a']);
+    await editor.layoutView({ animate: false });
+    const heads = [...el.querySelectorAll<HTMLElement>('.nm-group-head')];
+    expect(heads.map((h) => h.querySelector('strong')!.textContent)).toEqual(['Scene 1 · DAY', 'Scene 2 · NIGHT', 'Scene 3 · EVENING', 'Scene 1 · NIGHT']);
+    expect(heads[1].querySelector('span')!.textContent).toBe('The Read-Through — Maya discovers Jules has learned the whole play.');
+    // s1a is in scene 1 (the card) and scene 2 (a copy that goes to it).
+    const copies = [...el.querySelectorAll<HTMLElement>('.nm-copy')];
+    expect(copies.map((c) => c.getAttribute('data-nm-open'))).toEqual(['s1a']);
+    expect(copies[0].querySelector('[data-nm-open]')).toBeNull(); // only the copy as a whole is a link
+    // Tapping a header opens the scene on its tab.
+    heads[1].click();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(editor.currentView).toBe('scenes');
+    expect(editor.selection.node).toBe('sc2');
+    // Other tabs have no boxes.
+    expect(el.querySelectorAll('.nm-group')).toHaveLength(0);
+    editor.destroy();
+  });
+
   it('jumps to a linked node in its view, and back', async () => {
     const { el, editor } = mount();
     await editor.setView('shots');

@@ -539,6 +539,14 @@ export class NodeEditor extends Emitter<EditorEvents> {
       x1 = Math.max(x1, n.x + (el?.offsetWidth || 180));
       y1 = Math.max(y1, n.y + (el?.offsetHeight || 100));
     }
+    // Group boxes (and their headers) count too.
+    this.groupLayer?.querySelectorAll<HTMLElement>('.nm-group').forEach((b) => {
+      const [l, t, w, hh] = [b.style.left, b.style.top, b.style.width, b.style.height].map((v) => parseFloat(v) || 0);
+      x0 = Math.min(x0, l);
+      y0 = Math.min(y0, t);
+      x1 = Math.max(x1, l + w);
+      y1 = Math.max(y1, t + hh);
+    });
     const bottomUi = this.toolbar ? 64 : 0;
     const topUi = this.viewBar ? 48 : 0;
     const w = r.width - padding * 2;
@@ -1510,6 +1518,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
     if (typeof v.layout === 'function') {
       const r = this.root.getBoundingClientRect();
       Object.assign(pos, v.layout(shown.map((n) => ({ id: n.id, type: n.type, ...size(n.id) })).map(({ id, type, w, h }) => ({ id, type, w, h })), { graph: this.graph, width: Math.max(320, r.width - 32) }));
+    } else if (v.layout === 'grid' && v.groups) {
+      this.layoutGroups(v.groups(this.graph), shownIds, byDefault(), size, pos, opts);
     } else if (v.layout === 'grid') {
       const seen = new Set<string>();
       const order = [...(v.order?.(this.graph) ?? []), ...byDefault()].filter((id) => shownIds.has(id) && !seen.has(id) && seen.add(id));
@@ -1561,6 +1571,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
         y += Math.max(...row.map((id) => size(id).h)) + GAP * 2;
       }
     }
+    if (!(v.layout === 'grid' && v.groups)) this.groupLayer?.replaceChildren();
     const moved = Object.entries(pos).some(([id, p]) => {
       const n = this.graph.nodes.get(id)!;
       return n.x !== p.x || n.y !== p.y;
@@ -1568,6 +1579,100 @@ export class NodeEditor extends Emitter<EditorEvents> {
     if (moved) await this.animateTo(pos, opts.animate === false ? 0 : 220);
     // A grid opens zoomed out to show all of it (tap a card to zoom in); rows start top-left.
     if (opts.home) (v.layout === 'grid' ? this.fit({ minScale: 0 }) : this.viewHome());
+  }
+
+  private groupLayer?: HTMLElement;
+
+  /**
+   * A grid in boxes: each group's cards in rows inside a box with a header (tap it to open the
+   * group's node). The same column count for every box, chosen so the whole fits the screen best.
+   * A card already placed in an earlier box shows again as a copy (tap it to go to the card).
+   */
+  private layoutGroups(
+    groups: import('../core/graph-type.js').ViewGroup[],
+    shownIds: Set<string>,
+    rest: string[],
+    size: (id: string) => { w: number; h: number },
+    pos: Positions,
+    opts: { home?: boolean },
+  ): void {
+    const GAP = 24;
+    const COL_GAP = 44;
+    const PAD = 20;
+    const HEAD = 104; // big enough to read zoomed out: the boxes are how you find your way
+    const BOX_GAP = 48;
+    const listed = new Set(groups.flatMap((g) => g.nodes));
+    const loose = rest.filter((id) => !listed.has(id));
+    const all = [...groups.map((g) => ({ ...g, nodes: g.nodes.filter((id) => shownIds.has(id)) })), ...(loose.length ? [{ id: '', title: 'Not in a group', nodes: loose }] : [])].filter((g) => g.nodes.length);
+    const ids = [...new Set(all.flatMap((g) => g.nodes))];
+    const colW = Math.max(160, ...ids.map((id) => size(id).w));
+    const { w: availW, h: availH } = this.viewArea();
+    const heightFor = (cols: number) =>
+      all.reduce((y, g) => {
+        let h = HEAD;
+        for (let i = 0; i < g.nodes.length; i += cols) h += Math.max(...g.nodes.slice(i, i + cols).map((id) => size(id).h)) + GAP;
+        return y + h + PAD + BOX_GAP;
+      }, 0);
+    const kept = this.gridCols.get(this.view!.id);
+    const count = all.reduce((n, g) => n + g.nodes.length, 0);
+    let cols = 1;
+    if (kept && kept.n === count && !opts.home && !this.gridReshape) cols = kept.cols;
+    else {
+      let best = -1;
+      const most = Math.max(1, ...all.map((g) => g.nodes.length));
+      for (let c = 1; c <= most; c++) {
+        const w = c * (colW + COL_GAP) - COL_GAP + PAD * 2;
+        const k = Math.min(availW / w, availH / Math.max(1, heightFor(c)));
+        if (k > best + 1e-6) ((best = k), (cols = c));
+      }
+    }
+    this.gridCols.set(this.view!.id, { cols, n: count });
+    this.gridReshape = false;
+    if (!this.groupLayer) {
+      this.groupLayer = h('div', { class: 'nm-layer nm-groups' });
+      this.viewportEl.prepend(this.groupLayer);
+    }
+    this.groupLayer.replaceChildren();
+    const placed = new Set<string>();
+    const boxW = cols * (colW + COL_GAP) - COL_GAP + PAD * 2;
+    let y = 0;
+    for (const g of all) {
+      const top = y;
+      y += HEAD;
+      const slots: { id: string; x: number; y: number }[] = [];
+      for (let i = 0; i < g.nodes.length; i += cols) {
+        const row = g.nodes.slice(i, i + cols);
+        row.forEach((id, c) => slots.push({ id, x: PAD + c * (colW + COL_GAP), y }));
+        y += Math.max(...row.map((id) => size(id).h)) + GAP;
+      }
+      y += PAD - GAP;
+      const box = h('div', { class: 'nm-group' });
+      box.style.cssText = `left:${-PAD}px;top:${top}px;width:${boxW}px;height:${y - top}px;${g.color ? `--nm-group:${g.color};` : ''}`;
+      const head = h('div', { class: 'nm-group-head', ...(g.open ? { 'data-nm-open': g.open, role: 'link', title: `Open ${g.title}` } : {}) }, h('strong', {}, g.title), ...(g.subtitle ? [h('span', {}, g.subtitle)] : []));
+      box.append(head);
+      this.groupLayer.append(box);
+      for (const s of slots) {
+        if (!placed.has(s.id)) {
+          placed.add(s.id);
+          pos[s.id] = { x: s.x - PAD, y: s.y };
+          continue;
+        }
+        // Again in another box: a copy, which goes to the card.
+        const orig = this.records.get(s.id)?.el;
+        if (!orig) continue;
+        const copy = orig.cloneNode(true) as HTMLElement;
+        copy.classList.add('nm-copy');
+        copy.classList.remove('nm-selected');
+        copy.removeAttribute('data-id');
+        // Only the copy as a whole is a link (not the chips or buttons inside it).
+        copy.querySelectorAll('[data-nm-open], [data-nm-live], [data-id], [id]').forEach((x) => (x.removeAttribute('data-nm-open'), x.removeAttribute('data-nm-live'), x.removeAttribute('data-id'), x.removeAttribute('id')));
+        copy.setAttribute('data-nm-open', s.id);
+        copy.setAttribute('title', 'Also in another group: tap to go to it');
+        copy.style.transform = `translate(${s.x - PAD}px, ${s.y}px)`;
+        this.groupLayer.append(copy);
+      }
+      y += BOX_GAP;
+    }
   }
 
   /** The screen area a view's cards can use, without the tab bar and toolbar, in pixels. */
@@ -2862,6 +2967,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
   private onDown(e: PointerEvent): void {
     let t = e.target as Element;
     // Links and expanders marked live work even before their node is selected.
+    // A card's copy in another group box is a link to the card (its tap is the link's).
+    if (t.closest?.('.nm-copy')) return;
     if (!this.isOverview && t.closest?.('[data-nm-open], [data-nm-live]')) return;
     // In the overview a node is one big target: its fields and ports don't respond.
     const nodeOf = t.closest<HTMLElement>('.nm-node');
