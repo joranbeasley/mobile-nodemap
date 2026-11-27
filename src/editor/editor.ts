@@ -84,6 +84,13 @@ export interface EditorEvents extends Record<string, unknown> {
   details: { node: string };
   /** Wires whose routes changed (by id). */
   route: { edges: string[] };
+  /** The view (board) shown. */
+  view: { id: string };
+  /**
+   * A sheet opened or closed: a node's Edit sheet (`{ node }`), one of its params in a sheet
+   * (`{ node, param, title?, event? }`), or none (`{}`). Hosts can keep it in the address.
+   */
+  sheet: { node?: string; param?: string; title?: string; event?: string };
 }
 
 type Gesture =
@@ -1042,6 +1049,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
 
   closePalette(): void {
     if (!this.sheet) return;
+    const was = (this.sheet as any)._for;
     (this.sheet as any)._backdrop?.remove();
     (this.sheet as any)._off?.();
     this.sheet.remove();
@@ -1051,6 +1059,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       this.overlayEl = undefined;
     }
     this.root.focus({ preventScroll: true });
+    if (was) this.emit('sheet', {});
   }
 
   private chooser?: { sheet: HTMLElement; backdrop: HTMLElement; done: (id?: string) => void };
@@ -1699,6 +1708,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
     this.overlay().append(backdrop, sheet);
     this.sheet = sheet;
     (sheet as any)._backdrop = backdrop;
+    (sheet as any)._for = id;
+    this.emit('sheet', { node: id });
     if (matchMedia?.('(pointer: fine)').matches) name.focus();
   }
 
@@ -1987,6 +1998,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
     this.overlay().append(backdrop, sheet);
     this.sheet = sheet;
     (sheet as any)._backdrop = backdrop;
+    (sheet as any)._for = id;
+    this.emit('sheet', { node: id, param, ...(title ? { title } : {}), ...(event ? { event } : {}) });
     if (event) control.dispatchEvent(new CustomEvent(event));
   }
 

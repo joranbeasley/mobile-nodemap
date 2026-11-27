@@ -462,9 +462,15 @@ describe('Editor views', () => {
     await editor.setView('shots');
     const card = el.querySelector<HTMLElement>('.nm-node[data-id="s1a"]')!;
     expect(card.classList.contains('nm-summary')).toBe(true);
+    const sheets: unknown[] = [];
+    editor.on('sheet', (x) => sheets.push(x));
     card.querySelector<HTMLButtonElement>('.nm-card-pencil')!.click();
     expect(document.querySelector('.nm-edit')!.getAttribute('aria-label')).toBe('Edit Shot 1 · Wide');
     editor.closePalette();
+    editor.openFieldSheet('s1a', 'images', '✨ Frame', 'dr-generate');
+    editor.closePalette();
+    // Hosts can keep these in the address (to reopen the same sheet after a reload).
+    expect(sheets).toEqual([{ node: 's1a' }, {}, { node: 's1a', param: 'images', title: '✨ Frame', event: 'dr-generate' }, {}]);
     // Its Seedance export opens from Export (not on every tap).
     card.querySelector<HTMLButtonElement>('.nm-card-details')!.click();
     expect(document.querySelector('.nm-card')!.textContent).toMatch(/Seedance shot/);
