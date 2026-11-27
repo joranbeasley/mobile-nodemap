@@ -103,6 +103,8 @@ export interface ParamControlContext {
    * with the picked id, or undefined if they close it. Use it when a plain select gets long.
    */
   choose?: (opts: ChooseOptions) => Promise<string | undefined>;
+  /** Where the control is: on the node's card (on the canvas) or in its Edit sheet. */
+  place?: 'card' | 'sheet';
 }
 
 export interface ChooseOptions {

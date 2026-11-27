@@ -90,7 +90,7 @@ Any param can take `when: (params) => boolean`, which shows it only when it appl
 ```ts
 registry.defineParamKind({
   kind: 'color',
-  render({ param, node, graph, value, set, key, choose }) {   // return an element; call set(v) on change; graph: the map; choose: a searchable picker sheet
+  render({ param, node, graph, value, set, key, choose, place }) {   // return an element; call set(v) on change; graph: the map; choose: a searchable picker sheet; place: 'card' or 'sheet' (the Edit sheet)
     const input = document.createElement('input');
     input.type = 'color';
     input.dataset.key = key;                    // keeps focus across re-renders

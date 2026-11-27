@@ -1622,7 +1622,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
     if (params.length) {
       form.append(h('div', { class: 'nm-sheet-cat' }, 'Settings'));
       for (const p of params) {
-        const f = field(p.label ?? p.name, this.paramControl(node, p), p.description);
+        const f = field(p.label ?? p.name, this.paramControl(node, p, 'sheet'), p.description);
         if (p.when) {
           f.hidden = !shows(p, node);
           conditional.push([p, f]);
@@ -2041,12 +2041,12 @@ export class NodeEditor extends Emitter<EditorEvents> {
     }
   }
 
-  private paramControl(node: NodeInstance, param: ParamDef): HTMLElement {
+  private paramControl(node: NodeInstance, param: ParamDef, place: 'card' | 'sheet' = 'card'): HTMLElement {
     const set = (v: unknown) => this.graph.setParam(node.id, param.name, v);
     const value = node.params[param.name] ?? param.default;
     const key = `p:${param.name}`;
     const custom = this.registry.paramKind(param.kind);
-    if (custom) return this.customControl(custom, node, param, value, key);
+    if (custom) return this.customControl(custom, node, param, value, key, place);
     const p = param as BuiltinParamDef;
     switch (p.kind) {
       case 'number': {
@@ -2092,8 +2092,8 @@ export class NodeEditor extends Emitter<EditorEvents> {
     }
   }
 
-  private customControl(kind: ParamKind, node: NodeInstance, param: ParamDef, value: unknown, key: string): HTMLElement {
-    const el = kind.render({ param, node, graph: this.graph, value, key, set: (v) => this.graph.setParam(node.id, param.name, v), choose: (o) => this.choose(o) });
+  private customControl(kind: ParamKind, node: NodeInstance, param: ParamDef, value: unknown, key: string, place: 'card' | 'sheet' = 'card'): HTMLElement {
+    const el = kind.render({ param, node, graph: this.graph, value, key, place, set: (v) => this.graph.setParam(node.id, param.name, v), choose: (o) => this.choose(o) });
     el.dataset.paramKind = kind.kind;
     el.dataset.param = param.name;
     return el;

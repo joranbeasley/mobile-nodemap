@@ -434,9 +434,10 @@ describe('🎬 clips that finish while the page is away', () => {
     expect(asked).toBe(1);
     expect(g.nodes.get('s1b')!.params.clipUrl).toBe('https://v/done.mp4');
     expect(g.nodes.get('s1b')!.params.clipJob).toBeNull();
+    // The card is now the clip (no job left on it).
     const field = onCard(el, 's1b', 'lastFrame');
-    expect(field.textContent).toMatch(/Clip ready/);
-    expect(field.querySelector('.dr-clip-job')).toBeNull();
+    expect(field.querySelector('.dr-clip-play')).not.toBeNull();
+    expect(field.querySelector('.dr-clip-busy')).toBeNull();
     globalThis.fetch = realFetch;
     editor.destroy();
   });
@@ -566,8 +567,13 @@ describe('keeping clips', () => {
     expect(kept).toEqual(['s1b https://v3.fal.media/files/clip.mp4']);
     expect(g.nodes.get('s1b')!.params.clipUrl).toBe('https://app.test/api/clips/abc.mp4');
     expect(fetched).toEqual(['https://app.test/api/clips/abc.mp4']); // the last frame comes from the copy
-    const video = el.querySelector<HTMLVideoElement>('.nm-node[data-id="s1b"] video.dr-clip-video')!;
+    // ▶ plays the copy full screen, with sound.
+    el.querySelector<HTMLButtonElement>('.nm-node[data-id="s1b"] .dr-clip-play')!.click();
+    const video = document.querySelector<HTMLVideoElement>('.dr-player video')!;
     expect(video.getAttribute('src')).toBe('https://app.test/api/clips/abc.mp4');
+    expect(video.muted).toBe(false);
+    document.querySelector<HTMLButtonElement>('.dr-player button[aria-label="Close the clip"]')!.click();
+    expect(document.querySelector('.dr-player')).toBeNull();
     globalThis.fetch = realFetch;
     editor.destroy();
   });

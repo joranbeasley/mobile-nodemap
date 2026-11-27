@@ -422,6 +422,9 @@ const images = (name = 'images', label = 'images', advanced = false) => ({
  * description, who and where). Everything else is edited in the card's Edit sheet (tap it twice).
  */
 const sheetOnly = <T extends object>(p: T) => ({ ...p, card: false as const });
+/** Once a shot has a clip, its card is the clip: the rest leaves the card (it's in the Edit sheet). */
+const noClip = (q: Record<string, unknown>) => !(q.lastFrame || q.clipUrl);
+const untilClip = <T extends object>(p: T & { card?: (q: Record<string, unknown>) => boolean }) => ({ ...p, card: (q: Record<string, unknown>) => noClip(q) && (p.card ? p.card(q) : true) });
 const ref = (name: string, label: string, of: string) => ({ name, label, kind: 'ref', of, default: '' });
 const refs = (name: string, label: string, of: string, exclusive = false) => ({ name, label, kind: 'refs', of, exclusive, default: [] });
 const number = () => ({ name: 'number', label: 'number', kind: 'number' as const, default: 1, min: 1, step: 1 });
@@ -521,19 +524,27 @@ const shotNode = defineNode({
     // A shot's card is a summary (its title says the number and framing); tap it twice for the rest.
     sheetOnly({ name: 'number', label: 'shot', kind: 'text', default: '1', placeholder: '1, 2, 2A…' }),
     sheetOnly({ name: 'framing', label: 'framing', kind: 'select', options: FRAMINGS, default: 'Medium' }),
-    { ...ref('location', 'location', D2.location), create: true },
+    untilClip({ ...ref('location', 'location', D2.location), create: true }),
     // Characters and props are on the card only when there are some (add them in the Edit sheet).
-    { ...refs('characters', 'characters', D2.character), create: true, card: (q: Record<string, unknown>) => Array.isArray(q.characters) && q.characters.length > 0 },
-    { ...refs('props', 'props', D2.prop), create: true, chip: wearerPicker, only: (n: NodeInstance) => !isOutfit(n), card: (q: Record<string, unknown>) => Array.isArray(q.props) && q.props.length > 0 },
+    untilClip({ ...refs('characters', 'characters', D2.character), create: true, card: (q: Record<string, unknown>) => Array.isArray(q.characters) && q.characters.length > 0 }),
+    untilClip({ ...refs('props', 'props', D2.prop), create: true, chip: wearerPicker, only: (n: NodeInstance) => !isOutfit(n), card: (q: Record<string, unknown>) => Array.isArray(q.props) && q.props.length > 0 }),
     wardrobe('What each character wears in this shot. Leave it "from scene" to keep what the scene (or episode) says.'),
-    text('description', 'description', 'What we see and hear'),
-    images('images', 'frames'),
+    untilClip(text('description', 'description', 'What we see and hear')),
+    untilClip(images('images', 'frames')),
     // The clip field: 🎬 Generate clip reads the wired drama model (same ids).
     // On the card once a clip has been tried (one is ready, on its way, or failed: clipJob is then
     // null, not missing), so it shows, is collected, and says what happened.
     ...SHOT_CLIP_PARAMS.map((p) =>
       p.name === 'lastFrame'
-        ? { ...p, video: (node: NodeInstance, graph: Graph) => shotClipSuggestion(toDrama(graph), node.id), card: (q: Record<string, unknown>) => !!(q.lastFrame || q.clipUrl) || q.clipJob !== undefined }
+        ? {
+            ...p,
+            video: (node: NodeInstance, graph: Graph) => shotClipSuggestion(toDrama(graph), node.id),
+            card: (q: Record<string, unknown>) => !!(q.lastFrame || q.clipUrl) || q.clipJob !== undefined,
+            // With a clip, the card shows it big (first frame, ▶ to play), with where and who.
+            compact: true,
+            summary: (node: NodeInstance, graph: Graph) =>
+              [...refsOf(graph, node, 'location'), ...refsOf(graph, node, 'characters')].map((n) => nodeTitle(graph, n)).join(' · '),
+          }
         : sheetOnly(p),
     ),
     sheetOnly({ name: 'movement', label: 'camera', kind: 'select', options: MOVES, default: 'Static' }),

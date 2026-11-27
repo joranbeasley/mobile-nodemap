@@ -307,9 +307,15 @@ describe('Editor views', () => {
     field().querySelector<HTMLButtonElement>('[aria-label="Remove the clip"]')!.click();
     expect(g.nodes.get('s1a')!.params.lastFrame).toBe('');
     expect(field().querySelector('.dr-clip-thumb')).toBeNull();
-    // With a clip, the card shows it too.
+    // With a clip, the card is the clip: its frame big, where and who, and nothing else.
     g.setParam('s1a', 'lastFrame', 'data:image/jpeg;base64,QUJD');
-    expect(el.querySelector('.nm-node[data-id="s1a"] [data-param="lastFrame"] .dr-clip-thumb')).not.toBeNull();
+    const card = el.querySelector<HTMLElement>('.nm-node[data-id="s1a"]')!;
+    expect(card.querySelector('.dr-clip-card img')!.getAttribute('src')).toBe('data:image/jpeg;base64,QUJD');
+    expect(card.querySelector('.dr-clip-sum')!.textContent).toBe('School hall · Maya · Theo · Jules · Ms Okafor');
+    expect([...card.querySelectorAll('[data-param]')].map((x) => x.getAttribute('data-param'))).toEqual(['lastFrame']);
+    expect(card.querySelector('.dr-clip-play')).toBeNull(); // added by hand: no video kept, so nothing to play
+    // The Edit sheet still has the whole clip field.
+    expect(field().querySelector('.dr-clip-thumb')).not.toBeNull();
     editor.closePalette();
     editor.destroy();
   });

@@ -97,6 +97,46 @@ function referenceSwitch(r: Reference, ctx: { node: NodeInstance; graph: Graph; 
 
 /** Service links already offered to the keeper on this page. */
 const keepTried = new Set<string>();
+/** Clips whose first frame was already looked for on this page. */
+const posterTried = new Set<string>();
+
+/** Play a clip full screen, with sound (from a tap, so browsers allow the sound). */
+export function playClip(url: string, poster?: string): void {
+  const box = document.createElement('div');
+  box.className = 'dr-player';
+  box.setAttribute('role', 'dialog');
+  box.setAttribute('aria-label', 'Clip');
+  box.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:#000;display:flex;align-items:center;justify-content:center;';
+  const v = Object.assign(document.createElement('video'), { src: url, controls: true, autoplay: true, playsInline: true, muted: false });
+  if (poster) v.poster = poster;
+  v.style.cssText = 'width:100%;height:100%;object-fit:contain;';
+  const close = Object.assign(document.createElement('button'), { type: 'button', textContent: '✕' });
+  close.setAttribute('aria-label', 'Close the clip');
+  close.style.cssText = 'position:absolute;top:max(12px,env(safe-area-inset-top));right:12px;width:44px;height:44px;border-radius:50%;border:0;background:rgba(255,255,255,.18);color:#fff;font:20px system-ui,sans-serif;cursor:pointer;';
+  box.append(v, close);
+  document.body.append(box);
+  let shown = false;
+  const done = () => {
+    document.removeEventListener('keydown', onKey);
+    document.removeEventListener('fullscreenchange', onFull);
+    v.pause();
+    if (document.fullscreenElement === box) void document.exitFullscreen?.().catch(() => undefined);
+    box.remove();
+  };
+  const onKey = (e: KeyboardEvent) => e.key === 'Escape' && done();
+  // Leaving full screen (back gesture, Esc) closes the player too.
+  const onFull = () => (document.fullscreenElement === box ? (shown = true) : shown && done());
+  document.addEventListener('keydown', onKey);
+  document.addEventListener('fullscreenchange', onFull);
+  close.addEventListener('click', done);
+  v.addEventListener('ended', done);
+  v.addEventListener('webkitendfullscreen', done); // iPhone's own player
+  void v.play()?.catch?.(() => undefined);
+  // The page's full screen where there is one; iPhones only do it for the video itself.
+  const vid = v as HTMLVideoElement & { webkitEnterFullscreen?: () => void };
+  if (box.requestFullscreen) void box.requestFullscreen().catch(() => vid.webkitEnterFullscreen?.());
+  else vid.webkitEnterFullscreen?.();
+}
 
 /** Clips being collected right now (shot id + job start), so redraws don't ask twice. */
 const collecting = new Set<string>();
@@ -253,6 +293,11 @@ export function openLightbox(images: string[], start = 0, caption?: string): voi
  * side. Runs in the browser: the video is opened locally and never uploaded or stored.
  */
 export async function lastFrameOf(file: Blob, max = 1280): Promise<string> {
+  return (await clipFramesOf(file, max)).last;
+}
+
+/** A clip's first and last frames (JPEG data URLs) and its length in seconds. */
+export async function clipFramesOf(file: Blob, max = 1280): Promise<{ first: string; last: string; seconds: number }> {
   const url = URL.createObjectURL(file);
   const v = document.createElement('video');
   const once = (ev: string) =>
@@ -275,15 +320,22 @@ export async function lastFrameOf(file: Blob, max = 1280): Promise<string> {
       v.currentTime = 1e9;
       await s;
     }
-    const seeked = once('seeked');
-    v.currentTime = Math.max(0, v.duration - 0.05);
-    await seeked;
     const k = Math.min(1, max / Math.max(v.videoWidth, v.videoHeight));
-    const c = document.createElement('canvas');
-    c.width = Math.max(1, Math.round(v.videoWidth * k));
-    c.height = Math.max(1, Math.round(v.videoHeight * k));
-    c.getContext('2d')!.drawImage(v, 0, 0, c.width, c.height);
-    return c.toDataURL('image/jpeg', 0.9);
+    const grab = async (t: number) => {
+      const seeked = once('seeked');
+      v.currentTime = t;
+      await seeked;
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(v.videoWidth * k));
+      c.height = Math.max(1, Math.round(v.videoHeight * k));
+      c.getContext('2d')!.drawImage(v, 0, 0, c.width, c.height);
+      return c.toDataURL('image/jpeg', 0.9);
+    };
+    const seconds = v.duration;
+    // Just after the start (some clips open on a black frame at 0).
+    const first = await grab(Math.min(0.05, seconds / 2));
+    const last = await grab(Math.max(0, seconds - 0.05));
+    return { first, last, seconds };
   } finally {
     v.removeAttribute('src');
     v.load();
@@ -332,7 +384,9 @@ export const clipFrameParam: ParamKind = {
       if (!file) return;
       status.textContent = 'Taking the last frame…';
       try {
-        value = await lastFrameOf(file);
+        const f = await clipFramesOf(file);
+        keepFrames(f);
+        value = f.last;
         ctx.set(value);
         draw();
       } catch (err) {
@@ -345,7 +399,47 @@ export const clipFrameParam: ParamKind = {
       b.addEventListener('click', fn);
       return b;
     };
+    /** The clip's first frame (what the shot looks like) and length, kept beside its last frame. */
+    const keepFrames = (f: { first: string; seconds: number }) => {
+      ctx.graph.setParam(ctx.node.id, 'clipPoster', f.first);
+      if (Number.isFinite(f.seconds)) ctx.graph.setParam(ctx.node.id, 'clipSeconds', Math.round(f.seconds * 10) / 10);
+    };
+    /**
+     * On the board, a shot with a clip is its clip: the first frame, its length, a line the
+     * param gives (where, who), and ▶ (shown once the card is zoomed into) to play it full screen.
+     */
+    const drawCard = () => {
+      wrap.replaceChildren(input);
+      wrap.classList.add('dr-clip-compact');
+      const ps = ctx.graph.nodes.get(ctx.node.id)?.params ?? {};
+      const url = typeof ps.clipUrl === 'string' ? ps.clipUrl : '';
+      const poster = (typeof ps.clipPoster === 'string' && ps.clipPoster) || value;
+      const fig = document.createElement('div');
+      fig.className = 'dr-clip-card';
+      if (poster) fig.append(Object.assign(document.createElement('img'), { src: poster, alt: '' }));
+      const secs = Number(ps.clipSeconds);
+      if (secs > 0) fig.append(Object.assign(document.createElement('span'), { className: 'dr-clip-len', textContent: `${Math.floor(secs / 60)}:${String(Math.round(secs % 60)).padStart(2, '0')}` }));
+      const job = jobOf();
+      if (job || making) fig.append(Object.assign(document.createElement('span'), { className: 'dr-clip-busy', textContent: '⏳', title: `A new clip is being made on ${job?.service ?? 'the service'}` }));
+      if (url) fig.append(button('▶', 'Play the clip full screen, with sound', () => playClip(url, poster || undefined), 'dr-clip-play'));
+      wrap.append(fig);
+      const line = (ctx.param as { summary?: (node: NodeInstance, graph: Graph) => string }).summary?.(ctx.node, ctx.graph);
+      if (line) wrap.append(Object.assign(document.createElement('div'), { className: 'dr-clip-sum', textContent: line }));
+      // A clip from before first frames were kept: take it now, once per page (only clips this site serves can be read).
+      const here = typeof location !== 'undefined' ? location.origin : '';
+      if (url && !ps.clipPoster && !posterTried.has(url) && (!/^https?:\/\//i.test(url) || url.startsWith(here))) {
+        posterTried.add(url);
+        void fetch(url, { credentials: 'same-origin' })
+          .then((r) => (r.ok ? r.blob() : Promise.reject(new Error(String(r.status)))))
+          .then((b) => clipFramesOf(b))
+          .then((f) => (keepFrames(f), wrap.isConnected && draw()))
+          .catch(() => undefined);
+      }
+    };
     const draw = () => {
+      const ps = ctx.graph.nodes.get(ctx.node.id)?.params ?? {};
+      if (ctx.place !== 'sheet' && (value || ps.clipUrl) && (ctx.param as { compact?: boolean }).compact) return drawCard();
+      wrap.classList.remove('dr-clip-compact');
       wrap.replaceChildren(input);
       if (value) {
         const view = button('', 'View the last frame', () => openLightbox([value], 0, 'Last frame of the finished clip'), 'dr-clip-thumb');
@@ -403,6 +497,7 @@ export const clipFrameParam: ParamKind = {
         try {
           kept = await clipKeeper(clip, { shotId: ctx.node.id });
           copied = kept !== clip;
+          keepTried.add(kept); // the copy is kept already
         } catch (err) {
           if ((err as Error).name === 'AbortError') throw err;
         }
@@ -412,7 +507,10 @@ export const clipFrameParam: ParamKind = {
       ctx.graph.setParam(ctx.node.id, 'clipJob', null);
       draw();
       try {
-        value = await lastFrameOf(await (await fetch(kept, { signal, credentials: 'same-origin' })).blob());
+        posterTried.add(kept);
+        const f = await clipFramesOf(await (await fetch(kept, { signal, credentials: 'same-origin' })).blob());
+        keepFrames(f);
+        value = f.last;
         ctx.set(value);
         status.textContent = `Clip ready${spent ? ` · ${spent}` : ''}.${copied ? '' : ' Its link may expire: download it to keep it.'}`;
       } catch (err) {
@@ -722,6 +820,14 @@ export const clipFrameParam: ParamKind = {
       const next = typeof v === 'string' ? v : '';
       if (next !== value) ((value = next), draw());
     };
+    // On the board the field shows more of the shot than its last frame (a job, the first frame,
+    // the length): follow every change to the shot.
+    if (ctx.place !== 'sheet') {
+      const off = ctx.graph.on('change', (c) => {
+        if (!wrap.isConnected) return queueMicrotask(off);
+        if (c.kind === 'node:params' && c.node.id === ctx.node.id) draw();
+      });
+    }
     draw();
     return wrap;
   },
@@ -2036,6 +2142,18 @@ const css = `
 .dr-clip small { flex-basis: 100%; color: var(--_muted); font-size: 11px; }
 .dr-clip small:empty { display: none; }
 .dr-clip-panel { flex-basis: 100%; }
+/* A shot with a clip, on the board: its first frame, big. ▶ once the card is zoomed into. */
+.nm-field:has(> .dr-clip-compact) { grid-template-columns: 1fr; padding: 4px 8px 8px; }
+.nm-field:has(> .dr-clip-compact) > span { display: none; }
+.dr-clip.dr-clip-compact { display: block; }
+.dr-clip-card { position: relative; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: #111; }
+.dr-clip-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.dr-clip-len, .dr-clip-busy { position: absolute; bottom: 6px; right: 6px; font: 600 11px/1 var(--_font); color: #fff; background: rgba(0,0,0,.6); padding: 3px 6px; border-radius: 4px; }
+.dr-clip-busy { right: auto; left: 6px; }
+.dr-clip-play { all: unset; position: absolute; inset: 0; margin: auto; width: 56px; height: 56px; border-radius: 50%; background: rgba(0,0,0,.55); color: #fff;
+  font-size: 22px; display: none; place-items: center; cursor: pointer; box-shadow: 0 2px 12px rgba(0,0,0,.4); }
+.nm-root:not(.nm-overview) .nm-node.nm-selected .dr-clip-play { display: grid; }
+.dr-clip-sum { margin-top: 5px; font-size: 12px; color: var(--_muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dr-gen-panel { box-sizing: border-box; min-width: 0; max-width: 100%; }
 .dr-gen-panel :is(select, textarea, input:not([type=checkbox])) { box-sizing: border-box; max-width: 100%; }
 .dr-clip-panel select, .dr-clip-panel input[type=number] { font: 12px var(--_font); min-height: 28px; }
