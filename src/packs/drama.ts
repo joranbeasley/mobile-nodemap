@@ -106,6 +106,59 @@ const CLIP_PROGRESS = 'dr-clip-progress';
 /** Dispatched on a picture or clip field to open its generate panel (the cards' ✨ / 🎬 buttons). */
 export const GENERATE_EVENT = 'dr-generate';
 
+/** An amount in a service's unit: $1.94, or 3 credits. */
+const amountText = (n: number, unit: string | undefined) => (unit === 'USD' ? `$${n.toFixed(2)}` : `${n.toLocaleString()} credit${n === 1 ? '' : 's'}`);
+
+/**
+ * Before spending: what it will probably cost and what's left ("Uses about 3 of 1,234 credits on
+ * Meshy"), with ✓ Generate and Back, shown under the Generate button. Resolves true to go ahead.
+ */
+export function confirmSpend(
+  go: HTMLButtonElement,
+  service: string,
+  estimate: Promise<{ amount: number; unit?: string } | undefined>,
+  balance: Promise<number | undefined> | undefined,
+): Promise<boolean> {
+  const box = document.createElement('div');
+  box.className = 'dr-confirm';
+  box.setAttribute('role', 'alertdialog');
+  box.setAttribute('aria-label', 'Confirm');
+  const text = Object.assign(document.createElement('div'), { className: 'dr-confirm-text', textContent: 'Checking the cost…' });
+  const yes = Object.assign(document.createElement('button'), { type: 'button', className: 'dr-gen-go', textContent: '✓ Generate', disabled: true });
+  const no = Object.assign(document.createElement('button'), { type: 'button', className: 'dr-gen-cancel', textContent: 'Back' });
+  const row = document.createElement('div');
+  row.className = 'dr-gen-row';
+  row.append(yes, no);
+  box.append(text, row);
+  const at = go.closest('.dr-gen-row') ?? go;
+  at.after(box);
+  at.setAttribute('hidden', '');
+  // Don't wait long: a slow balance shouldn't hold things up.
+  const soon = <T,>(p: Promise<T> | undefined) => Promise.race([(p ?? Promise.resolve(undefined)).catch(() => undefined), new Promise<undefined>((r) => setTimeout(r, 6000))]);
+  void Promise.all([soon(estimate), soon(balance)]).then(([e, b]) => {
+    const unit = e?.unit ?? (service === 'fal' ? 'USD' : 'credits');
+    const left = typeof b === 'number' ? b : undefined;
+    text.textContent = e
+      ? left != null
+        ? unit === 'USD'
+          ? `Uses about ${amountText(e.amount, unit)} of ${amountText(left, unit)} on ${service}.`
+          : `Uses about ${e.amount.toLocaleString()} of ${left.toLocaleString()} credits on ${service}.`
+        : `Uses about ${amountText(e.amount, unit)} on ${service}. (Your balance couldn’t be read${service === 'fal' ? ': fal shows it only to keys with billing access' : ''}.)`
+      : `${service} will charge for this; the cost isn’t known yet${left != null ? ` · ${amountText(left, unit)} left` : ''}.`;
+    if (e && left != null && e.amount > left) text.textContent += ' That’s more than your balance.';
+    yes.disabled = false;
+  });
+  return new Promise((resolve) => {
+    const done = (ok: boolean) => {
+      box.remove();
+      at.removeAttribute('hidden');
+      resolve(ok);
+    };
+    yes.addEventListener('click', () => done(true));
+    no.addEventListener('click', () => done(false));
+  });
+}
+
 /** Clips whose first frame was already looked for on this page. */
 const posterTried = new Set<string>();
 
@@ -778,6 +831,9 @@ export const clipFrameParam: ParamKind = {
       go.addEventListener('click', async () => {
         if (gen.key && !gen.key.get()) return void (st.textContent = `Add your ${gen.key.label} first.`);
         if (!prompt.value.trim()) return void (st.textContent = 'Write a prompt first.');
+        st.textContent = '';
+        const q = quote();
+        if (!(await confirmSpend(go, gen.name, Promise.resolve(q && { amount: q.amount, unit: q.unit }), gen.balance?.()))) return;
         abort = new AbortController();
         go.disabled = true;
         st.textContent = `Asking ${gen.name}…`;
@@ -1047,7 +1103,7 @@ export const imagesParam: ParamKind = {
                 ? `About $${est.credits.toFixed(2)} (${est.basis})`
                 : `About ${est.credits} credit${est.credits === 1 ? '' : 's'} (${est.basis})`
               : `Cost with ${label} not known yet: it shows after the first one`,
-            bal != null ? `${bal.toLocaleString()} left` : '',
+            bal != null ? `${amountText(bal, est?.unit ?? 'credits')} left` : '',
           ]
             .filter(Boolean)
             .join(' · ');
@@ -1124,6 +1180,10 @@ export const imagesParam: ParamKind = {
         if (gen.key && keyInput.value.trim()) gen.key.set(cleanKey(keyInput.value));
         if (gen.key && !gen.key.get()) return void (status.textContent = `Add your ${gen.key.label} first.`);
         if (!prompt.value.trim()) return void (status.textContent = 'Write a prompt first.');
+        status.textContent = '';
+        const m = gen.models?.length ? model.value : undefined;
+        const est = gen.estimate?.({ model: m, references: chosen.size }).then((e) => e && { amount: e.credits, unit: e.unit ?? 'credits' });
+        if (!(await confirmSpend(go, gen.name, est ?? Promise.resolve(undefined), gen.balance?.()))) return;
         abort = new AbortController();
         go.disabled = true;
         status.textContent = `Asking ${gen.name}…`;
@@ -2186,6 +2246,9 @@ const css = `
 .dr-clip small { flex-basis: 100%; color: var(--_muted); font-size: 11px; }
 .dr-clip small:empty { display: none; }
 .dr-clip-panel { flex-basis: 100%; }
+.dr-confirm { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 8px; border: 1px solid var(--_accent);
+  background: color-mix(in srgb, var(--_accent) 8%, var(--_node)); }
+.dr-confirm-text { font: 500 13px/1.4 var(--_font); color: var(--_text); }
 /* A shot with a clip, on the board: its first frame, big. ▶ once the card is zoomed into. */
 .nm-field:has(> .dr-clip-compact) { grid-template-columns: 1fr; padding: 4px 8px 8px; }
 .nm-field:has(> .dr-clip-compact) > span { display: none; }

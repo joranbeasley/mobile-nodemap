@@ -2,6 +2,12 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { Graph, NodeEditor, dramaGraph, drama2Graph, dramaImagePrompt, dramaImageReferences, meshyImageGenerator, setImageGenerator, type ImageGenerator } from '../src/index';
 
+/** Press ✓ Generate in the cost confirm that Generate shows. */
+const pressConfirm = async () => {
+  await new Promise((r) => setTimeout(r, 0));
+  [...document.querySelectorAll<HTMLButtonElement>('.dr-confirm .dr-gen-go')].pop()!.click();
+};
+
 afterEach(() => setImageGenerator(null));
 const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
 
@@ -174,6 +180,7 @@ describe('✨ Generate in image fields', () => {
     expect(panel.querySelector('.dr-gen-status')!.textContent).toMatch(/Add your Fake key/);
     panel.querySelector<HTMLInputElement>('.dr-gen-key input')!.value = 'secret';
     go.click();
+    await pressConfirm();
     await tick(30);
     expect(key).toBe('secret');
     expect(asked).toMatchObject({ aspect: '3:4' });
@@ -217,7 +224,7 @@ describe('✨ Generate in image fields', () => {
     expect(refs.at(-1)!.getAttribute('aria-label')).toBe('This card’s picture 1');
     expect(panel.querySelector('.dr-gen-refs-note')!.textContent).toMatch(/^2 reference pictures/);
     await tick(5);
-    expect(panel.querySelector('.dr-gen-cost')!.textContent).toBe(`About 5 credits (a guess) · ${(1234).toLocaleString()} left`);
+    expect(panel.querySelector('.dr-gen-cost')!.textContent).toBe(`About 5 credits (a guess) · ${(1234).toLocaleString()} credits left`);
     // A third can't go on until one is off.
     refs[2].click();
     expect(refs[2].getAttribute('aria-pressed')).toBe('false');
@@ -225,6 +232,7 @@ describe('✨ Generate in image fields', () => {
     refs[1].click();
     refs[2].click();
     panel.querySelector<HTMLButtonElement>('.dr-gen-go')!.click();
+    await pressConfirm();
     await tick(30);
     const label = (b: HTMLButtonElement) => b.getAttribute('aria-label');
     expect(asked!.references).toEqual([refs[0], refs[2]].map((b) => b.querySelector('img')!.getAttribute('src')));

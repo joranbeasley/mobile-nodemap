@@ -98,6 +98,8 @@ export interface VideoGenerator {
   resume?(job: VideoJob, opts?: { signal?: AbortSignal; onProgress?: (status: string, percent?: number) => void }): Promise<VideoResult>;
   /** What a clip with these settings will probably cost; undefined when unknown. */
   estimate?(req: { model?: string; duration?: number; resolution?: string; aspect?: string; audio?: boolean; references?: number }): VideoEstimate | undefined;
+  /** What's left on the account, in the estimate's unit (undefined when it can't be read). */
+  balance?(opts?: { signal?: AbortSignal }): Promise<number | undefined>;
   /** Where to see prices and make clips by hand. */
   site?: string;
 }

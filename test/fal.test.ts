@@ -13,11 +13,18 @@ import {
   shotClipSuggestion,
   dramaImageReferences,
   setClipKeeper,
+  confirmSpend,
   FAL_VIDEO_MODELS,
   type VideoGenerator,
   type VideoRequest,
   type ImageGenerator,
 } from '../src/index';
+
+/** Press ✓ Generate in the cost confirm that Generate shows. */
+const pressConfirm = async () => {
+  await new Promise((r) => setTimeout(r, 0));
+  [...document.querySelectorAll<HTMLButtonElement>('.dr-confirm .dr-gen-go')].pop()!.click();
+};
 
 afterEach(() => {
   setVideoGenerators([]);
@@ -36,7 +43,7 @@ const inSheet = (name: string) => [...document.querySelectorAll<HTMLElement>('.n
 const onCard = (el: HTMLElement, id: string, name: string) => el.querySelector<HTMLElement>(`.nm-node[data-id="${id}"] [data-param="${name}"]`)!;
 
 /** A stand-in for fal: the queue (submit, status, result) and storage uploads. */
-function fakeFal(output: Record<string, unknown>, opts: { statusUrls?: boolean; fail?: { status: number; body: unknown } } = {}) {
+function fakeFal(output: Record<string, unknown>, opts: { statusUrls?: boolean; fail?: { status: number; body: unknown }; noBilling?: boolean } = {}) {
   const calls: { url: string; method: string; headers: Record<string, string>; body?: unknown }[] = [];
   let polls = 0;
   const json = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body, blob: async () => new Blob(['x'], { type: 'image/png' }) }) as unknown as Response;
@@ -44,6 +51,7 @@ function fakeFal(output: Record<string, unknown>, opts: { statusUrls?: boolean; 
     const body = typeof init.body === 'string' ? JSON.parse(init.body) : init.body;
     calls.push({ url, method: init.method ?? 'GET', headers: (init.headers ?? {}) as Record<string, string>, body });
     if (url.startsWith('data:')) return json({});
+    if (url.includes('/account/billing')) return opts.noBilling ? json({ detail: 'Forbidden' }, 403) : json({ username: 'me', credits: { current_balance: 24.5, currency: 'USD' } });
     if (url.includes('/storage/upload/initiate')) return json({ upload_url: 'https://upload.test/put/1', file_url: `https://v3.fal.media/files/up-${calls.length}.png` });
     if (url.startsWith('https://upload.test/')) return json({});
     if (opts.fail && init.method === 'POST') return json(opts.fail.body, opts.fail.status);
@@ -137,6 +145,37 @@ describe('fal video (Seedance)', () => {
     expect(mm.url).toBe('https://queue.fal.run/minimax/h3-max/text-to-video');
     expect(mm.body).toEqual({ prompt: 'words', duration: 7, resolution: '768P', prompt_expansion_mode: 'disabled', aspect_ratio: '21:9' });
     await expect(gen.generate({ prompt: 'x'.repeat(1600), model: 'wan-2.6' })).rejects.toThrow(/up to 1,500 characters; this one has 1600/);
+  });
+
+  it('reads the fal balance where the key may, and confirms the spend before generating', async () => {
+    const fal = fakeFal({});
+    expect(await falVideoGenerator({ apiKey: 'k', fetch: fal.fetch }).balance!()).toBe(24.5);
+    const billing = fal.calls.find((c) => c.url.includes('/account/billing'))!;
+    expect(billing.url).toBe('https://api.fal.ai/v1/account/billing?expand=credits');
+    expect(billing.headers.Authorization).toBe('Key k');
+    expect(await falImageGenerator({ apiKey: 'k', fetch: fakeFal({}, { noBilling: true }).fetch }).balance!()).toBeUndefined();
+    // The confirm, under the Generate button.
+    const ask = async (est: { amount: number; unit?: string } | undefined, bal: number | undefined, service = 'fal') => {
+      const row = document.createElement('div');
+      row.className = 'dr-gen-row';
+      const go = document.createElement('button');
+      row.append(go);
+      document.body.append(row);
+      const answer = confirmSpend(go, service, Promise.resolve(est), Promise.resolve(bal));
+      await tick();
+      const box = document.querySelector<HTMLElement>('.dr-confirm')!;
+      const text = box.querySelector('.dr-confirm-text')!.textContent;
+      expect(row.hidden).toBe(true);
+      box.querySelector<HTMLButtonElement>('.dr-gen-cancel')!.click();
+      expect(await answer).toBe(false);
+      expect(row.hidden).toBe(false);
+      row.remove();
+      return text;
+    };
+    expect(await ask({ amount: 1.94, unit: 'USD' }, 24.5)).toBe('Uses about $1.94 of $24.50 on fal.');
+    expect(await ask({ amount: 3, unit: 'credits' }, 1234, 'Meshy')).toBe('Uses about 3 of 1,234 credits on Meshy.');
+    expect(await ask({ amount: 1.94, unit: 'USD' }, undefined)).toMatch(/^Uses about \$1\.94 on fal\. \(Your balance couldn’t be read: fal shows it only to keys with billing access\.\)$/);
+    expect(await ask({ amount: 30, unit: 'credits' }, 12, 'Meshy')).toMatch(/That’s more than your balance\.$/);
   });
 
   it('prices sound where it costs more, and Veo’s 8-second reference clips', () => {
@@ -289,6 +328,7 @@ describe('🎬 Generate clip on a shot', () => {
     panel.querySelector<HTMLInputElement>('input[aria-label="With sound"]')!.checked = true;
     expect(panel.querySelector('.dr-gen-cost')!.textContent).toBe(''); // this fake has no prices
     panel.querySelector<HTMLButtonElement>('.dr-gen-go')!.click();
+    await pressConfirm();
     await tick(30);
     expect(asked).toMatchObject({ prompt: expected.prompt, references: expected.refs.map((r) => r.src), duration: expected.duration, aspect: '16:9', resolution: '720p', model: 'm', audio: true });
     expect(g.nodes.get('s1b')!.params.clipUrl).toBe('https://v/clip.mp4');
@@ -333,6 +373,7 @@ describe('🎬 Generate clip on a shot', () => {
     expect(view.getAttribute('aria-pressed')).toBe('false');
     expect(view.querySelector('img')!.getAttribute('src')).toBe(A);
     panel.querySelector<HTMLButtonElement>('.dr-gen-go')!.click();
+    await pressConfirm();
     await tick(30);
     expect(asked!.references).toContain(B);
     expect(asked!.references).not.toContain(A);
@@ -525,6 +566,7 @@ describe('placeholders while generating', () => {
     const field = () => el.querySelector<HTMLElement>('.nm-node[data-id="theo"] [data-param="images"]')!;
     field().querySelector<HTMLButtonElement>('.dr-gen')!.click();
     field().querySelector<HTMLButtonElement>('.dr-gen-go')!.click();
+    await pressConfirm();
     await tick();
     const tile = () => field().querySelector<HTMLElement>('.dr-pending.dr-thumb');
     expect(tile()!.classList.contains('dr-indeterminate')).toBe(true); // no percent yet: it moves
@@ -557,6 +599,7 @@ describe('placeholders while generating', () => {
     const field = () => inSheet('lastFrame');
     [...field().querySelectorAll('button')].find((b) => b.textContent === '🎬 Generate clip')!.click();
     field().querySelector<HTMLButtonElement>('.dr-gen-go')!.click();
+    await pressConfirm();
     await tick(20);
     const tile = () => field().querySelector<HTMLElement>('.dr-pending.dr-clip-tile');
     expect(tile()!.getAttribute('aria-label')).toBe("In fal's queue (2 ahead)…");

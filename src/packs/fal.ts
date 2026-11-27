@@ -36,6 +36,8 @@ type FetchLike = typeof fetch;
 type Key = NonNullable<VideoGenerator['key']>;
 
 export interface FalOptions {
+  /** fal's platform API (the balance), default https://api.fal.ai/v1. */
+  apiUrl?: string;
   key?: Key;
   /** A fixed key instead (servers, tests). */
   apiKey?: string;
@@ -184,6 +186,7 @@ const IMAGE_ASPECTS = ['21:9', '16:9', '3:2', '4:3', '5:4', '1:1', '4:5', '3:4',
 function falClient(opts: FalOptions) {
   const queue = (opts.queueUrl ?? 'https://queue.fal.run').replace(/\/$/, '');
   const rest = (opts.restUrl ?? 'https://rest.fal.ai').replace(/\/$/, '');
+  const api = (opts.apiUrl ?? 'https://api.fal.ai/v1').replace(/\/$/, '');
   const doFetch: FetchLike = opts.fetch ?? ((...a: Parameters<FetchLike>) => fetch(...a));
   let memoryKey = '';
   const key: Key = opts.key ?? { label: 'fal API key', get: () => opts.apiKey ?? memoryKey, set: (v: string) => void (memoryKey = v) };
@@ -303,7 +306,24 @@ function falClient(opts: FalOptions) {
   /** Submit, wait in the queue, and return the result. */
   const run = async (endpoint: string, input: Record<string, unknown>, signal?: AbortSignal, onStatus?: (s: string) => void) =>
     wait(await submit(endpoint, input, signal), signal, onStatus);
-  return { key, run, submit, wait, fileUrl };
+  /**
+   * The account's credit balance in USD (fal's billing API). Only keys with billing access can
+   * read it (fal's BILLING, READONLY or FULL presets); otherwise undefined.
+   */
+  const balance = async (signal?: AbortSignal): Promise<number | undefined> => {
+    const k = key.get();
+    if (!k) return undefined;
+    try {
+      const res = await doFetch(`${api}/account/billing?expand=credits`, { headers: { Authorization: `Key ${k}` }, signal });
+      if (!res.ok) return undefined;
+      const b = (await res.json()) as { credits?: { current_balance?: number } };
+      return typeof b.credits?.current_balance === 'number' ? b.credits.current_balance : undefined;
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') throw err;
+      return undefined;
+    }
+  };
+  return { key, run, submit, wait, fileUrl, balance };
 }
 
 const nearest = (values: string[] | undefined, want: string | undefined, fallback: string) => {
@@ -358,6 +378,7 @@ export function falVideoGenerator(opts: FalOptions & { model?: string } = {}): V
       const seconds = lengthWith(m, duration, Math.min(references ?? 0, m.maxReferences ?? 0));
       return { amount: Math.round(rate * seconds * 100) / 100, unit: 'USD', basis: FAL_PRICE_BASIS, ...(seconds !== duration ? { seconds } : {}) };
     },
+    balance: ({ signal } = {}) => fal.balance(signal),
     key: { help: 'From fal.ai → Dashboard → Keys. Kept in this browser only and sent only to fal. Billed by fal.', ...fal.key },
     async generate(req: VideoRequest) {
       const m = pick(req.model);
@@ -438,6 +459,7 @@ export function falImageGenerator(opts: FalOptions & { model?: string } = {}): I
     defaultModel: opts.model ?? 'fal-ai/nano-banana-2',
     maxReferences: 9,
     key: { help: 'From fal.ai → Dashboard → Keys. Kept in this browser only and sent only to fal. Billed by fal.', ...fal.key },
+    balance: ({ signal } = {}) => fal.balance(signal),
     async estimate({ model } = {}) {
       const m = FAL_IMAGE_MODELS.find((x) => x.id === (model ?? opts.model)) ?? FAL_IMAGE_MODELS[0];
       return { credits: m.perImage, unit: 'USD', basis: FAL_PRICE_BASIS };
