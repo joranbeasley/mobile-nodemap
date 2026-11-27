@@ -417,10 +417,15 @@ const images = (name = 'images', label = 'images', advanced = false) => ({
     return w ? dramaImagePrompt(wired, w, name) : undefined;
   },
 });
+/**
+ * Cards on the boards are summaries: what you need to recognise and link things (pictures,
+ * description, who and where). Everything else is edited in the card's Edit sheet (tap it twice).
+ */
+const sheetOnly = <T extends object>(p: T) => ({ ...p, card: false as const });
 const ref = (name: string, label: string, of: string) => ({ name, label, kind: 'ref', of, default: '' });
 const refs = (name: string, label: string, of: string, exclusive = false) => ({ name, label, kind: 'refs', of, exclusive, default: [] });
 const number = () => ({ name: 'number', label: 'number', kind: 'number' as const, default: 1, min: 1, step: 1 });
-const wardrobe = (description: string) => ({ name: 'wardrobe', label: 'wardrobe', kind: 'wardrobe', default: {}, description });
+const wardrobe = (description: string) => sheetOnly({ name: 'wardrobe', label: 'wardrobe', kind: 'wardrobe', default: {}, description });
 
 const characterNode = defineNode({
   type: D2.character,
@@ -433,9 +438,9 @@ const characterNode = defineNode({
   description: 'Someone in the story: name, description, appearance, pictures',
   params: [
     text('description', 'description', 'Who they are'),
-    text('appearance', 'appearance', 'Age, build, hair, face, usual clothes', false, 'Repeated word for word in every video prompt they are in'),
+    sheetOnly(text('appearance', 'appearance', 'Age, build, hair, face, usual clothes', false, 'Repeated word for word in every video prompt they are in')),
     images(),
-    { name: 'actor', label: 'played by', kind: 'text', default: '', placeholder: 'Cast member', advanced: true },
+    sheetOnly({ name: 'actor', label: 'played by', kind: 'text', default: '', placeholder: 'Cast member' }),
   ],
   onCreate: (n) => void (n.label ??= 'New character'),
 });
@@ -454,9 +459,10 @@ const propNode = defineNode({
   tags: ['outfit', 'costume', 'object', 'wardrobe', 'item'],
   description: 'An object or an outfit that shots need',
   params: [
-    { name: 'kind', label: 'type', kind: 'select', options: PROP_TYPES, default: 'Object' },
+    sheetOnly({ name: 'kind', label: 'type', kind: 'select', options: PROP_TYPES, default: 'Object' }),
     {
       ...ref('wornBy', 'usually worn by', D2.character),
+      card: false,
       description: 'Optional. Anyone can wear it: in each shot, pick who wears it next to the outfit. There it replaces their usual clothes.',
       when: (p: Record<string, unknown>) => p.kind === 'Outfit',
     },
@@ -475,7 +481,7 @@ const locationNode = defineNode({
   flavor: 'source',
   width: 250,
   description: 'Where shots happen: name, setting, description, pictures',
-  params: [{ name: 'setting', label: 'setting', kind: 'select', options: ['INT', 'EXT'], default: 'INT' }, text('description', 'description', 'What it looks like'), images()],
+  params: [sheetOnly({ name: 'setting', label: 'setting', kind: 'select', options: ['INT', 'EXT'], default: 'INT' }), text('description', 'description', 'What it looks like'), images()],
   onCreate: (n) => void (n.label ??= 'New location'),
 });
 
@@ -512,8 +518,9 @@ const shotNode = defineNode({
   description: 'One camera set-up: one location, any characters',
   caption: (n) => `Shot ${String(n.params.number ?? '').trim() || '?'} · ${n.params.framing ?? 'Medium'}`,
   params: [
-    { name: 'number', label: 'shot', kind: 'text', default: '1', placeholder: '1, 2, 2A…' },
-    { name: 'framing', label: 'framing', kind: 'select', options: FRAMINGS, default: 'Medium' },
+    // A shot's card is a summary (its title says the number and framing); tap it twice for the rest.
+    sheetOnly({ name: 'number', label: 'shot', kind: 'text', default: '1', placeholder: '1, 2, 2A…' }),
+    sheetOnly({ name: 'framing', label: 'framing', kind: 'select', options: FRAMINGS, default: 'Medium' }),
     { ...ref('location', 'location', D2.location), create: true },
     { ...refs('characters', 'characters', D2.character), create: true },
     { ...refs('props', 'props', D2.prop), create: true, chip: wearerPicker, only: (n: NodeInstance) => !isOutfit(n) },
@@ -521,9 +528,15 @@ const shotNode = defineNode({
     text('description', 'description', 'What we see and hear'),
     images('images', 'frames'),
     // The clip field: 🎬 Generate clip reads the wired drama model (same ids).
-    ...SHOT_CLIP_PARAMS.map((p) => (p.name === 'lastFrame' ? { ...p, video: (node: NodeInstance, graph: Graph) => shotClipSuggestion(toDrama(graph), node.id) } : p)),
-    { name: 'movement', label: 'camera', kind: 'select', options: MOVES, default: 'Static', advanced: true },
-    { name: 'duration', label: 'seconds', kind: 'number', default: 5, min: 0, step: 1, advanced: true },
+    // On the card once a clip has been tried (one is ready, on its way, or failed: clipJob is then
+    // null, not missing), so it shows, is collected, and says what happened.
+    ...SHOT_CLIP_PARAMS.map((p) =>
+      p.name === 'lastFrame'
+        ? { ...p, video: (node: NodeInstance, graph: Graph) => shotClipSuggestion(toDrama(graph), node.id), card: (q: Record<string, unknown>) => !!(q.lastFrame || q.clipUrl) || q.clipJob !== undefined }
+        : sheetOnly(p),
+    ),
+    sheetOnly({ name: 'movement', label: 'camera', kind: 'select', options: MOVES, default: 'Static' }),
+    sheetOnly({ name: 'duration', label: 'seconds', kind: 'number', default: 5, min: 0, step: 1 }),
   ],
 });
 
@@ -538,20 +551,20 @@ const sceneNode = defineNode({
   description: 'A numbered scene: a set of shots',
   caption: (n) => `Scene ${Number(n.params.number ?? 1)} · ${n.params.time ?? 'DAY'}`,
   params: [
-    number(),
-    { name: 'time', label: 'time', kind: 'select', options: TIMES, default: 'DAY' },
+    sheetOnly(number()),
+    sheetOnly({ name: 'time', label: 'time', kind: 'select', options: TIMES, default: 'DAY' }),
     { ...refs('shots', 'shots', D2.shot, true), create: true, movable: true, sortable: true, renumber: 'number' },
     text('description', 'description', 'What happens'),
     wardrobe('What each character wears in this scene, for all its shots (a shot can still change it).'),
-    images('storyboard', 'storyboard', true),
+    sheetOnly(images('storyboard', 'storyboard')),
   ],
 });
 
 const look = [
-  text('style', 'video style', 'e.g. 16mm film, warm stage lighting', true),
-  { name: 'aspect', label: 'aspect ratio', kind: 'select' as const, options: ['inherit', '16:9', '9:16', '1:1', '4:3', '21:9'], default: 'inherit', advanced: true },
-  { name: 'maxImages', label: 'reference images', kind: 'number' as const, default: 0, min: 0, max: 50, step: 1, advanced: true, description: 'Most images per clip; 0 = 9' },
-  { name: 'maxClip', label: 'clip seconds', kind: 'number' as const, default: 0, min: 0, max: 60, step: 1, advanced: true, description: 'Longest clip; 0 = 15 s' },
+  sheetOnly(text('style', 'video style', 'e.g. 16mm film, warm stage lighting')),
+  sheetOnly({ name: 'aspect', label: 'aspect ratio', kind: 'select' as const, options: ['inherit', '16:9', '9:16', '1:1', '4:3', '21:9'], default: 'inherit' }),
+  sheetOnly({ name: 'maxImages', label: 'reference images', kind: 'number' as const, default: 0, min: 0, max: 50, step: 1, description: 'Most images per clip; 0 = 9' }),
+  sheetOnly({ name: 'maxClip', label: 'clip seconds', kind: 'number' as const, default: 0, min: 0, max: 60, step: 1, description: 'Longest clip; 0 = 15 s' }),
 ];
 
 const episodeNode = defineNode({
@@ -564,11 +577,11 @@ const episodeNode = defineNode({
   width: 440,
   description: 'A titled, numbered episode: a set of scenes',
   params: [
-    number(),
+    sheetOnly(number()),
     { ...refs('scenes', 'scenes', D2.scene, true), create: true, movable: true, sortable: true, renumber: 'number' },
     text('description', 'description', 'Optional synopsis'),
     wardrobe('What each character wears in this episode, for all its scenes and shots (a scene or shot can still change it).'),
-    images('images', 'poster', true),
+    sheetOnly(images('images', 'poster')),
     ...look,
   ],
   onCreate: (n) => void (n.label ??= 'Untitled episode'),

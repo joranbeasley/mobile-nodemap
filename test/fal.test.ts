@@ -25,6 +25,15 @@ afterEach(() => {
   localStorage.clear();
 });
 const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
+/** Open a node's Edit sheet (cards are summaries; the sheet has every field), past its guard against the opening tap. */
+const openSheet = async (editor: NodeEditor, id: string) => {
+  editor.openNodeEditor(id);
+  await tick(360);
+};
+/** A field in the open Edit sheet. */
+const inSheet = (name: string) => [...document.querySelectorAll<HTMLElement>('.nm-edit')].pop()!.querySelector<HTMLElement>(`[data-param="${name}"]`)!;
+/** A field on a node's card (a shot's clip shows there once it has one, or one is on its way). */
+const onCard = (el: HTMLElement, id: string, name: string) => el.querySelector<HTMLElement>(`.nm-node[data-id="${id}"] [data-param="${name}"]`)!;
 
 /** A stand-in for fal: the queue (submit, status, result) and storage uploads. */
 function fakeFal(output: Record<string, unknown>, opts: { statusUrls?: boolean; fail?: { status: number; body: unknown } } = {}) {
@@ -266,9 +275,10 @@ describe('🎬 Generate clip on a shot', () => {
     globalThis.fetch = (async () => {
       throw new TypeError('offline');
     }) as typeof fetch;
-    const { g, el, editor } = mount();
+    const { g, editor } = mount();
     await editor.setView('shots');
-    const field = () => el.querySelector<HTMLElement>('.nm-node[data-id="s1b"] [data-param="lastFrame"]')!;
+    await openSheet(editor, 's1b');
+    const field = () => inSheet('lastFrame');
     const gen = [...field().querySelectorAll('button')].find((b) => b.textContent === '🎬 Generate clip')!;
     gen.click();
     const panel = field().querySelector<HTMLElement>('.dr-clip-panel')!;
@@ -296,13 +306,14 @@ describe('🎬 Generate clip on a shot', () => {
       asked = req;
       return { videos: [] };
     } }]);
-    const { g, el, editor } = mount();
+    const { g, editor } = mount();
     const A = 'data:image/png;base64,QQ==', B = 'data:image/png;base64,Qg==';
     g.setParam('hall', 'images', [A, B]);
     // Unpicked: the first leads, the second goes along as another view.
     expect(seedanceShot(toDrama(g), 's1b').refs.filter((r) => r.card === 'hall').map((r) => r.src)).toEqual([A, B]);
     await editor.setView('shots');
-    const field = () => el.querySelector<HTMLElement>('.nm-node[data-id="s1b"] [data-param="lastFrame"]')!;
+    await openSheet(editor, 's1b');
+    const field = () => inSheet('lastFrame');
     [...field().querySelectorAll('button')].find((b) => b.textContent === '🎬 Generate clip')!.click();
     const panel = field().querySelector<HTMLElement>('.dr-clip-panel')!;
     const sw = [...panel.querySelectorAll<HTMLButtonElement>('.dr-gen-pick')];
@@ -394,7 +405,7 @@ describe('🎬 clips that finish while the page is away', () => {
     expect(asked).toBe(1);
     expect(g.nodes.get('s1b')!.params.clipUrl).toBe('https://v/done.mp4');
     expect(g.nodes.get('s1b')!.params.clipJob).toBeNull();
-    const field = el.querySelector<HTMLElement>('.nm-node[data-id="s1b"] [data-param="lastFrame"]')!;
+    const field = onCard(el, 's1b', 'lastFrame');
     expect(field.textContent).toMatch(/Clip ready/);
     expect(field.querySelector('.dr-clip-job')).toBeNull();
     globalThis.fetch = realFetch;
@@ -412,7 +423,7 @@ describe('🎬 clips that finish while the page is away', () => {
     g.setParam('s1b', 'clipJob', job);
     await editor.setView('shots');
     await tick(20);
-    const field = () => el.querySelector<HTMLElement>('.nm-node[data-id="s1b"] [data-param="lastFrame"]')!;
+    const field = () => onCard(el, 's1b', 'lastFrame');
     expect(g.nodes.get('s1b')!.params.clipJob).toEqual(job);
     expect(field().querySelector('.dr-clip-job')!.textContent).toMatch(/^⏳ Generating on fake since/);
     expect(field().textContent).toMatch(/Still generating on Fake/);
@@ -470,11 +481,12 @@ describe('placeholders while generating', () => {
     globalThis.fetch = (async () => {
       throw new TypeError('offline');
     }) as typeof fetch;
-    const { g, el, editor } = mount();
+    const { g, editor } = mount();
     // Photos (PNG), which need no canvas to send (happy-dom has none for the example's drawings).
     for (const n of g.nodes.values()) if (Array.isArray(n.params.images) && n.params.images.length) g.setParam(n.id, 'images', [`data:image/png;base64,${btoa(n.id)}`]);
     await editor.setView('shots');
-    const field = () => el.querySelector<HTMLElement>('.nm-node[data-id="s1b"] [data-param="lastFrame"]')!;
+    await openSheet(editor, 's1b');
+    const field = () => inSheet('lastFrame');
     [...field().querySelectorAll('button')].find((b) => b.textContent === '🎬 Generate clip')!.click();
     field().querySelector<HTMLButtonElement>('.dr-gen-go')!.click();
     await tick(20);
@@ -557,7 +569,8 @@ describe('🎬 price in the clip panel', () => {
     document.body.append(el);
     const editor = new NodeEditor(el, { graph: g, registry: g.registry!, views: drama2Graph.editor!.views });
     await editor.setView('shots');
-    const field = el.querySelector<HTMLElement>('.nm-node[data-id="s1b"] [data-param="lastFrame"]')!;
+    await openSheet(editor, 's1b');
+    const field = inSheet('lastFrame');
     [...field.querySelectorAll('button')].find((b) => b.textContent === '🎬 Generate clip')!.click();
     const panel = field.querySelector<HTMLElement>('.dr-clip-panel')!;
     const set = (sel: string, v: string) => {

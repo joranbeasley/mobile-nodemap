@@ -146,17 +146,11 @@ describe('Editor views', () => {
     editor.destroy();
   });
 
-  it('shows “worn by” only on outfits', async () => {
+  it('shows “worn by” only on outfits, in the Edit sheet', async () => {
     const { g, el, editor } = mount();
     await editor.setView('props');
-    const wornBy = (id: string) => !!el.querySelector(`.nm-node[data-id="${id}"] [data-param="wornBy"]`);
-    expect(wornBy('jules-lead')).toBe(true);
-    expect(wornBy('script')).toBe(false);
-    g.setParam('script', 'kind', 'Outfit');
-    expect(wornBy('script')).toBe(true);
-    g.setParam('script', 'kind', 'Object');
-    expect(wornBy('script')).toBe(false);
-    // The edit sheet follows the type too.
+    // Cards are summaries: the type and who wears it are edited in the sheet.
+    expect(el.querySelector('.nm-node[data-id="jules-lead"] [data-param="wornBy"]')).toBeNull();
     editor.openNodeEditor('script');
     const sheetField = () => document.querySelector('.nm-edit [data-param="wornBy"]')!.closest<HTMLElement>('.nm-edit-field')!;
     expect(sheetField().hidden).toBe(true);
@@ -206,10 +200,18 @@ describe('Editor views', () => {
     expect(dressOf(g, node('s3b'), wearerOf(g, node('s3b'), node('jules-lead'))!.id).from).toBe('shot');
   });
 
-  it('sets the wardrobe on episode, scene and shot cards', async () => {
+  it('sets the wardrobe on episode, scene and shot cards, in their Edit sheets', async () => {
     const { g, el, editor } = mount();
-    const row = (id: string, who: string) =>
-      [...el.querySelectorAll<HTMLElement>(`.nm-node[data-id="${id}"] [data-param="wardrobe"] .dr2-wardrobe-row`)].find((r) => r.textContent!.startsWith(who))!.querySelector('select')!;
+    // Not on the cards (a row per character would make them long)…
+    await editor.setView('shots');
+    expect(el.querySelector('.nm-node[data-id="s4a"] [data-param="wardrobe"]')).toBeNull();
+    // …but in each one's Edit sheet.
+    let open = '';
+    const sheet = (id: string) => {
+      if (open !== id) (editor.closePalette(), editor.openNodeEditor(id), (open = id));
+      return document.querySelector<HTMLElement>('.nm-edit [data-param="wardrobe"]')!;
+    };
+    const row = (id: string, who: string) => [...sheet(id).querySelectorAll<HTMLElement>('.dr2-wardrobe-row')].find((r) => r.textContent!.startsWith(who))!.querySelector('select')!;
     const label = (sel: HTMLSelectElement) => sel.selectedOptions[0].textContent;
     const choose = (sel: HTMLSelectElement, v: string) => {
       sel.value = v;
@@ -246,7 +248,8 @@ describe('Editor views', () => {
     expect(g.nodes.get(made)!.params).toMatchObject({ kind: 'Outfit', wornBy: 'theo' });
     // Shots without characters say so.
     g.setParam('s1b', 'characters', []);
-    expect(el.querySelector('.nm-node[data-id="s1b"] [data-param="wardrobe"]')!.textContent).toMatch(/Add characters/);
+    expect(sheet('s1b').textContent).toMatch(/Add characters/);
+    editor.closePalette();
     editor.destroy();
   });
 
@@ -288,10 +291,14 @@ describe('Editor views', () => {
   it('keeps a shot’s finished clip as its last frame', async () => {
     const { g, el, editor } = mount();
     await editor.setView('shots');
-    const field = () => el.querySelector<HTMLElement>('.nm-node[data-id="s1a"] [data-param="lastFrame"]')!;
+    // No clip yet: the field is in the Edit sheet, not on the card.
+    expect(el.querySelector('.nm-node[data-id="s1a"] [data-param="lastFrame"]')).toBeNull();
+    editor.openNodeEditor('s1a');
+    await new Promise((r) => setTimeout(r, 360)); // the sheet's guard against the opening tap
+    const field = () => document.querySelector<HTMLElement>('.nm-edit [data-param="lastFrame"]')!;
     expect(field().querySelector('.dr-clip-btn')!.textContent).toBe('🎞 Add finished clip…');
     expect(field().querySelector('input[type=file]')!.getAttribute('accept')).toBe('video/*');
-    expect(el.querySelector<HTMLInputElement>('.nm-node[data-id="s1a"] input[type=checkbox][data-key="p:continues"]')!.checked).toBe(false);
+    expect(document.querySelector<HTMLInputElement>('.nm-edit input[type=checkbox][data-key="p:continues"]')!.checked).toBe(false);
     // Set from elsewhere (undo, a save from another device): the field shows the frame.
     g.setParam('s1a', 'lastFrame', 'data:image/jpeg;base64,QUJD');
     expect(field().querySelector<HTMLImageElement>('.dr-clip-thumb img')!.getAttribute('src')).toBe('data:image/jpeg;base64,QUJD');
@@ -300,6 +307,10 @@ describe('Editor views', () => {
     field().querySelector<HTMLButtonElement>('[aria-label="Remove the clip"]')!.click();
     expect(g.nodes.get('s1a')!.params.lastFrame).toBe('');
     expect(field().querySelector('.dr-clip-thumb')).toBeNull();
+    // With a clip, the card shows it too.
+    g.setParam('s1a', 'lastFrame', 'data:image/jpeg;base64,QUJD');
+    expect(el.querySelector('.nm-node[data-id="s1a"] [data-param="lastFrame"] .dr-clip-thumb')).not.toBeNull();
+    editor.closePalette();
     editor.destroy();
   });
 

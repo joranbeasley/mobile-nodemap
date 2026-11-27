@@ -390,7 +390,6 @@ export const clipFrameParam: ParamKind = {
     };
     /** A finished clip: keep its link and its last frame, and forget the job. */
     const collect = async (clip: string, spent: string, signal?: AbortSignal) => {
-      ctx.graph.setParam(ctx.node.id, 'clipJob', null);
       // Keep a copy where the host says (it lasts, and this page can read it), else the service's link.
       let kept = clip;
       let copied = false;
@@ -403,7 +402,9 @@ export const clipFrameParam: ParamKind = {
           if ((err as Error).name === 'AbortError') throw err;
         }
       }
+      // The clip first, then forget the job: the shot is never without either (its card shows the field while it has one).
       ctx.graph.setParam(ctx.node.id, 'clipUrl', kept);
+      ctx.graph.setParam(ctx.node.id, 'clipJob', null);
       draw();
       try {
         value = await lastFrameOf(await (await fetch(kept, { signal, credentials: 'same-origin' })).blob());

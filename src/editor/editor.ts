@@ -169,6 +169,15 @@ function pointAlong(pts: { x: number; y: number }[], t: number): { x: number; y:
 }
 
 /** Whether a param applies to a node right now (see ParamBase.when). */
+/** On the node's card (not just in its Edit sheet)? */
+const onCard = (p: ParamDef, node: NodeInstance) => {
+  if (typeof p.card !== 'function') return p.card !== false;
+  try {
+    return p.card(node.params);
+  } catch {
+    return true;
+  }
+};
 const shows = (p: ParamDef, node: NodeInstance) => {
   try {
     return !p.when || p.when(node.params);
@@ -1902,7 +1911,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
   private portsKey(node: NodeInstance): string {
     const f = (ps: PortDef[]) => ps.map((p) => `${p.name}:${p.type}`).join(',');
     // Which conditional params show is part of the node's shape too: a change rebuilds it.
-    const shown = (this.registry.get(node.type)?.params ?? []).filter((p) => p.when && shows(p, node)).map((p) => p.name);
+    const shown = (this.registry.get(node.type)?.params ?? []).filter((p) => (p.when || typeof p.card === 'function') && shows(p, node) && onCard(p, node)).map((p) => p.name);
     return f(this.registry.inputsOf(node)) + '|' + f(this.registry.outputsOf(node)) + '|' + shown.join(',');
   }
 
@@ -1944,7 +1953,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
       const control = this.paramControl(node, p);
       return h(control.dataset.paramKind ? 'div' : 'label', { class: 'nm-field' }, h('span', {}, p.label ?? p.name), control);
     };
-    const params = (def?.params ?? []).filter((p) => shows(p, node));
+    const params = (def?.params ?? []).filter((p) => shows(p, node) && onCard(p, node));
     params.filter((p) => !p.advanced).forEach((p) => body.append(field(p)));
     const advanced = params.filter((p) => p.advanced);
     if (advanced.length) {

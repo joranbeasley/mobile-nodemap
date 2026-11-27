@@ -67,7 +67,7 @@ interface PortDef {
 
 ## `ParamDef`
 
-Every param has `name`, `label?`, `description?` and `advanced?` (fold it behind "More"). The built-in kinds are:
+Every param has `name`, `label?`, `description?`, `advanced?` (fold it behind "More") and `card?`: `false` keeps it off the node's card (edited in the Edit sheet only, to keep cards small), and a function `(params) => boolean` shows it on the card only when it says so. The built-in kinds are:
 
 | `kind` | Extra fields |
 | --- | --- |

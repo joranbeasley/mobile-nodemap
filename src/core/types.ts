@@ -60,6 +60,11 @@ interface ParamBase {
   /** Tuck this param behind the node's "More" toggle to keep nodes small on phones. */
   advanced?: boolean;
   /**
+   * Whether it's on the node's card. `false`: edited in the Edit sheet only (keeps cards small);
+   * a function: on the card only when it says so (e.g. once there's something to see). Default true.
+   */
+  card?: boolean | ((params: Record<string, unknown>) => boolean);
+  /**
    * Show this param only when it applies, given the node's params. Hidden params keep their
    * value. `when: (p) => p.kind === 'Outfit'`
    */
