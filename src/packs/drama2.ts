@@ -1,7 +1,7 @@
 import { defineNode, definePack, type GraphEngine } from '../core/registry.js';
 import { Graph } from '../core/graph.js';
 import type { GraphJSON, NodeInstance, NodeResult, NodeType, ParamKind } from '../core/types.js';
-import { DRAMA_DETAILS, GENERATE_EVENT, viewsParam, SHOT_CLIP_PARAMS, clipFrameParam, dramaImagePrompt, shotClipSuggestion, FRAMINGS, MOVES, TIMES, appearances, dramaEngine, dramaPack, dramaView, imagesParam, sceneInfo, episodeInfo } from './drama.js';
+import { DRAMA_DETAILS, GENERATE_EVENT, playSequence, type SequenceItem, viewsParam, SHOT_CLIP_PARAMS, clipFrameParam, dramaImagePrompt, shotClipSuggestion, FRAMINGS, MOVES, TIMES, appearances, dramaEngine, dramaPack, dramaView, imagesParam, sceneInfo, episodeInfo } from './drama.js';
 import { getVideoGenerators } from './video-generation.js';
 
 /**
@@ -215,6 +215,8 @@ type RefParam = {
   only?: (n: NodeInstance) => boolean;
   /** Something extra on a chip (who wears an outfit in this shot). */
   chip?: (graph: Graph, holder: NodeInstance, item: NodeInstance) => HTMLElement | undefined;
+  /** A picture at the start of a chip (a shot's first frame, on a scene). */
+  chipImage?: (graph: Graph, holder: NodeInstance, item: NodeInstance) => string | undefined;
 };
 const NEW = '\u0000new';
 const MOVE = '\u0000move:';
@@ -320,6 +322,11 @@ function refControl(single: boolean): ParamKind {
           const open = button('', name, `Open ${name}`, () => {});
           open.dataset.nmOpen = id;
           open.title = `Open ${name}`;
+          const pic = p.chipImage?.(graph, ctx.node, n);
+          if (pic) {
+            open.prepend(Object.assign(document.createElement('img'), { src: pic, alt: '', className: 'dr2-chip-img' }));
+            chip.classList.add('dr2-chip-pic');
+          }
           const move = (d: number) => () => {
             const next = [...shown];
             [next[i], next[i + d]] = [next[i + d], next[i]];
@@ -522,6 +529,31 @@ function wearerPicker(graph: Graph, shot: NodeInstance, item: NodeInstance): HTM
   return sel;
 }
 
+/** A shot's first frame when it has a clip (else its last frame, for a clip added by hand). */
+const shotPoster = (shot: NodeInstance): string | undefined => {
+  const p = shot.params;
+  if (!(p.clipUrl || p.lastFrame)) return undefined;
+  return (typeof p.clipPoster === 'string' && p.clipPoster) || (typeof p.lastFrame === 'string' && p.lastFrame) || undefined;
+};
+
+/** A scene's shots, in order, to play: each one's clip, or a still (its frame, or its words). */
+export function sceneSequence(graph: Graph, scene: NodeInstance): SequenceItem[] {
+  return refsOf(graph, scene, 'shots').map((shot) => {
+    const p = shot.params;
+    const frames = Array.isArray(p.images) ? (p.images as string[]).filter((x) => typeof x === 'string' && x) : [];
+    const label = nodeTitle(graph, shot);
+    const seconds = Number(p.clipSeconds) || Number(p.duration) || 5;
+    return {
+      label,
+      ...(typeof p.clipUrl === 'string' && p.clipUrl ? { video: p.clipUrl } : {}),
+      ...(shotPoster(shot) || frames[0] ? { image: shotPoster(shot) || frames[0] } : {}),
+      text: `${label}\n${String(p.description ?? '')}`.trim(),
+      seconds: Math.min(15, Math.max(1, seconds)),
+      continues: !!p.continues,
+    };
+  });
+}
+
 const shotNode = defineNode({
   type: D2.shot,
   title: 'Shot',
@@ -575,6 +607,8 @@ const shotNode = defineNode({
 const sceneNode = defineNode({
   type: D2.scene,
   editOnCard: false, // for looking; ✎ Edit opens its sheet
+  // ▶ Preview: its shots in order, clips crossfading (stills for shots without one).
+  cardActions: [{ label: '▶ Preview', run: (scene: NodeInstance, graph: Graph) => playSequence(sceneSequence(graph, scene), { title: `Preview: ${nodeTitle(graph, scene)}` }) }],
   title: 'Scene',
   category: 'Story',
   color: '#5f3dc4',
@@ -586,7 +620,8 @@ const sceneNode = defineNode({
   params: [
     sheetOnly(number()),
     sheetOnly({ name: 'time', label: 'time', kind: 'select', options: TIMES, default: 'DAY' }),
-    { ...refs('shots', 'shots', D2.shot, true), create: true, movable: true, sortable: true, renumber: 'number' },
+    // A shot with a clip shows its first frame on its chip.
+    { ...refs('shots', 'shots', D2.shot, true), create: true, movable: true, sortable: true, renumber: 'number', chipImage: (_g: Graph, _sc: NodeInstance, shot: NodeInstance) => shotPoster(shot) },
     text('description', 'description', 'What happens'),
     wardrobe('What each character wears in this scene, for all its shots (a shot can still change it).'),
     sheetOnly(images('storyboard', 'storyboard')),
@@ -917,6 +952,8 @@ const css = `
 .dr2-refs { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 .dr2-chip { display: inline-flex; align-items: stretch; border: 1px solid var(--_border); border-radius: 999px; overflow: hidden; background: color-mix(in srgb, var(--_accent) 8%, var(--_node)); }
 .dr2-chip button { all: unset; cursor: pointer; font: 500 12px/1 var(--_font); color: var(--_text); padding: 6px 10px; }
+.dr2-chip-pic button[data-nm-open] { display: inline-flex; align-items: center; gap: 6px; padding-left: 3px; }
+.dr2-chip-img { width: 40px; height: 24px; object-fit: cover; border-radius: 999px 4px 4px 999px; display: block; }
 .dr2-wardrobe { display: flex; flex-direction: column; gap: 6px; min-width: 0; width: 100%; }
 .dr2-wardrobe-row { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .dr2-wardrobe-row > span { font: 500 11px/1.2 var(--_font); color: var(--_muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

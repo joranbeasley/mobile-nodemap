@@ -170,6 +170,168 @@ export function confirmSpend(
 /** Clips whose first frame was already looked for on this page. */
 const posterTried = new Set<string>();
 
+/** One shot in a played sequence: its clip, or a still (its frame, else its words) for its length. */
+export interface SequenceItem {
+  label: string;
+  /** The clip. */
+  video?: string;
+  /** A picture to show (a clip's poster, or the still when there's no clip). */
+  image?: string;
+  /** What it is, when there's nothing to show. */
+  text?: string;
+  /** How long a still stays (seconds). */
+  seconds: number;
+  /** Carries straight on from the one before: a cut, not a crossfade. */
+  continues?: boolean;
+}
+
+/**
+ * Play shots one after another, full screen with sound: clips crossfade into each other (a cut
+ * where a shot continues the one before), shots without a clip show their frame (or their
+ * words) for their length, like an animatic. ⏮ ⏯ ⏭ and ✕; Esc or leaving full screen closes it.
+ */
+export function playSequence(items: SequenceItem[], opts: { title?: string; fade?: number } = {}): void {
+  if (!items.length) return;
+  const fade = opts.fade ?? 0.6;
+  const box = document.createElement('div');
+  box.className = 'dr-player dr-sequence';
+  box.setAttribute('role', 'dialog');
+  box.setAttribute('aria-label', opts.title ?? 'Preview');
+  box.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:#000;overflow:hidden;';
+  const stage = document.createElement('div');
+  stage.style.cssText = 'position:absolute;inset:0;';
+  // Two video layers, made now (from the tap) so later clips may play with sound; one still layer.
+  const mk = () => {
+    const v = Object.assign(document.createElement('video'), { playsInline: true, preload: 'auto' });
+    v.style.cssText = `position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:0;transition:opacity ${fade}s;`;
+    return v;
+  };
+  const vids = [mk(), mk()];
+  const still = document.createElement('div');
+  still.style.cssText = `position:absolute;inset:0;display:grid;place-items:center;opacity:0;transition:opacity ${fade}s;background:#000 center/contain no-repeat;color:#fff;font:500 20px/1.4 system-ui,sans-serif;text-align:center;padding:32px;white-space:pre-line;`;
+  stage.append(...vids, still);
+  const cap = document.createElement('div');
+  cap.style.cssText = 'position:absolute;left:16px;bottom:max(16px,env(safe-area-inset-bottom));color:#fff;font:600 14px/1.3 system-ui,sans-serif;text-shadow:0 1px 4px #000;pointer-events:none;';
+  const bar = document.createElement('div');
+  bar.style.cssText = 'position:absolute;top:max(12px,env(safe-area-inset-top));right:12px;display:flex;gap:8px;';
+  const btn = (text: string, label: string) => {
+    const b = Object.assign(document.createElement('button'), { type: 'button', textContent: text });
+    b.setAttribute('aria-label', label);
+    b.style.cssText = 'width:44px;height:44px;border-radius:50%;border:0;background:rgba(255,255,255,.18);color:#fff;font:18px system-ui,sans-serif;cursor:pointer;';
+    return b;
+  };
+  const prev = btn('⏮', 'Previous shot');
+  const pause = btn('⏸', 'Pause');
+  const next = btn('⏭', 'Next shot');
+  const close = btn('✕', 'Close the preview');
+  bar.append(prev, pause, next, close);
+  box.append(stage, cap, bar);
+  document.body.append(box);
+
+  let i = -1;
+  let layer = 0; // which video layer is showing
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stillLeft = 0;
+  let stillFrom = 0;
+  let paused = false;
+  let advancing = false;
+  /** The clip showing now (none while a still shows): only its events move things on. */
+  let active: HTMLVideoElement | null = null;
+  const current = () => vids[layer];
+  const hideAll = (except?: HTMLElement) => {
+    for (const v of vids) if (v !== except) ((v.style.opacity = '0'), v.pause());
+    if (still !== except) still.style.opacity = '0';
+  };
+  const show = (to: number, cut: boolean) => {
+    clearTimeout(timer);
+    if (to >= items.length) return done();
+    i = Math.max(0, to);
+    const it = items[i];
+    cap.textContent = `${it.label} · ${i + 1}/${items.length}`;
+    for (const el of [...vids, still]) el.style.transition = cut ? 'none' : `opacity ${fade}s`;
+    if (it.video) {
+      layer = 1 - layer;
+      const v = current();
+      active = v;
+      v.src = it.video;
+      if (it.image) v.poster = it.image;
+      v.currentTime = 0;
+      v.muted = false;
+      v.style.opacity = '1';
+      hideAll(v);
+      if (!paused) void v.play()?.catch?.(() => undefined);
+    } else {
+      still.style.backgroundImage = it.image ? `url("${it.image.replace(/"/g, '%22')}")` : 'none';
+      still.textContent = it.image ? '' : it.text ?? it.label;
+      still.style.opacity = '1';
+      active = null;
+      hideAll(still);
+      stillLeft = it.seconds * 1000;
+      if (!paused) runStill();
+    }
+    advancing = false;
+  };
+  // A still moves on after its length (less the fade, so the next fades in as it ends).
+  const runStill = () => {
+    stillFrom = Date.now();
+    const nextCut = items[i + 1]?.continues;
+    timer = setTimeout(() => show(i + 1, !!nextCut), Math.max(200, stillLeft - (nextCut ? 0 : fade * 1000)));
+  };
+  // A clip hands over a fade before its end (or at its end, for a cut).
+  for (const v of vids)
+    v.addEventListener('timeupdate', () => {
+      if (v !== active || advancing || paused || !Number.isFinite(v.duration)) return;
+      const nextCut = items[i + 1]?.continues;
+      if (!nextCut && v.duration - v.currentTime <= fade) ((advancing = true), show(i + 1, false));
+    });
+  for (const v of vids)
+    v.addEventListener('ended', () => {
+      if (v === active && !advancing) ((advancing = true), show(i + 1, true));
+    });
+  // A clip that won't load: move on.
+  for (const v of vids) v.addEventListener('error', () => v === active && v.src && show(i + 1, true));
+
+  const setPaused = (p: boolean) => {
+    paused = p;
+    pause.textContent = p ? '▶' : '⏸';
+    pause.setAttribute('aria-label', p ? 'Play' : 'Pause');
+    const it = items[i];
+    if (!it) return;
+    if (it.video) void (p ? current().pause() : current().play()?.catch?.(() => undefined));
+    else if (p) ((stillLeft -= Date.now() - stillFrom), clearTimeout(timer));
+    else runStill();
+  };
+  let shown = false;
+  function done() {
+    clearTimeout(timer);
+    document.removeEventListener('keydown', onKey);
+    document.removeEventListener('fullscreenchange', onFull);
+    for (const v of vids) (v.pause(), v.removeAttribute('src'), v.load());
+    if (document.fullscreenElement === box) void document.exitFullscreen?.().catch(() => undefined);
+    box.remove();
+  }
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') done();
+    else if (e.key === ' ') (e.preventDefault(), setPaused(!paused));
+    else if (e.key === 'ArrowRight') show(i + 1, true);
+    else if (e.key === 'ArrowLeft') show(i - 1, true);
+  };
+  const onFull = () => (document.fullscreenElement === box ? (shown = true) : shown && done());
+  document.addEventListener('keydown', onKey);
+  document.addEventListener('fullscreenchange', onFull);
+  close.addEventListener('click', done);
+  pause.addEventListener('click', () => setPaused(!paused));
+  next.addEventListener('click', () => show(i + 1, true));
+  prev.addEventListener('click', () => show(i - 1, true));
+  // Let the second layer play with sound later: start it now, in the tap, muted, then stop.
+  const other = vids[1];
+  other.muted = true;
+  void other.play()?.catch?.(() => undefined);
+  other.pause();
+  if (box.requestFullscreen) void box.requestFullscreen().catch(() => undefined);
+  show(0, true);
+}
+
 /** Play a clip full screen, with sound (from a tap, so browsers allow the sound). */
 export function playClip(url: string, poster?: string): void {
   const box = document.createElement('div');

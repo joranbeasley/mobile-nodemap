@@ -112,8 +112,10 @@ export const NM_OPEN_FIELD = 'nm-open-field';
 
 export interface CardAction {
   label: string;
-  /** The param it opens in a sheet. */
-  param: string;
+  /** The param it opens in a sheet (or give `run`). */
+  param?: string;
+  /** Instead of a sheet: do this (e.g. play a preview). */
+  run?: (node: NodeInstance, graph: import('./graph.js').Graph) => void;
   /** The sheet's title (default: the label; the node's name goes under it). */
   title?: string;
   event?: string;

@@ -1946,7 +1946,10 @@ export class NodeEditor extends Emitter<EditorEvents> {
     b.addEventListener('click', (e) => {
       e.stopPropagation();
       this.select({ node: id });
-      this.openFieldSheet(id, a.param, a.title ?? a.label, a.event);
+      const node = this.graph.nodes.get(id);
+      if (a.run) {
+        if (node) a.run(node, this.graph);
+      } else if (a.param) this.openFieldSheet(id, a.param, a.title ?? a.label, a.event);
     });
     return b;
   }

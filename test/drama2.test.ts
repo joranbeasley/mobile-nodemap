@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from 'vitest';
-import { Graph, Evaluator, NodeEditor, drama2Graph, dramaGraph, toDrama, fromDrama, drama2Lists, seedanceShot, getGraphType, sceneCostumes, shotCostumes, wearerOf, dressOf, dramaImagePrompt, previousShot } from '../src/index';
+import { Graph, Evaluator, NodeEditor, drama2Graph, dramaGraph, toDrama, fromDrama, drama2Lists, seedanceShot, getGraphType, sceneCostumes, shotCostumes, wearerOf, dressOf, dramaImagePrompt, previousShot, sceneSequence } from '../src/index';
 
 const load = (id = 'term') => Graph.fromJSON(drama2Graph.examples!.find((e) => e.id === id)!.graph, drama2Graph.createRegistry());
 const view = (id: string) => drama2Graph.editor!.views!.find((v) => v.id === id)!;
@@ -250,6 +250,43 @@ describe('Editor views', () => {
     g.setParam('s1b', 'characters', []);
     expect(sheet('s1b').textContent).toMatch(/Add characters/);
     editor.closePalette();
+    editor.destroy();
+  });
+
+  it('plays a scene: clips in order, stills for shots without one, cuts where a shot continues', () => {
+    const g = load();
+    g.setParam('s1a', 'clipUrl', 'https://v/1.mp4');
+    g.setParam('s1a', 'clipPoster', 'data:image/jpeg;base64,MQ==');
+    g.setParam('s1a', 'lastFrame', 'data:image/jpeg;base64,RU5E');
+    g.setParam('s1a', 'clipSeconds', 4.5);
+    g.setParam('s1b', 'continues', true);
+    const seq = sceneSequence(g, g.nodes.get('sc1')!);
+    expect(seq.map((x) => x.label)).toEqual(['Shot 1 · Wide', 'Shot 2 · Close-up', 'Shot 3 · Two-shot']);
+    expect(seq[0]).toMatchObject({ video: 'https://v/1.mp4', image: 'data:image/jpeg;base64,MQ==', seconds: 4.5, continues: false });
+    expect(seq[1].video).toBeUndefined(); // no clip yet: its frame, for its length
+    expect(seq[1]).toMatchObject({ image: (g.nodes.get('s1b')!.params.images as string[])[0], seconds: Number(g.nodes.get('s1b')!.params.duration), continues: true });
+  });
+
+  it('shows a shot’s first frame on its chip in the scene, and previews the scene', async () => {
+    const g = load();
+    const el = document.createElement('div');
+    document.body.append(el);
+    const editor = new NodeEditor(el, { graph: g, registry: g.registry!, views: drama2Graph.editor!.views });
+    await editor.setView('scenes');
+    const chipImg = () => el.querySelector<HTMLImageElement>('.nm-node[data-id="sc1"] [data-nm-open="s1a"] img');
+    expect(chipImg()).toBeNull(); // no clip yet
+    g.setParam('s1a', 'clipUrl', 'https://v/1.mp4');
+    g.setParam('s1a', 'clipPoster', 'data:image/jpeg;base64,MQ==');
+    expect(chipImg()!.getAttribute('src')).toBe('data:image/jpeg;base64,MQ==');
+    // ▶ Preview: full screen, shot by shot.
+    const preview = [...el.querySelectorAll<HTMLButtonElement>('.nm-node[data-id="sc1"] .nm-card-row button')].find((b) => b.textContent === '▶ Preview')!;
+    preview.click();
+    const box = document.querySelector<HTMLElement>('.dr-sequence')!;
+    expect(box.textContent).toContain('Shot 1 · Wide · 1/3');
+    box.querySelector<HTMLButtonElement>('[aria-label="Next shot"]')!.click();
+    expect(box.textContent).toContain('Shot 2 · Close-up · 2/3');
+    box.querySelector<HTMLButtonElement>('[aria-label="Close the preview"]')!.click();
+    expect(document.querySelector('.dr-sequence')).toBeNull();
     editor.destroy();
   });
 
