@@ -429,6 +429,33 @@ describe('🎬 Generate clip on a shot', () => {
     editor.destroy();
   });
 
+  it('lays a picture prompt out to review: pictures sent, its parts, checks', async () => {
+    setImageGenerators([{ id: 'img', name: 'Img', maxReferences: 9, async generate() {
+      return { images: [] };
+    } }]);
+    const { editor } = mount();
+    await editor.setView('shots');
+    editor.openFieldSheet('s1b', 'images', '✨ Frame', 'dr-generate');
+    await tick(360); // the sheet's guard against the opening tap
+    const sheet = [...document.querySelectorAll<HTMLElement>('.nm-field-sheet')].pop()!;
+    const review = sheet.querySelector<HTMLElement>('.dr-gen-panel .dr-review')!;
+    const heads = [...review.querySelectorAll('h4')].map((h) => h.textContent);
+    expect(heads[0]).toMatch(/^Pictures sent \(\d+\)$/);
+    expect(heads.slice(1)).toEqual(['Picture', 'Action', 'On screen', 'Setting', 'Style', 'Rules']);
+    expect(review.querySelector('.dr-review-checks')!.textContent).toMatch(/The shot only says “Theo freezes on his first line\.”/);
+    // The words are one tap away, and the review follows them.
+    const ta = sheet.querySelector<HTMLTextAreaElement>('.dr-gen-panel textarea')!;
+    expect(ta.hidden).toBe(true);
+    const toggle = sheet.querySelector<HTMLButtonElement>('.dr-gen-panel .dr-review-toggle')!;
+    toggle.click();
+    expect(ta.hidden).toBe(false);
+    ta.value = 'Storyboard frame, wide shot.\nAction: Theo bows.';
+    toggle.click();
+    expect(sheet.querySelector('.dr-gen-panel .dr-review-shot')!.textContent).toContain('Theo bows.');
+    editor.closePalette();
+    editor.destroy();
+  });
+
   it('keeps what made each picture and clip, and shows it in the sheet', async () => {
     const saved: GenerationRecord[] = [];
     setGenerationLog({ save: (r) => void saved.push(r), list: async (node, param) => saved.filter((r) => r.node === node && r.param === param).reverse() });

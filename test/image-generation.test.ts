@@ -108,19 +108,19 @@ describe('Image prompts from drama cards', () => {
     const g = Graph.fromJSON(dramaGraph.examples![0].graph, dramaGraph.createRegistry());
     const maya = dramaImagePrompt(g, g.nodes.get('maya')!)!;
     expect(maya.aspect).toBe('3:4');
-    expect(maya.prompt).toMatch(/^Character reference portrait of Maya\. Early 20s, slim, warm brown skin/);
+    expect(maya.prompt).toMatch(/^Character reference portrait of Maya\.\nAppearance: Early 20s, slim, warm brown skin/); // one labelled line per part
     const shot = dramaImagePrompt(g, g.nodes.get('s1b')!)!;
     expect(shot.aspect).toBe('16:9');
-    expect(shot.prompt).toContain('Storyboard frame, close-up shot. Theo freezes on his first line.');
-    expect(shot.prompt).toContain('On screen: Theo: 17, tall and lanky');
+    expect(shot.prompt).toContain('Storyboard frame, close-up shot.\nAction: Theo freezes on his first line.');
+    expect(shot.prompt).toContain('On screen:\n- Theo: 17, tall and lanky');
     expect(shot.prompt).toContain('Setting: School hall, interior, day.');
     expect(shot.prompt).toContain('35mm film look'); // the season's style
     // Outfits on a dress form and objects on their own: never a person.
     const outfit = dramaImagePrompt(g, g.nodes.get('jules-lead')!)!.prompt;
-    expect(outfit).toMatch(/^Costume reference: Deep green velvet.* Made for Jules\. .*headless dress form \(mannequin\).* No person, no face, no text\.$/);
+    expect(outfit).toMatch(/^Costume reference: Deep green velvet.*\nMade for: Jules\.\n.*headless dress form \(mannequin\).*\nRules: No person, no face, no text\.$/);
     expect(outfit).not.toMatch(/16, small/); // not their looks: that would draw a person
     const prop = [...g.nodes.values()].find((n) => n.type === 'drama/prop')!;
-    expect(dramaImagePrompt(g, prop)!.prompt).toMatch(/the object on its own\..* No people, no hands, no text\.$/);
+    expect(dramaImagePrompt(g, prop)!.prompt).toMatch(/the object on its own\.\n[^]*\nRules: No people, no hands, no text\.$/);
   });
 
   it('suggests reference pictures: who is in a shot, where, and what they wear', () => {
@@ -171,7 +171,7 @@ describe('✨ Generate in image fields', () => {
     const field = () => el.querySelector<HTMLElement>('.nm-node[data-id="theo"] [data-param="images"]')!;
     field().querySelector<HTMLButtonElement>('.dr-gen')!.click();
     const panel = field().querySelector<HTMLElement>('.dr-gen-panel')!;
-    expect(panel.querySelector('textarea')!.value).toMatch(/^Character reference portrait of Theo\. 17, tall and lanky/);
+    expect(panel.querySelector('textarea')!.value).toMatch(/^Character reference portrait of Theo\.\nAppearance: 17, tall and lanky/);
     expect(panel.querySelector<HTMLSelectElement>('select[aria-label="Aspect ratio"]')!.value).toBe('3:4');
     // No key yet: the panel asks for it.
     const go = panel.querySelector<HTMLButtonElement>('.dr-gen-go')!;
@@ -237,7 +237,7 @@ describe('✨ Generate in image fields', () => {
     const label = (b: HTMLButtonElement) => b.getAttribute('aria-label');
     expect(asked!.references).toEqual([refs[0], refs[2]].map((b) => b.querySelector('img')!.getAttribute('src')));
     expect(field().querySelector('.dr-gen-note')!.textContent).toMatch(/· 5 credits · .*1229|1,229 left/);
-    expect(asked!.prompt).toMatch(new RegExp(`Reference pictures, in order: 1\\. ${label(refs[0])}; 2\\. ${label(refs[2])!.replace(/[()]/g, '\\$&')}\\.`));
+    expect(asked!.prompt).toMatch(new RegExp(`Reference pictures \\(in order\\): 1\\. ${label(refs[0])}; 2\\. ${label(refs[2])!.replace(/[()]/g, '\\$&')}\\.`));
     editor.destroy();
   });
 

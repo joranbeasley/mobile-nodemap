@@ -119,7 +119,12 @@ export const GENERATE_EVENT = 'dr-generate';
  * setting, props, scene, the shot itself, rules), each @ImageN shown as its picture, and any
  * checks first. `refs` are the pictures in the order they're sent.
  */
-export function promptReview(prompt: string, refs: { src: string; label: string }[], checks: string[] = []): HTMLElement {
+export function promptReview(
+  prompt: string,
+  refs: { src: string; label: string }[],
+  checks: string[] = [],
+  opts: { first?: string; pictures?: { src: string; label: string }[] } = {},
+): HTMLElement {
   const box = document.createElement('div');
   box.className = 'dr-review';
   if (checks.length) {
@@ -161,19 +166,34 @@ export function promptReview(prompt: string, refs: { src: string; label: string 
   lines.forEach((line, i) => {
     if (!line) return void (cur = undefined);
     const head = /^([A-Z][A-Za-z ]{1,24})(\s*\([^)]*\))?:\s*(.*)$/.exec(line);
-    if (i === 0 && !head) return void section('Style').append(rich(line));
+    if (i === 0 && !head) return void section(opts.first ?? 'Style').append(rich(line));
     const key = head?.[1].trim();
-    if (head && key === 'Characters' && !head[3]) return void (cur = section('Characters'));
+    // "Characters:" or "On screen:" on its own: a list follows ("- …").
+    if (head && !head[3]) return void (cur = section(key!));
     if (line.startsWith('- ') && cur) return void cur.append(rich(line.slice(2)));
     if (head) {
       const name = key === 'Shot' ? `Shot ${head[2]?.trim() ?? ''}`.trim() : key === 'Scene context' ? 'Scene' : key!;
-      cur = section(name, key === 'Shot' ? 'dr-review-shot' : '');
+      cur = section(name, key === 'Shot' || key === 'Action' ? 'dr-review-shot' : key === 'Rules' ? 'dr-review-rules' : '');
       if (head[3]) cur.append(rich(head[3]));
       return;
     }
     if (/^(Keep|One continuous|No subtitles)/.test(line)) return void section('Rules', 'dr-review-rules').append(rich(line));
     (cur ?? section('More')).append(rich(line));
   });
+  // Pictures sent with a prompt that doesn't name them (pictures, not clips): numbered, in order.
+  if (opts.pictures?.length) {
+    const sec = section(`Pictures sent (${opts.pictures.length})`);
+    const list = document.createElement('div');
+    list.className = 'dr-review-pics';
+    opts.pictures.forEach((p, k) => {
+      const item = document.createElement('span');
+      item.append(Object.assign(document.createElement('img'), { src: p.src, alt: '' }), `${k + 1}. ${p.label}`);
+      list.append(item);
+    });
+    sec.append(list);
+    // Pictures first: what the AI looks at, then what it's told.
+    box.insertBefore(sec, box.querySelector('.dr-review-part'));
+  }
   return box;
 }
 
@@ -1226,7 +1246,7 @@ export const clipFrameParam: ParamKind = {
         const sent = (s?.references ?? []).filter((r) => on.has(r.src));
         reviewWrap.replaceChildren(promptReview(prompt.value, sent, s?.checks ?? []));
       };
-      const textBtn = el('button', { type: 'button', class: 'dr-gen-link-btn' }, '✎ Edit the prompt as text') as HTMLButtonElement;
+      const textBtn = el('button', { type: 'button', class: 'dr-review-toggle' }, '✎ Edit the prompt as text') as HTMLButtonElement;
       prompt.hidden = true;
       textBtn.addEventListener('click', () => {
         prompt.hidden = !prompt.hidden;
@@ -1526,7 +1546,7 @@ export const imagesParam: ParamKind = {
     // from the card, sent to the generator; results are copied in like added photos.
     let chosenGen: ImageGenerator | null = preferred('image', getImageGenerators());
     const p = ctx.param as {
-      prompt?: (node: NodeInstance, graph: Graph) => { prompt: string; aspect?: string; references?: { src: string; label: string }[] } | undefined;
+      prompt?: (node: NodeInstance, graph: Graph) => { prompt: string; aspect?: string; references?: { src: string; label: string }[]; checks?: string[] } | undefined;
       browse?: boolean;
     };
     /** Copy a picture in from a service (its links expire); keep the link if it can't be fetched. */
@@ -1591,8 +1611,19 @@ export const imagesParam: ParamKind = {
         row.append(el('small', {}, 'Service'), service);
         panel.append(row);
       }
-      const prompt = el('textarea', { rows: '4', 'aria-label': 'Image prompt', placeholder: 'Describe the picture' }) as HTMLTextAreaElement;
+      const prompt = el('textarea', { rows: '8', 'aria-label': 'Image prompt', placeholder: 'Describe the picture' }) as HTMLTextAreaElement;
       prompt.value = suggestion?.prompt ?? '';
+      // Read it as a page (the pictures sent, its parts under headings, checks first); ✎ for the words.
+      const reviewWrap = el('div', { class: 'dr-review-wrap' });
+      let showReview = () => {};
+      const textBtn = el('button', { type: 'button', class: 'dr-review-toggle' }, '✎ Edit the prompt as text') as HTMLButtonElement;
+      prompt.hidden = true;
+      textBtn.addEventListener('click', () => {
+        prompt.hidden = !prompt.hidden;
+        reviewWrap.hidden = !prompt.hidden;
+        textBtn.textContent = prompt.hidden ? '✎ Edit the prompt as text' : '☰ Back to the review';
+        if (prompt.hidden) showReview();
+      });
       const row = el('div', { class: 'dr-gen-row' });
       const model = el('select', { 'aria-label': 'Model' }) as HTMLSelectElement;
       for (const m of gen.models ?? []) model.append(Object.assign(document.createElement('option'), { value: m.id, textContent: m.label }));
@@ -1749,7 +1780,7 @@ export const imagesParam: ParamKind = {
           // which is which, so the model knows whose face and which room it is looking at.
           const picked = refChoices.filter((r) => chosen.has(r.src));
           const references = picked.length ? await Promise.all(picked.map((r) => referencePicture(r.src))) : undefined;
-          const legend = picked.length ? ` Reference pictures, in order: ${picked.map((r, i) => `${i + 1}. ${r.label}`).join('; ')}. Keep the people, costumes, places and objects looking as they do in them.` : '';
+          const legend = picked.length ? `\nReference pictures (in order): ${picked.map((r, i) => `${i + 1}. ${r.label}`).join('; ')}. Keep the people, costumes, places and objects looking as they do in them.` : '';
           const result = await gen.generate({
             references,
             prompt: prompt.value.trim() + legend,
@@ -1818,7 +1849,14 @@ export const imagesParam: ParamKind = {
         const open = el('a', { href: gen.site, target: '_blank', rel: 'noopener', class: 'dr-gen-cancel dr-gen-link' }, `Open ${gen.name}`);
         buttons.append(open);
       }
-      panel.append(prompt, row, ...(refChoices.length ? [refs, refNote] : []), cost, keyRow, buttons, status);
+      showReview = () => {
+        const sent = (refChoices as Reference[]).filter((r) => chosen.has(r.src));
+        reviewWrap.replaceChildren(promptReview(prompt.value, [], suggestion?.checks ?? [], { first: 'Picture', pictures: sent }));
+      };
+      showReview();
+      // Switching pictures on or off (or ⇄ another): the review follows.
+      refs.addEventListener('click', () => setTimeout(() => !reviewWrap.hidden && showReview(), 0));
+      panel.append(reviewWrap, prompt, textBtn, row, ...(refChoices.length ? [refs, refNote] : []), cost, keyRow, buttons, status);
       void showCost();
       wrap.append(panel);
       syncGen();
@@ -2375,7 +2413,34 @@ export function appearances(graph: Graph, id: string): { shot: ShotInfo; scene?:
  */
 export function dramaImagePrompt(graph: Graph, n: NodeInstance, param = 'images'): DramaImagePrompt | undefined {
   const base = basePrompt(graph, n, param);
-  return base && { ...base, references: dramaImageReferences(graph, n) };
+  if (!base) return undefined;
+  const references = dramaImageReferences(graph, n);
+  return { ...base, references, checks: pictureChecks(graph, n, references) };
+}
+
+/** What a person should look at before making a picture for a card (thin words, sketches, unpicked views). */
+function pictureChecks(graph: Graph, n: NodeInstance, refs: Reference[]): string[] {
+  const out: string[] = [];
+  const len = (v: unknown) => String(v ?? '').trim().length;
+  const name = dramaName(n);
+  const noLook = (c: NodeInstance) => !len(c.params.appearance) && out.push(`${dramaName(c)} has no appearance written: it goes into every picture and clip of them.`);
+  if (n.type === T.character) noLook(n);
+  else if (n.type === T.location && len(n.params.description) < 40) out.push(`${name}’s description is short: say what it looks like (layout, materials, light).`);
+  else if ((n.type === T.prop || n.type === T.costume) && len(n.params.description) < 20) out.push(`${name} has little description: say what it’s made of, its colour and details.`);
+  else if (n.type === T.shot) {
+    const s = shotInfo(graph, n);
+    const desc = String(n.params.description ?? '').trim();
+    if (desc.length < 60) out.push(desc ? `The shot only says “${desc}”: add where people are, what they do and how it looks.` : 'The shot has no description.');
+    if (!s.location) out.push('No location: add one in the shot’s Edit sheet.');
+    else {
+      const r = referenceImages(s.location, n);
+      const real = r.all.filter((x) => !isSketch(x));
+      if (real.length > 1 && !r.explicit) out.push(`${dramaName(s.location)} has ${real.length} pictures and none is picked for this shot: ⇄ the view it needs.`);
+    }
+    s.characters.forEach(noLook);
+  } else if (n.type === T.scene && len(n.params.description) < 40) out.push('The scene’s description is short.');
+  refs.forEach((r, i) => isSketch(r.src) && out.push(`Picture ${i + 1} (${r.label}) is a placeholder sketch.`));
+  return out;
 }
 
 /** A suggested picture to generate from, and the reference pictures to send with it. */
@@ -2384,6 +2449,8 @@ export interface DramaImagePrompt {
   aspect: string;
   /** Pictures of what is in it (most important first): who is on screen, where, what they wear and hold. */
   references: Reference[];
+  /** What to look at before generating. */
+  checks?: string[];
 }
 
 /** A reference picture: from which card, and the other pictures that card has to choose from. */
@@ -2493,6 +2560,12 @@ function basePrompt(graph: Graph, n: NodeInstance, param: string): { prompt: str
     const what = bare(t(k?.params.description) || (k ? dramaName(k) : ''));
     return k ? `${look}. In this scene wearing ${what.charAt(0).toLowerCase()}${what.slice(1)}, instead of their usual clothes` : look;
   };
+  /** One labelled line per part (easier to read and review), blank parts left out. */
+  const lines = (...parts: (string | false | undefined)[]) =>
+    parts
+      .filter((x): x is string => !!x && !!x.replace(/^[A-Za-z ]+:\s*$/, '').trim())
+      .map((x) => x.replace(/[ \t]+/g, ' ').trim())
+      .join('\n');
   const sceneOfShot = (id: string) => into(graph, id).find((x) => x.type === T.scene);
   const styleFor = (sceneNode?: NodeInstance) => {
     const ep = sceneNode && into(graph, sceneNode.id).find((x) => x.type === T.episode);
@@ -2502,23 +2575,47 @@ function basePrompt(graph: Graph, n: NodeInstance, param: string): { prompt: str
   switch (n.type) {
     case T.character:
       return {
-        prompt: `Character reference portrait of ${name}. ${end(t(n.params.appearance))} ${end(t(n.params.description))} Head to mid-thigh, facing the camera, neutral grey studio background, soft even light, photorealistic. No text.`.replace(/\s+/g, ' '),
+        prompt: lines(
+          `Character reference portrait of ${name}.`,
+          `Appearance: ${end(t(n.params.appearance))}`,
+          `About: ${end(t(n.params.description))}`,
+          'Framing: Head to mid-thigh, facing the camera, neutral grey studio background, soft even light, photorealistic.',
+          'Rules: No text.',
+        ),
         aspect: '3:4',
       };
     case T.location:
       return {
-        prompt: `Establishing reference photo of ${name}, ${n.params.setting === 'EXT' ? 'exterior' : 'interior'}. ${end(t(n.params.description))} Wide shot, no people, natural light, photorealistic. No text.`.replace(/\s+/g, ' '),
+        prompt: lines(
+          `Establishing reference photo of ${name}, ${n.params.setting === 'EXT' ? 'exterior' : 'interior'}.`,
+          `Description: ${end(t(n.params.description))}`,
+          'Framing: Wide shot, no people, natural light, photorealistic.',
+          'Rules: No text.',
+        ),
         aspect: '16:9',
       };
     case T.prop:
       // The object on its own: no hands or people, so it can be put in anyone's hands later.
-      return { prompt: `Product-style reference photo of ${name}, the object on its own. ${end(t(n.params.description))} Plain light background, soft light, photorealistic. No people, no hands, no text.`.replace(/\s+/g, ' '), aspect: '1:1' };
+      return {
+        prompt: lines(
+          `Product-style reference photo of ${name}, the object on its own.`,
+          `Description: ${end(t(n.params.description))}`,
+          'Framing: Plain light background, soft light, photorealistic.',
+          'Rules: No people, no hands, no text.',
+        ),
+        aspect: '1:1',
+      };
     case T.costume: {
       const wearer = from(graph, n.id, 'character')[0];
       return {
         // On a headless dress form, never a person: a face here would fight the actor's own
         // portrait when both are sent as references for a shot.
-        prompt: `Costume reference: ${end(t(n.params.description) || name)}${wearer ? ` Made for ${dramaName(wearer)}.` : ''} The full outfit displayed on a headless dress form (mannequin), front view, plain neutral background, soft even light, photorealistic. No person, no face, no text.`.replace(/\s+/g, ' '),
+        prompt: lines(
+          `Costume reference: ${end(t(n.params.description) || name)}`,
+          wearer && `Made for: ${dramaName(wearer)}.`,
+          'Framing: The full outfit displayed on a headless dress form (mannequin), front view, plain neutral background, soft even light, photorealistic.',
+          'Rules: No person, no face, no text.',
+        ),
         aspect: '3:4',
       };
     }
@@ -2527,26 +2624,38 @@ function basePrompt(graph: Graph, n: NodeInstance, param: string): { prompt: str
       const sc = sceneOfShot(n.id);
       const time = sc ? String(sc.params.time ?? 'DAY').toLowerCase() : 'day';
       const view = s.location ? viewSentence(pictureView(s.location, referenceImages(s.location, n).picked)) : '';
-      const where = s.location ? `Setting: ${dramaName(s.location)}, ${s.location.params.setting === 'EXT' ? 'exterior' : 'interior'}, ${time}. ${end(t(s.location.params.description))} ${view}` : '';
+      const where = s.location ? `Setting: ${dramaName(s.location)}, ${s.location.params.setting === 'EXT' ? 'exterior' : 'interior'}, ${time}. ${end(t(s.location.params.description))}` : '';
       const costumes = shotCostumes(graph, n.id);
-      const cast = s.characters.length ? `On screen: ${s.characters.map((c) => who(c, costumes)).join('; ')}.` : '';
       return {
-        prompt: `Storyboard frame, ${s.framing.toLowerCase()} shot.${n.params.continues ? ' It carries straight on from the previous shot, without a cut.' : ''} ${end(s.description)} ${cast} ${where} ${end(styleFor(sc))} Single film still, no text, no captions.`.replace(/\s+/g, ' ').trim(),
+        prompt: lines(
+          `Storyboard frame, ${s.framing.toLowerCase()} shot.${n.params.continues ? ' It carries straight on from the previous shot, without a cut.' : ''}`,
+          `Action: ${end(s.description)}`,
+          s.characters.length > 0 && ['On screen:', ...s.characters.map((c) => `- ${end(who(c, costumes))}`)].join('\n'),
+          where,
+          view,
+          `Style: ${end(styleFor(sc))}`,
+          'Rules: Single film still, no text, no captions.',
+        ),
         aspect: '16:9',
       };
     }
     case T.scene: {
       const info = sceneInfo(graph, n);
       const costumes = sceneCostumes(graph, n.id);
-      const cast = info.characters.length ? `Characters: ${info.characters.map((c) => who(c, costumes)).join('; ')}.` : '';
       return {
-        prompt: `Storyboard frame for a scene set in ${info.slug}. ${end(info.description)} ${cast} ${end(styleFor(n))} Single film still, no text.`.replace(/\s+/g, ' ').trim(),
+        prompt: lines(
+          `Storyboard frame for a scene set in ${info.slug}.`,
+          `Action: ${end(info.description)}`,
+          info.characters.length > 0 && ['Characters:', ...info.characters.map((c) => `- ${end(who(c, costumes))}`)].join('\n'),
+          `Style: ${end(styleFor(n))}`,
+          'Rules: Single film still, no text.',
+        ),
         aspect: '16:9',
       };
     }
     case T.episode:
       return {
-        prompt: `Poster artwork for the episode "${name}". ${end(t(n.params.description))} ${end(t(n.params.style) || 'Cinematic drama')} No text or lettering.`.replace(/\s+/g, ' ').trim(),
+        prompt: lines(`Poster artwork for the episode "${name}".`, `About: ${end(t(n.params.description))}`, `Style: ${end(t(n.params.style) || 'Cinematic drama')}`, 'Rules: No text or lettering.'),
         aspect: param === 'images' ? '2:3' : '16:9',
       };
     default:
@@ -2874,7 +2983,7 @@ const css = `
 .dr-gen-key:empty { display: none; }
 .dr-gen-key input { font: 12px var(--_mono, monospace); min-height: 32px; flex: 1 1 140px; min-width: 0; }
 .dr-key-masked { -webkit-text-security: disc; }
-.dr-gen-link-btn { all: unset; cursor: pointer; font-size: 11.5px; color: var(--_accent); text-decoration: underline; align-self: flex-start; }
+.dr-gen-link-btn, .dr-review-toggle { all: unset; cursor: pointer; font-size: 11.5px; color: var(--_accent); text-decoration: underline; align-self: flex-start; }
 .dr-gen-key small { color: var(--_muted); font-size: 11px; }
 .dr-gen-go { font: 600 12px var(--_font); padding: 6px 12px; border-radius: 999px; border: 0; background: var(--_accent); color: #fff; cursor: pointer; }
 .dr-gen-go:disabled { opacity: .6; cursor: progress; }
@@ -2910,6 +3019,9 @@ const css = `
 .dr-review-checks { border: 1px solid #f2c94c; background: color-mix(in srgb, #f2c94c 14%, var(--_node)); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
 .dr-review-checks ul { margin: 4px 0 0; padding-left: 18px; }
 .dr-review-checks li { margin: 2px 0; }
+.dr-review-pics { display: flex; flex-direction: column; gap: 4px; }
+.dr-review-pics span { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.dr-review-pics img { width: 40px; height: 30px; object-fit: cover; border-radius: 4px; flex: none; border: 1px solid var(--_border); }
 .dr-views { display: flex; flex-direction: column; gap: 8px; }
 .dr-view { display: grid; grid-template-columns: 72px 1fr; gap: 8px; align-items: start; }
 .dr-view img { width: 72px; height: 54px; object-fit: cover; border-radius: 6px; border: 1px solid var(--_border); }
