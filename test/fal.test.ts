@@ -107,6 +107,14 @@ describe('fal video (Seedance)', () => {
     expect(gen.estimate!({ model: 'nope' })).toBeUndefined();
   });
 
+  it('refuses SVG drawings (fal can’t read them) before uploading anything', async () => {
+    const fal = fakeFal({ video: { url: 'https://v/c.mp4' } });
+    const gen = falVideoGenerator({ apiKey: 'k', fetch: fal.fetch, pollMs: 1 });
+    await expect(gen.generate({ prompt: 'x', references: ['data:image/svg+xml,%3Csvg%2F%3E'] })).rejects.toThrow('fal can’t read SVG drawings');
+    expect(fal.calls.some((c) => c.url.includes('/storage/upload'))).toBe(false);
+    expect(fal.posts()).toHaveLength(0);
+  });
+
   it('explains failures', async () => {
     await expect(falVideoGenerator({ fetch: fakeFal({}).fetch }).generate({ prompt: 'x' })).rejects.toThrow('Add your fal API key first');
     const bad = (status: number, body: unknown) => falVideoGenerator({ apiKey: 'k', fetch: fakeFal({}, { fail: { status, body } }).fetch }).generate({ prompt: 'x' });

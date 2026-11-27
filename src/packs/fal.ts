@@ -138,7 +138,11 @@ function falClient(opts: FalOptions) {
       uploaded.set(
         src,
         (async () => {
+          // fal reads JPEG, PNG, WebP and GIF; drawings must be turned into one first (referencePicture).
+          const svg = () => new Error('fal can’t read SVG drawings: convert them to JPEG or PNG first');
+          if (/^data:image\/svg/i.test(src)) throw svg();
           const blob = await (await doFetch(src, { signal, credentials: 'same-origin' })).blob();
+          if (/svg/i.test(blob.type)) throw svg();
           const type = blob.type || 'image/jpeg';
           const ext = type.split('/')[1]?.replace('jpeg', 'jpg') ?? 'jpg';
           const { upload_url, file_url } = await call(`${rest}/storage/upload/initiate?storage_type=fal-cdn-v3`, {

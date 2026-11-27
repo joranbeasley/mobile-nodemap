@@ -394,11 +394,15 @@ export const clipFrameParam: ParamKind = {
         go.disabled = true;
         st.textContent = `Asking ${gen.name}…`;
         try {
-          const picked = refs.filter((r) => on.has(r.src)).map((r) => r.src);
+          // Pictures the service can read: drawings (SVG) and oversized pictures become JPEGs, as in ✨.
+          st.textContent = 'Preparing pictures…';
+          const picked = await Promise.all(refs.filter((r) => on.has(r.src)).map((r) => referencePicture(r.src)));
+          const first = s?.firstFrame && on.has(s.firstFrame) ? await referencePicture(s.firstFrame) : undefined;
+          st.textContent = `Asking ${gen.name}…`;
           const result = await gen.generate({
             prompt: prompt.value.trim(),
             references: picked,
-            firstFrame: s?.firstFrame && on.has(s.firstFrame) ? s.firstFrame : undefined,
+            firstFrame: first,
             duration: Number(dur.value),
             aspect: aspect.value,
             resolution: res.value,
