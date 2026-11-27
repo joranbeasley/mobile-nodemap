@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from 'vitest';
-import { Graph, Evaluator, NodeEditor, drama2Graph, dramaGraph, toDrama, fromDrama, drama2Lists, seedanceShot, getGraphType, sceneCostumes, shotCostumes, wearerOf, dressOf, dramaImagePrompt, previousShot, sceneSequence } from '../src/index';
+import { Graph, Evaluator, NodeEditor, drama2Graph, dramaGraph, toDrama, fromDrama, drama2Lists, seedanceShot, getGraphType, sceneCostumes, shotCostumes, wearerOf, dressOf, dramaImagePrompt, previousShot, sceneSequence, shotChecks, promptReview } from '../src/index';
 
 const load = (id = 'term') => Graph.fromJSON(drama2Graph.examples!.find((e) => e.id === id)!.graph, drama2Graph.createRegistry());
 const view = (id: string) => drama2Graph.editor!.views!.find((v) => v.id === id)!;
@@ -251,6 +251,40 @@ describe('Editor views', () => {
     expect(sheet('s1b').textContent).toMatch(/Add characters/);
     editor.closePalette();
     editor.destroy();
+  });
+
+  it('leaves placeholder sketches out when a card has a real picture, and says what to look at', () => {
+    const g = load();
+    const photo = 'data:image/png;base64,UEhPVE8=';
+    // Backstage: the example's sketch first, then a photo. The photo leads; the sketch stays home.
+    g.setParam('back', 'images', [...(g.nodes.get('back')!.params.images as string[]).slice(0, 1), photo]);
+    const s2a = seedanceShot(toDrama(g), 's2a');
+    expect(s2a.refs.filter((r) => r.label.startsWith('Backstage')).map((r) => r.src)).toEqual([photo]);
+    // Checks: a thin description, a sketch still sent (its storyboard frame), an unpicked view.
+    const checks = shotChecks(toDrama(g), 's2a');
+    expect(checks).toEqual(expect.arrayContaining([expect.stringMatching(/^The shot only says “Jules mouths/), expect.stringMatching(/storyboard frame\) is a placeholder sketch\.$/)]));
+    g.setParam('hall', 'images', [photo, 'data:image/png;base64,VFdP']);
+    expect(shotChecks(toDrama(g), 's1a')).toContain('School hall has 2 pictures and none is picked for this shot, so all go: ⇄ the view it needs.');
+    g.setParam('s1a', 'referencePicks', { hall: photo });
+    expect(shotChecks(toDrama(g), 's1a').some((c) => c.startsWith('School hall has'))).toBe(false);
+  });
+
+  it('lays a prompt out to read: sections, @ImageN as pictures, checks first', () => {
+    const el = promptReview(
+      'Warm drama. Aspect ratio 16:9.\nCharacters:\n- Theo is @Image1, the lead.\nSetting: Hall (@Image2), interior.\n\nShot (0–4 s): Close-up. Theo freezes (@Image3).\n\nKeep every face consistent.',
+      [{ src: 'data:image/png;base64,MQ==', label: 'Theo' }, { src: 'data:image/png;base64,Mg==', label: 'Hall' }],
+      ['The shot is short.'],
+    );
+    expect(el.querySelector('.dr-review-checks')!.textContent).toContain('The shot is short.');
+    expect([...el.querySelectorAll('h4')].map((h) => h.textContent)).toEqual(['Style', 'Characters', 'Setting', 'Shot (0–4 s)', 'Rules']);
+    expect(el.querySelector('.dr-review-shot')!.textContent).toContain('Theo freezes');
+    const tags = [...el.querySelectorAll('.dr-review-ref')];
+    expect(tags.map((t) => [t.textContent, t.querySelector('img')?.getAttribute('src') ?? null])).toEqual([
+      ['1', 'data:image/png;base64,MQ=='],
+      ['2', 'data:image/png;base64,Mg=='],
+      ['3', null], // not sent: flagged
+    ]);
+    expect(tags[2].classList.contains('dr-review-missing')).toBe(true);
   });
 
   it('plays a scene: clips in order, stills for shots without one, cuts where a shot continues', () => {

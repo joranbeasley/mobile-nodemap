@@ -1,6 +1,6 @@
 import type { Graph } from '../core/graph.js';
 import type { NodeInstance } from '../core/types.js';
-import { cardId, pictureView, viewSentence, dramaName, episodeInfo, imageList, previousShot, referenceImages, sceneInfo, setShotClipSuggester, shotCostumes, shotInfo, type EpisodeInfo, type SceneInfo } from './drama.js';
+import { cardId, isSketch, pictureView, viewSentence, dramaName, episodeInfo, imageList, previousShot, referenceImages, sceneInfo, setShotClipSuggester, shotCostumes, shotInfo, type EpisodeInfo, type SceneInfo } from './drama.js';
 
 /**
  * Export a production for Seedance video generation, one generation per shot.
@@ -231,7 +231,9 @@ export function seedanceShot(graph: Graph, shotId: string, opts: SeedanceOptions
     // Named views say which way the picture looks: "School hall (location, from the wings)".
     const viewOf = (src: string) => pictureView(n, src)?.name;
     first.push({ src: r.picked, name, label: `${dramaName(n)} (${kind}${viewOf(r.picked) ? `, ${viewOf(r.picked)}` : ''})`, card });
-    if (!r.explicit) r.all.filter((src) => src !== r.picked).forEach((src) => rest.push({ src, name, label: `${dramaName(n)} (${kind}, ${viewOf(src) ?? `view ${r.all.indexOf(src) + 1}`})`, card }));
+    // Extra views: real pictures only, when the card has any (sketches are placeholders).
+    const photos = r.all.some((x) => !isSketch(x));
+    if (!r.explicit) r.all.filter((src) => src !== r.picked && !(photos && isSketch(src))).forEach((src) => rest.push({ src, name, label: `${dramaName(n)} (${kind}, ${viewOf(src) ?? `view ${r.all.indexOf(src) + 1}`})`, card }));
   };
   // What each character wears in this shot: the scene's costumes, or the shot's own.
   const costumes = shotCostumes(graph, shotId);
@@ -251,7 +253,9 @@ export function seedanceShot(graph: Graph, shotId: string, opts: SeedanceOptions
   const startFrame = continues && prevEnd ? { src: prevEnd, name: `shot-${prevNo}-last-frame`, label: `Last frame of shot ${prevNo}'s clip (first frame)` } : undefined;
   if (startFrame) cands.push(startFrame);
   cands.push(...first);
-  if (!continues) x.images.forEach((src, i) => cands.push({ src, name: `shot-${x.number}-frame`, label: `Shot ${x.number} storyboard frame${x.images.length > 1 ? ` ${i + 1}` : ''}` }));
+  // Storyboard frames: the real ones, when there are any (sketches are placeholders).
+  const boards = x.images.some((f) => !isSketch(f)) ? x.images.filter((f) => !isSketch(f)) : x.images;
+  if (!continues) boards.forEach((src, i) => cands.push({ src, name: `shot-${x.number}-frame`, label: `Shot ${x.number} storyboard frame${boards.length > 1 ? ` ${i + 1}` : ''}` }));
   if (prevEnd && !continues) cands.push({ src: prevEnd, name: `shot-${prevNo}-end`, label: `End of shot ${prevNo} (continuity)` });
   cands.push(...rest);
 
@@ -683,6 +687,37 @@ export const saveDramaFile: FileSaver = (f) => saver(f);
 
 // 🎬 Generate clip (drama.ts) starts from this export: the same prompt, pictures in the same
 // order (the prompt calls them @Image1…), the clip length and aspect ratio.
+/**
+ * What a person should look at before generating a shot: thin descriptions, placeholder sketches
+ * sent as references, a location with several views and none picked, missing cards or pictures.
+ */
+export function shotChecks(graph: Graph, shotId: string, shot = seedanceShot(graph, shotId)): string[] {
+  const node = graph.nodes.get(shotId);
+  if (!node) return [];
+  const x = shotInfo(graph, node);
+  const out: string[] = [];
+  const desc = String(node.params.description ?? '').trim();
+  if (desc.length < 60) out.push(desc ? `The shot only says “${desc}”: add where people are, what they do and how it looks.` : 'The shot has no description: say where people are, what they do and how it looks.');
+  if (!x.location) out.push('No location: add one in the shot’s Edit sheet.');
+  else {
+    const r = referenceImages(x.location, node);
+    const real = r.all.filter((s) => !isSketch(s));
+    if (!r.all.length) out.push(`${dramaName(x.location)} has no picture: add one so every shot looks like the same place.`);
+    else if (!real.length) out.push(`${dramaName(x.location)} only has a placeholder sketch: add a real picture.`);
+    else if (real.length > 1 && !r.explicit) out.push(`${dramaName(x.location)} has ${real.length} pictures and none is picked for this shot, so all go: ⇄ the view it needs.`);
+  }
+  for (const c of x.characters) {
+    if (!String(c.params.appearance ?? '').trim()) out.push(`${dramaName(c)} has no appearance written: faces drift between shots without it.`);
+    const pics = imageList(c.params.images);
+    if (!pics.length) out.push(`${dramaName(c)} has no picture.`);
+    else if (pics.every(isSketch)) out.push(`${dramaName(c)} only has a placeholder sketch: add a real picture.`);
+  }
+  for (const p of x.props) if (imageList(p.params.images).every(isSketch)) out.push(`${dramaName(p)} has no real picture.`);
+  shot.refs.forEach((r, i) => isSketch(r.src) && out.push(`@Image${i + 1} (${r.label}) is a placeholder sketch.`));
+  if (shot.dropped.length) out.push(`${shot.dropped.length} picture${shot.dropped.length > 1 ? 's' : ''} didn’t fit the limit and won’t be sent.`);
+  return out;
+}
+
 setShotClipSuggester((graph, shotId) => {
   const node = graph.nodes.get(shotId);
   if (node?.type !== 'drama/shot') return undefined;
@@ -698,5 +733,6 @@ setShotClipSuggester((graph, shotId) => {
     firstFrame: first,
     duration: shot.duration,
     aspect: settingsFor(graph, node, {}).aspect,
+    checks: shotChecks(graph, shotId, shot),
   };
 });

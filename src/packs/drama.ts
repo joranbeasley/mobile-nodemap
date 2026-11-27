@@ -114,6 +114,69 @@ const IMAGE_PROGRESS = 'dr-image-progress';
 /** Dispatched on a picture or clip field to open its generate panel (the cards' ✨ / 🎬 buttons). */
 export const GENERATE_EVENT = 'dr-generate';
 
+/**
+ * A prompt laid out for reading on a phone: its parts under headings (style, characters,
+ * setting, props, scene, the shot itself, rules), each @ImageN shown as its picture, and any
+ * checks first. `refs` are the pictures in the order they're sent.
+ */
+export function promptReview(prompt: string, refs: { src: string; label: string }[], checks: string[] = []): HTMLElement {
+  const box = document.createElement('div');
+  box.className = 'dr-review';
+  if (checks.length) {
+    const c = document.createElement('div');
+    c.className = 'dr-review-checks';
+    c.append(Object.assign(document.createElement('strong'), { textContent: `Worth a look (${checks.length})` }));
+    const ul = document.createElement('ul');
+    for (const t of checks) ul.append(Object.assign(document.createElement('li'), { textContent: t }));
+    c.append(ul);
+    box.append(c);
+  }
+  // Text with each @ImageN as a small picture and its number.
+  const rich = (text: string) => {
+    const p = document.createElement('p');
+    for (const part of text.split(/(@Image\d+)/)) {
+      const m = /^@Image(\d+)$/.exec(part);
+      const r = m ? refs[Number(m[1]) - 1] : undefined;
+      if (m) {
+        const tag = document.createElement('span');
+        tag.className = 'dr-review-ref';
+        tag.title = r?.label ?? `${part}: not sent`;
+        if (r) tag.append(Object.assign(document.createElement('img'), { src: r.src, alt: '' }));
+        tag.append(m[1]);
+        if (!r) tag.classList.add('dr-review-missing');
+        p.append(tag);
+      } else if (part) p.append(part);
+    }
+    return p;
+  };
+  const section = (title: string, cls = '') => {
+    const s = document.createElement('section');
+    s.className = `dr-review-part ${cls}`.trim();
+    s.append(Object.assign(document.createElement('h4'), { textContent: title }));
+    box.append(s);
+    return s;
+  };
+  const lines = prompt.split('\n').map((l) => l.trim());
+  let cur: HTMLElement | undefined;
+  lines.forEach((line, i) => {
+    if (!line) return void (cur = undefined);
+    const head = /^([A-Z][A-Za-z ]{1,24})(\s*\([^)]*\))?:\s*(.*)$/.exec(line);
+    if (i === 0 && !head) return void section('Style').append(rich(line));
+    const key = head?.[1].trim();
+    if (head && key === 'Characters' && !head[3]) return void (cur = section('Characters'));
+    if (line.startsWith('- ') && cur) return void cur.append(rich(line.slice(2)));
+    if (head) {
+      const name = key === 'Shot' ? `Shot ${head[2]?.trim() ?? ''}`.trim() : key === 'Scene context' ? 'Scene' : key!;
+      cur = section(name, key === 'Shot' ? 'dr-review-shot' : '');
+      if (head[3]) cur.append(rich(head[3]));
+      return;
+    }
+    if (/^(Keep|One continuous|No subtitles)/.test(line)) return void section('Rules', 'dr-review-rules').append(rich(line));
+    (cur ?? section('More')).append(rich(line));
+  });
+  return box;
+}
+
 /** An amount in a service's unit: $1.94, or 3 credits. */
 const amountText = (n: number, unit: string | undefined) => (unit === 'USD' ? `$${n.toFixed(2)}` : `${n.toLocaleString()} credit${n === 1 ? '' : 's'}`);
 
@@ -724,6 +787,8 @@ export interface ShotClipSuggestion {
   firstFrame?: string;
   duration: number;
   aspect: string;
+  /** What to look at before generating (thin descriptions, sketches, unpicked views…). */
+  checks?: string[];
 }
 type ClipSuggester = (graph: Graph, shotId: string) => ShotClipSuggestion | undefined;
 /**
@@ -1072,7 +1137,21 @@ export const clipFrameParam: ParamKind = {
       box.append(row(model, secs, aspect, res, sound), hint, price, limits);
       const prompt = el('textarea', { rows: '6', 'aria-label': 'Clip prompt', placeholder: 'Describe the shot' }) as HTMLTextAreaElement;
       prompt.value = s?.prompt ?? '';
-      box.append(prompt);
+      // Read it as a page (sections, pictures for @ImageN, checks first); ✎ Edit text for the words.
+      const reviewWrap = el('div', { class: 'dr-review-wrap' });
+      const showReview = () => {
+        const sent = (s?.references ?? []).filter((r) => on.has(r.src));
+        reviewWrap.replaceChildren(promptReview(prompt.value, sent, s?.checks ?? []));
+      };
+      const textBtn = el('button', { type: 'button', class: 'dr-gen-link-btn' }, '✎ Edit the prompt as text') as HTMLButtonElement;
+      prompt.hidden = true;
+      textBtn.addEventListener('click', () => {
+        prompt.hidden = !prompt.hidden;
+        reviewWrap.hidden = !prompt.hidden;
+        textBtn.textContent = prompt.hidden ? '✎ Edit the prompt as text' : '☰ Back to the review';
+        if (prompt.hidden) showReview();
+      });
+      box.append(reviewWrap, prompt, textBtn);
       // The shot's pictures, in the export's order (the prompt calls them @Image1…): all on.
       const refs = s?.references ?? [];
       const on = new Set(refs.map((r) => r.src));
@@ -1120,7 +1199,10 @@ export const clipFrameParam: ParamKind = {
         box.append(strip, el('small', { class: 'dr-gen-refs-note' }, 'Sent in this order; the prompt calls them @Image1, @Image2… Switching one off renumbers the rest, so edit the prompt to match.'));
         refsOn = () => refs.filter((r) => on.has(r.src)).length;
         showPrice();
+        // Switching pictures on or off renumbers them: the review follows.
+        strip.addEventListener('click', () => queueMicrotask(() => !reviewWrap.hidden && showReview()));
       }
+      showReview();
       // The key, saved as soon as it's entered.
       const keyIn = el('input', { type: 'text', class: 'dr-key-masked', autocomplete: 'off', spellcheck: 'false', 'aria-label': gen.key?.label ?? 'API key', placeholder: `Paste your ${gen.key?.label ?? 'API key'}` }) as HTMLInputElement;
       keyIn.addEventListener('input', () => {
@@ -2225,8 +2307,12 @@ export function referenceImages(card: NodeInstance, target?: NodeInstance): { pi
   const picks = target?.params.referencePicks as Record<string, string> | undefined;
   const p = picks?.[cardId(card.id)];
   const explicit = !!p && all.includes(p);
-  return { picked: explicit ? p : all[0], all, explicit };
+  // Unpicked: the first real picture leads (a placeholder sketch only when there's nothing else).
+  return { picked: explicit ? p : all.find((x) => !isSketch(x)) ?? all[0], all, explicit };
 }
+
+/** A drawn placeholder (the examples' SVG sketches), not a picture of the real thing. */
+export const isSketch = (src: string) => /^data:image\/svg/i.test(src);
 
 /**
  * The pictures already on the cards a new picture should match, so a generator that takes
@@ -2681,6 +2767,21 @@ const css = `
 .dr-clip small { flex-basis: 100%; color: var(--_muted); font-size: 11px; }
 .dr-clip small:empty { display: none; }
 .dr-clip-panel { flex-basis: 100%; }
+/* The prompt, laid out to read on a phone. */
+.dr-review { display: flex; flex-direction: column; gap: 10px; font: 14px/1.5 var(--_font); color: var(--_text); }
+.dr-review-part { border-left: 3px solid var(--_border); padding: 2px 0 2px 10px; }
+.dr-review-part h4 { margin: 0 0 2px; font: 700 11px/1.2 var(--_font); letter-spacing: .06em; text-transform: uppercase; color: var(--_muted); }
+.dr-review-part p { margin: 0 0 6px; }
+.dr-review-part p:last-child { margin-bottom: 0; }
+.dr-review-shot { border-left-color: var(--_accent); background: color-mix(in srgb, var(--_accent) 6%, transparent); border-radius: 0 8px 8px 0; padding: 6px 8px 6px 10px; font-size: 15px; }
+.dr-review-rules { color: var(--_muted); font-size: 12px; }
+.dr-review-ref { display: inline-flex; align-items: center; gap: 3px; vertical-align: middle; margin: 0 2px; padding: 1px 6px 1px 1px; border-radius: 999px;
+  background: color-mix(in srgb, var(--_accent) 12%, var(--_node)); font: 700 11px/1 var(--_font); color: var(--_accent); }
+.dr-review-ref img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; }
+.dr-review-missing { background: #fde2e1; color: #b42318; padding-left: 6px; }
+.dr-review-checks { border: 1px solid #f2c94c; background: color-mix(in srgb, #f2c94c 14%, var(--_node)); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.dr-review-checks ul { margin: 4px 0 0; padding-left: 18px; }
+.dr-review-checks li { margin: 2px 0; }
 .dr-views { display: flex; flex-direction: column; gap: 8px; }
 .dr-view { display: grid; grid-template-columns: 72px 1fr; gap: 8px; align-items: start; }
 .dr-view img { width: 72px; height: 54px; object-fit: cover; border-radius: 6px; border: 1px solid var(--_border); }
