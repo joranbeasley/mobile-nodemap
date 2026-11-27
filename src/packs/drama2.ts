@@ -522,8 +522,9 @@ const shotNode = defineNode({
     sheetOnly({ name: 'number', label: 'shot', kind: 'text', default: '1', placeholder: '1, 2, 2A…' }),
     sheetOnly({ name: 'framing', label: 'framing', kind: 'select', options: FRAMINGS, default: 'Medium' }),
     { ...ref('location', 'location', D2.location), create: true },
-    { ...refs('characters', 'characters', D2.character), create: true },
-    { ...refs('props', 'props', D2.prop), create: true, chip: wearerPicker, only: (n: NodeInstance) => !isOutfit(n) },
+    // Characters and props are on the card only when there are some (add them in the Edit sheet).
+    { ...refs('characters', 'characters', D2.character), create: true, card: (q: Record<string, unknown>) => Array.isArray(q.characters) && q.characters.length > 0 },
+    { ...refs('props', 'props', D2.prop), create: true, chip: wearerPicker, only: (n: NodeInstance) => !isOutfit(n), card: (q: Record<string, unknown>) => Array.isArray(q.props) && q.props.length > 0 },
     wardrobe('What each character wears in this shot. Leave it "from scene" to keep what the scene (or episode) says.'),
     text('description', 'description', 'What we see and hear'),
     images('images', 'frames'),
@@ -910,6 +911,11 @@ const css = `
 .dr2-list { margin-top: 6px; border-top: 1px solid var(--_border); padding-top: 4px; font: 12px/1.35 var(--_font); }
 .dr2-list summary { cursor: pointer; font-weight: 600; padding: 4px 0; list-style-position: inside; }
 .dr2-list summary span { color: var(--_muted); font-weight: 500; margin-left: 2px; }
+/* Shot cards are the most numerous: keep them short (two lines of description, small frames). */
+.nm-node[data-type="drama2/shot"] .nm-field { padding-block: 1px; }
+.nm-node[data-type="drama2/shot"] .nm-field textarea { min-height: 0; height: 2.9em; max-height: 2.9em; resize: none; }
+.nm-node[data-type="drama2/shot"] .dr-thumb { width: 48px; height: 32px; }
+.nm-node[data-type="drama2/shot"] .dr-add { min-width: 32px; height: 32px; padding: 0 8px; }
 .dr2-list ul { list-style: none; margin: 2px 0 4px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .dr2-list li button { all: unset; cursor: pointer; display: block; width: 100%; box-sizing: border-box; padding: 5px 8px; border-radius: 6px; color: var(--_accent); }
 .dr2-list li button:hover, .dr2-list li button:focus-visible { background: color-mix(in srgb, var(--_accent) 12%, transparent); }

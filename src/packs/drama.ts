@@ -377,7 +377,12 @@ export const clipFrameParam: ParamKind = {
             draw();
           }),
         );
-      } else if (getVideoGenerators().length) wrap.append(button('🎬 Generate clip', 'Generate a clip for this shot', () => openGen()));
+      } else if (getVideoGenerators().length) {
+        // The same button folds the panel away again.
+        const b = panel ? button('✕ Close', 'Close the clip panel', () => openGen()) : button('🎬 Generate clip', 'Generate a clip for this shot', () => openGen());
+        b.setAttribute('aria-expanded', String(!!panel));
+        wrap.append(b);
+      }
       wrap.append(status);
       if (panel) wrap.append(panel);
     };
@@ -782,9 +787,16 @@ export const imagesParam: ParamKind = {
     let note = '';
     /** A picture being made: a placeholder thumbnail in the strip, where it will land. */
     let making: Pending | undefined;
+    /** ✨ says whether it opens or closes the panel. */
+    const syncGen = () =>
+      wrap.querySelectorAll<HTMLButtonElement>('.dr-gen:not(.dr-browse)').forEach((g) => {
+        g.textContent = panel ? '✕' : '✨';
+        g.setAttribute('aria-expanded', String(!!panel));
+      });
     const closePanel = () => {
       panel?.remove();
       panel = undefined;
+      syncGen();
     };
     const openPanel = () => {
       const gen = chosenGen;
@@ -1031,6 +1043,7 @@ export const imagesParam: ParamKind = {
       panel.append(prompt, row, ...(refChoices.length ? [refs, refNote] : []), cost, keyRow, buttons, status);
       void showCost();
       wrap.append(panel);
+      syncGen();
       // Not on touch screens: focusing would pop up the keyboard over the panel.
       if (globalThis.matchMedia?.('(pointer: fine)').matches) prompt.focus({ preventScroll: true });
     };
@@ -1136,6 +1149,7 @@ export const imagesParam: ParamKind = {
       }
       if (note) wrap.append(Object.assign(document.createElement('small'), { className: 'dr-gen-note', textContent: note }));
       if (panel) wrap.append(panel);
+      syncGen();
     };
     // Inside a <label>, a tap on a thumbnail's gap would "click" the first button: don't.
     wrap.addEventListener('click', (e) => {
@@ -2022,6 +2036,8 @@ const css = `
 .dr-clip small { flex-basis: 100%; color: var(--_muted); font-size: 11px; }
 .dr-clip small:empty { display: none; }
 .dr-clip-panel { flex-basis: 100%; }
+.dr-gen-panel { box-sizing: border-box; min-width: 0; max-width: 100%; }
+.dr-gen-panel :is(select, textarea, input:not([type=checkbox])) { box-sizing: border-box; max-width: 100%; }
 .dr-clip-panel select, .dr-clip-panel input[type=number] { font: 12px var(--_font); min-height: 28px; }
 .dr-clip-panel .dr-gen-row { flex-wrap: wrap; }
 .dr-clip-panel .dr-gen-row > select { width: auto; flex: 1 1 72px; min-width: 0; }

@@ -1928,7 +1928,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
     const focusKey = active?.dataset.key;
     const sel = active && 'selectionStart' in active ? [active.selectionStart, active.selectionEnd] : null;
 
-    const el = h('div', { class: 'nm-node', 'data-id': node.id, role: 'group', 'aria-label': def?.title ?? node.type });
+    const el = h('div', { class: 'nm-node', 'data-id': node.id, 'data-type': node.type, role: 'group', 'aria-label': def?.title ?? node.type });
     if (def?.color) el.style.setProperty('--nm-type-color', def.color);
     el.dataset.flavor = flavorOf(def, this.registry.inputsOf(node), this.registry.outputsOf(node));
     if (def?.width) {

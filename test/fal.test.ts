@@ -347,6 +347,35 @@ describe('🎬 Generate clip on a shot', () => {
     editor.destroy();
   });
 
+  it('folds the panels away again from the button that opened them', async () => {
+    setVideoGenerators([{ id: 'fake', name: 'Fake', models: [{ id: 'm', label: 'M' }], async generate() {
+      return { videos: [] };
+    } }]);
+    setImageGenerators([{ id: 'img', name: 'Img', async generate() {
+      return { images: [] };
+    } }]);
+    const { editor } = mount();
+    await editor.setView('shots');
+    await openSheet(editor, 's1b');
+    const clipBtn = () => [...inSheet('lastFrame').querySelectorAll<HTMLButtonElement>('.dr-clip-btn')].find((b) => b.hasAttribute('aria-expanded'))!;
+    expect(clipBtn().textContent).toBe('🎬 Generate clip');
+    clipBtn().click();
+    expect(inSheet('lastFrame').querySelector('.dr-clip-panel')).not.toBeNull();
+    expect(clipBtn().textContent).toBe('✕ Close');
+    expect(clipBtn().getAttribute('aria-expanded')).toBe('true');
+    clipBtn().click();
+    expect(inSheet('lastFrame').querySelector('.dr-clip-panel')).toBeNull();
+    const spark = () => inSheet('images').querySelector<HTMLButtonElement>('.dr-gen:not(.dr-browse)')!;
+    spark().click();
+    expect(inSheet('images').querySelector('.dr-gen-panel')).not.toBeNull();
+    expect(spark().textContent).toBe('✕');
+    spark().click();
+    expect(inSheet('images').querySelector('.dr-gen-panel')).toBeNull();
+    expect(spark().textContent).toBe('✨');
+    editor.closePalette();
+    editor.destroy();
+  });
+
   it('starts a continuing shot from the previous clip’s last frame', () => {
     const { g, editor } = mount();
     g.setParam('s1a', 'lastFrame', 'data:image/jpeg;base64,RU5E');
