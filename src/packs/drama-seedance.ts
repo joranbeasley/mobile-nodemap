@@ -1,6 +1,6 @@
 import type { Graph } from '../core/graph.js';
 import type { NodeInstance } from '../core/types.js';
-import { cardId, isSketch, pictureView, viewSentence, dramaName, episodeInfo, imageList, previousShot, referenceImages, sceneInfo, setShotClipSuggester, shotCostumes, shotInfo, type EpisodeInfo, type SceneInfo } from './drama.js';
+import { cardId, into, isSketch, pictureView, viewSentence, dramaName, episodeInfo, imageList, previousShot, referenceImages, sceneInfo, setShotClipSuggester, shotCostumes, shotInfo, type EpisodeInfo, type SceneInfo } from './drama.js';
 
 /**
  * Export a production for Seedance video generation, one generation per shot.
@@ -715,6 +715,16 @@ export function shotChecks(graph: Graph, shotId: string, shot = seedanceShot(gra
     if (!r.all.length) out.push(`${dramaName(x.location)} has no picture: add one so every shot looks like the same place.`);
     else if (!real.length) out.push(`${dramaName(x.location)} only has a placeholder sketch: add a real picture.`);
     else if (real.length > 1 && !r.explicit) out.push(`${dramaName(x.location)} has ${real.length} pictures and none is picked for this shot, so all go: ⇄ the view it needs.`);
+    // The same room in every shot of a scene: another shot here shows it with a different picture.
+    const scene = into(graph, shotId).find((n) => n.type === 'drama/scene');
+    if (scene && r.picked) {
+      const others = sceneInfo(graph, scene).shots.filter((s) => s.node.id !== shotId && s.location?.id === x.location!.id);
+      const differ = others.filter((s) => {
+        const p = referenceImages(x.location!, s.node).picked;
+        return p && p !== r.picked;
+      });
+      if (differ.length) out.push(`${differ.map((s) => `Shot ${String(s.node.params.number ?? '?')}`).join(', ')} show${differ.length === 1 ? 's' : ''} ${dramaName(x.location)} with a different picture: the room may look different between cuts. ⇄ the same one, unless this is the reverse view.`);
+    }
   }
   for (const c of x.characters) {
     if (!String(c.params.appearance ?? '').trim()) out.push(`${dramaName(c)} has no appearance written: faces drift between shots without it.`);

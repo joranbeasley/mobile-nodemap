@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from 'vitest';
-import { Graph, Evaluator, NodeEditor, drama2Graph, dramaGraph, toDrama, fromDrama, drama2Lists, seedanceShot, getGraphType, sceneCostumes, shotCostumes, wearerOf, dressOf, dramaImagePrompt, previousShot, sceneSequence, shotChecks, promptReview } from '../src/index';
+import { Graph, Evaluator, NodeEditor, drama2Graph, dramaGraph, toDrama, fromDrama, drama2Lists, seedanceShot, getGraphType, sceneCostumes, shotCostumes, wearerOf, dressOf, dramaImagePrompt, previousShot, sceneSequence, shotChecks, promptReview, clipOutOfDate } from '../src/index';
 
 const load = (id = 'term') => Graph.fromJSON(drama2Graph.examples!.find((e) => e.id === id)!.graph, drama2Graph.createRegistry());
 const view = (id: string) => drama2Graph.editor!.views!.find((v) => v.id === id)!;
@@ -693,5 +693,36 @@ describe('Editor views', () => {
     expect(g.nodes.get('ep2')!.params.scenes).toEqual(['sc4', 'sc3']);
     expect(g.nodes.get('sc3')!.params.number).toBe(2); // scene numbers stay numbers
     editor.destroy();
+  });
+});
+
+describe('making a scene hang together', () => {
+  it('marks a carry-on shot out of date when the shot before gets a new clip', () => {
+    const g = Graph.fromJSON(drama2Graph.examples![0].graph, drama2Graph.createRegistry());
+    const [a, b] = g.nodes.get('sc1')!.params.shots as string[];
+    g.setParam(b, 'continues', true);
+    g.setParam(b, 'clipUrl', 'b.mp4');
+    expect(clipOutOfDate(g, g.nodes.get(b)!)).toBeUndefined(); // nothing to compare with yet
+    g.setParam(a, 'clipAt', 100);
+    g.setParam(b, 'clipFrom', 100);
+    expect(clipOutOfDate(g, g.nodes.get(b)!)).toBeUndefined(); // made from that clip
+    g.setParam(a, 'clipAt', 200);
+    expect(clipOutOfDate(g, g.nodes.get(b)!)).toMatch(/^Out of date: Shot 1 .* has a new clip since/);
+    g.setParam(b, 'continues', false);
+    expect(clipOutOfDate(g, g.nodes.get(b)!)).toBeUndefined(); // a cut doesn't depend on it
+  });
+
+  it('warns when shots of a scene show its location with different pictures', () => {
+    const g = Graph.fromJSON(drama2Graph.examples![0].graph, drama2Graph.createRegistry());
+    const [a, b] = g.nodes.get('sc1')!.params.shots as string[];
+    const loc = g.nodes.get(a)!.params.location as string;
+    g.setParam(b, 'location', loc);
+    const pics = ['data:image/png;base64,QQ==', 'data:image/png;base64,Qg=='];
+    g.setParam(loc, 'images', pics);
+    g.setParam(a, 'referencePicks', { [loc]: pics[0] });
+    g.setParam(b, 'referencePicks', { [loc]: pics[1] });
+    expect(shotChecks(toDrama(g), b).join('\n')).toMatch(/Shot 1, Shot 3 show School hall with a different picture/);
+    g.setParam(b, 'referencePicks', { [loc]: pics[0] });
+    expect(shotChecks(toDrama(g), b).join('\n')).not.toMatch(/different picture/);
   });
 });

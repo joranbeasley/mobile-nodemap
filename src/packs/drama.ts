@@ -101,6 +101,274 @@ function referenceSwitch(r: Reference, ctx: { node: NodeInstance; graph: Graph; 
   return b;
 }
 
+/** A shot has a new clip: stamp it (shots carrying on from it can tell), and its fixed voices were for the old one. */
+function newClip(graph: Graph, shotId: string): void {
+  graph.setParam(shotId, 'clipAt', Date.now());
+  if (graph.nodes.get(shotId)?.params.voiceTrack) graph.setParam(shotId, 'voiceTrack', null);
+}
+
+const usd = (e: { amount: number; unit: string }) => (e.unit === 'USD' ? `$${e.amount.toFixed(2)}` : `${e.amount} credits`);
+
+/** The settings a shot's clip gets without the panel: its length and aspect where the model allows, 720p, sound where it can. */
+function clipSettings(gen: VideoGenerator, modelId: string, s: ShotClipSuggestion) {
+  const m = gen.models.find((x) => x.id === modelId) ?? gen.models[0];
+  const d = Math.min(m?.maxDuration ?? 60, Math.max(m?.minDuration ?? 1, s.duration || 5));
+  const duration = m?.durations?.length ? m.durations.reduce((a, b) => (Math.abs(b - d) <= Math.abs(a - d) ? b : a)) : Math.round(d);
+  const aspect = !m?.aspects || m.aspects.includes(s.aspect) ? s.aspect : m.aspects[0];
+  const resolution = !m?.resolutions || m.resolutions.includes('720p') ? '720p' : m.resolutions[0];
+  return { model: m?.id ?? modelId, label: m?.label ?? modelId, duration, aspect, resolution, audio: !!m?.audio };
+}
+
+/** What making a shot's clip this way will cost (undefined: the service doesn't say). */
+export function shotClipEstimate(gen: VideoGenerator, modelId: string, s: ShotClipSuggestion) {
+  const c = clipSettings(gen, modelId, s);
+  return gen.estimate?.({ model: c.model, duration: c.duration, resolution: c.resolution, aspect: c.aspect, audio: c.audio, references: s.references.length });
+}
+
+/**
+ * Make a shot's clip without its panel (🎬 Make the scene): its own prompt, pictures and first
+ * frame, sent, kept, and its first and last frames taken, as 🎬 Clip does. `from` is the stamp of
+ * the clip it carries on from. Its card shows the progress.
+ */
+export async function makeShotClip(
+  graph: Graph,
+  shotId: string,
+  s: ShotClipSuggestion,
+  o: { gen: VideoGenerator; model: string; from?: number; signal?: AbortSignal; onProgress?: (text: string, percent?: number) => void },
+): Promise<void> {
+  const { gen } = o;
+  const c = clipSettings(gen, o.model, s);
+  const since = Date.now();
+  const live = (text: string, percent?: number) => {
+    liveClips.set(shotId, { text, since, ...(percent != null ? { percent } : {}) });
+    document.dispatchEvent(new CustomEvent(CLIP_PROGRESS, { detail: shotId }));
+    o.onProgress?.(text, percent);
+  };
+  let submitted = false;
+  try {
+    live('Preparing pictures…');
+    const picked = await Promise.all(s.references.map((r) => referencePicture(r.src)));
+    const first = s.firstFrame ? await referencePicture(s.firstFrame) : undefined;
+    live(`Asking ${gen.name}…`);
+    const e = shotClipEstimate(gen, o.model, s);
+    const record = (result?: string[]) =>
+      logGeneration({
+        at: Date.now(),
+        kind: 'clip',
+        node: shotId,
+        param: 'lastFrame',
+        service: gen.name,
+        model: c.label,
+        prompt: s.prompt,
+        references: s.references.map((r) => ({ label: r.label, ...(linkOnly(r.src) ? { src: r.src } : {}) })),
+        settings: { duration: c.duration, aspect: c.aspect, resolution: c.resolution, sound: c.audio, scene: true },
+        ...(result ? { result } : {}),
+        ...(e ? { cost: `about ${usd(e)}` } : {}),
+      });
+    const result = await gen.generate({
+      prompt: s.prompt,
+      references: picked,
+      firstFrame: first,
+      duration: c.duration,
+      aspect: c.aspect,
+      resolution: c.resolution,
+      model: c.model,
+      audio: c.audio,
+      signal: o.signal,
+      onProgress: live,
+      onSubmitted: (job) => {
+        submitted = true;
+        record();
+        collecting.add(`${shotId}:${job.startedAt}`);
+        graph.setParam(shotId, 'clipJob', job);
+        graph.setParam(shotId, 'clipFrom', s.firstFrame ? (o.from ?? null) : null);
+      },
+    });
+    const clip = result.videos[0];
+    if (!clip) throw new Error(`${gen.name} returned no clip`);
+    live('Saving a copy of the clip…');
+    let kept = clip;
+    if (clipKeeper) kept = await clipKeeper(clip, { shotId }).catch(() => clip);
+    keepTried.add(kept);
+    graph.setParam(shotId, 'clipUrl', kept);
+    graph.setParam(shotId, 'clipJob', null);
+    newClip(graph, shotId);
+    live('Taking the last frame…');
+    posterTried.add(kept);
+    const f = await clipFramesOf(await (await fetch(kept, { signal: o.signal, credentials: 'same-origin' })).blob());
+    graph.setParam(shotId, 'clipPoster', f.first);
+    if (Number.isFinite(f.seconds)) graph.setParam(shotId, 'clipSeconds', Math.round(f.seconds * 10) / 10);
+    graph.setParam(shotId, 'lastFrame', f.last);
+  } catch (err) {
+    if (submitted && (err as { code?: string }).code !== 'pending' && (err as Error).name !== 'AbortError') graph.setParam(shotId, 'clipJob', null);
+    throw err;
+  } finally {
+    for (const k of collecting) if (k.startsWith(`${shotId}:`)) collecting.delete(k);
+    liveClips.delete(shotId);
+    document.dispatchEvent(new CustomEvent(CLIP_PROGRESS, { detail: shotId }));
+  }
+}
+
+/** One of a scene's shots, for 🎬 Make the scene. */
+export interface SceneShot {
+  id: string;
+  label: string;
+  /** Carries straight on from the shot before (so it waits for that one's clip). */
+  continues: boolean;
+  hasClip: boolean;
+  /** Why its clip is out of date, if it is. */
+  stale?: string;
+  /** Its prompt and pictures, worked out when it's sent (after the shot before has its new clip). */
+  suggest(): ShotClipSuggestion | undefined;
+  /** The stamp of the clip before it (when it starts from that one's last frame). */
+  from(): number | undefined;
+}
+
+/**
+ * 🎬 Make the scene: its shots' clips, made in order. Shots that carry on from the one before
+ * wait for its new clip and start from its last frame; the rest (cuts) are made at the same
+ * time. Shots without a clip, or out of date, are ticked; tick others to remake them.
+ */
+export const sceneClipsParam: ParamKind = {
+  kind: 'scene-clips',
+  render(ctx) {
+    const wrap = document.createElement('div');
+    wrap.className = 'dr-scene-clips';
+    const el = (tag: string, attrs: Record<string, string> = {}, text = '') => {
+      const x = document.createElement(tag);
+      for (const [k, v] of Object.entries(attrs)) x.setAttribute(k, v);
+      if (text) x.textContent = text;
+      return x;
+    };
+    const shotsOf = () => (ctx.param as { shots?: (n: NodeInstance, g: Graph) => SceneShot[] }).shots?.(ctx.node, ctx.graph) ?? [];
+    let gen: VideoGenerator | null = preferred('video', getVideoGenerators());
+    let model = gen?.defaultModel ?? gen?.models[0]?.id ?? '';
+    const ticked = new Set(shotsOf().filter((s) => !s.hasClip || s.stale).map((s) => s.id));
+    const state = new Map<string, string>();
+    let abort: AbortController | undefined;
+    let running = false;
+    const draw = () => {
+      wrap.replaceChildren();
+      const gens = getVideoGenerators();
+      if (!gen) return void wrap.append(el('p', {}, 'Set up a video service first.'));
+      wrap.append(el('p', { class: 'dr-scene-clips-intro' }, 'Makes the ticked shots’ clips. A shot that carries on from the one before waits for its new clip and starts from its last frame; cuts are made at the same time. Keep this page open until it’s done.'));
+      const head = el('div', { class: 'dr-gen-row' });
+      if (gens.length > 1) {
+        const sv = el('select', { 'aria-label': 'Service' }) as HTMLSelectElement;
+        for (const g of gens) sv.append(Object.assign(document.createElement('option'), { value: g.id, textContent: g.name }));
+        sv.value = gen.id;
+        sv.disabled = running;
+        sv.addEventListener('change', () => {
+          gen = gens.find((g) => g.id === sv.value) ?? gen;
+          remember('video', gen!.id);
+          model = gen!.defaultModel ?? gen!.models[0]?.id ?? '';
+          draw();
+        });
+        head.append(sv);
+      }
+      const md = el('select', { 'aria-label': 'Model' }) as HTMLSelectElement;
+      for (const m of gen.models) md.append(Object.assign(document.createElement('option'), { value: m.id, textContent: m.label }));
+      md.value = model;
+      md.disabled = running;
+      md.addEventListener('change', () => ((model = md.value), draw()));
+      head.append(md);
+      wrap.append(head);
+      const shots = shotsOf();
+      const list = el('div', { class: 'dr-scene-clips-list' });
+      let total = 0;
+      let priced = true;
+      shots.forEach((s, i) => {
+        const row = el('label', { class: 'dr-scene-clip' });
+        const box = el('input', { type: 'checkbox' }) as HTMLInputElement;
+        box.checked = ticked.has(s.id);
+        box.disabled = running;
+        box.addEventListener('change', () => (box.checked ? ticked.add(s.id) : ticked.delete(s.id), draw()));
+        const note = state.get(s.id) ?? (s.stale ? `⚠ ${s.stale}` : s.hasClip ? 'has a clip' : 'no clip yet');
+        const carry = s.continues && i > 0 ? ' · carries on from the one before' : '';
+        row.append(box, el('span', { class: 'dr-scene-clip-name' }, s.label), el('small', {}, `${note}${carry}`));
+        list.append(row);
+        if (ticked.has(s.id)) {
+          let sg: ShotClipSuggestion | undefined;
+          try {
+            sg = s.suggest();
+          } catch {
+            sg = undefined;
+          }
+          const e = sg && shotClipEstimate(gen!, model, sg);
+          if (e) total += e.amount;
+          else priced = false;
+        }
+      });
+      wrap.append(list);
+      const n = shots.filter((s) => ticked.has(s.id)).length;
+      const go = el('button', { type: 'button', class: 'dr-gen-go' }, running ? 'Making…' : `🎬 Make ${n} clip${n === 1 ? '' : 's'}${n && priced && total ? ` · about $${total.toFixed(2)}` : ''}`) as HTMLButtonElement;
+      go.disabled = running || !n;
+      const stop = el('button', { type: 'button', class: 'dr-gen-cancel' }, 'Stop') as HTMLButtonElement;
+      stop.hidden = !running;
+      stop.addEventListener('click', () => abort?.abort());
+      go.addEventListener('click', async () => {
+        const g = gen!;
+        if (g.key && !g.key.get()) return void state.set('_', `Add your ${g.key.label} first.`), draw();
+        if (!(await confirmSpend(go, g.name, Promise.resolve(priced && total ? { amount: Math.round(total * 100) / 100, unit: 'USD' } : undefined), g.balance?.()))) return;
+        running = true;
+        abort = new AbortController();
+        state.clear();
+        const todo = shotsOf();
+        for (const s of todo) if (ticked.has(s.id)) state.set(s.id, 'waiting…');
+        draw();
+        // Each shot's clip, once the one it carries on from (if that's being made too) is done.
+        const done = new Map<string, Promise<void>>();
+        todo.forEach((s, i) => {
+          if (!ticked.has(s.id)) return;
+          const before = s.continues && i > 0 ? done.get(todo[i - 1].id) : undefined;
+          done.set(
+            s.id,
+            (async () => {
+              if (before) {
+                try {
+                  await before;
+                } catch {
+                  state.set(s.id, `not made: ${todo[i - 1].label} didn’t finish`);
+                  draw();
+                  throw new Error('skipped');
+                }
+              }
+              const sg = s.suggest();
+              if (!sg) throw new Error('no prompt');
+              try {
+                await makeShotClip(ctx.graph, s.id, sg, {
+                  gen: g,
+                  model,
+                  from: s.from(),
+                  signal: abort!.signal,
+                  onProgress: (t, pc) => {
+                    state.set(s.id, pc != null ? `${t} ${Math.round(pc)}%` : t);
+                    if (wrap.isConnected) draw();
+                  },
+                });
+                state.set(s.id, '✓ made');
+              } catch (err) {
+                state.set(s.id, (err as Error).name === 'AbortError' ? 'stopped' : `failed: ${(err as Error).message}`);
+                throw err;
+              } finally {
+                ticked.delete(s.id);
+                if (wrap.isConnected) draw();
+              }
+            })(),
+          );
+        });
+        await Promise.allSettled(done.values());
+        running = false;
+        draw();
+      });
+      wrap.append(el('div', { class: 'dr-gen-row' }), go, stop);
+      if (state.get('_')) wrap.append(el('small', { role: 'status' }, state.get('_')!));
+    };
+    draw();
+    return wrap;
+  },
+};
+
 /** Service links already offered to the keeper on this page. */
 const keepTried = new Set<string>();
 /**
@@ -940,6 +1208,8 @@ export const clipFrameParam: ParamKind = {
       try {
         const f = await clipFramesOf(file);
         keepFrames(f);
+        newClip(ctx.graph, ctx.node.id);
+        ctx.graph.setParam(ctx.node.id, 'clipFrom', null);
         value = f.last;
         ctx.set(value);
         draw();
@@ -986,6 +1256,8 @@ export const clipFrameParam: ParamKind = {
         fig.append(play);
       }
       wrap.append(fig);
+      const stale = !busy && (ctx.param as { stale?: (node: NodeInstance, graph: Graph) => string | undefined }).stale?.(ctx.node, ctx.graph);
+      if (stale) wrap.append(Object.assign(document.createElement('div'), { className: 'dr-clip-stale', textContent: `⚠ ${stale}` }));
       const line = (ctx.param as { summary?: (node: NodeInstance, graph: Graph) => string }).summary?.(ctx.node, ctx.graph);
       if (line) wrap.append(Object.assign(document.createElement('div'), { className: 'dr-clip-sum', textContent: line }));
       wrap.append(status); // what the service said (still generating, failed…)
@@ -1446,6 +1718,7 @@ export const clipFrameParam: ParamKind = {
       // The clip first, then forget the job: the shot is never without either (its card shows the field while it has one).
       ctx.graph.setParam(ctx.node.id, 'clipUrl', kept);
       ctx.graph.setParam(ctx.node.id, 'clipJob', null);
+      newClip(ctx.graph, ctx.node.id);
       draw();
       try {
         posterTried.add(kept);
@@ -1772,6 +2045,8 @@ export const clipFrameParam: ParamKind = {
               submitted = true;
               collecting.add(`${ctx.node.id}:${job.startedAt}`);
               ctx.graph.setParam(ctx.node.id, 'clipJob', job);
+              // Which clip of the shot before it starts from (to tell when that one changes).
+              ctx.graph.setParam(ctx.node.id, 'clipFrom', first ? ((p as { from?: (n: NodeInstance, g: Graph) => number | undefined }).from?.(ctx.node, ctx.graph) ?? null) : null);
               jobKey = `${ctx.node.id}:${job.startedAt}`;
             },
           });
@@ -1820,7 +2095,9 @@ export const clipFrameParam: ParamKind = {
     if (ctx.place !== 'sheet') {
       const off = ctx.graph.on('change', (c) => {
         if (!wrap.isConnected) return queueMicrotask(off);
-        if (c.kind === 'node:params' && c.node.id === ctx.node.id) draw();
+        if (c.kind !== 'node:params') return;
+        // Its own changes; and another shot's new clip (this one may now be out of date), or the scene's order.
+        if (c.node.id === ctx.node.id || (ctx.node.params.continues && (c.name === 'clipAt' || c.name === 'shots'))) draw();
       });
       // …and the progress of a clip being made for it elsewhere on the page (its Edit sheet).
       const onProgress = (e: Event) => {
@@ -2812,7 +3089,7 @@ const from = (graph: Graph, id: string, port: string) =>
     .filter((e) => e.to.port === port)
     .map((e) => graph.nodes.get(e.from.node))
     .filter((n): n is NodeInstance => !!n);
-const into = (graph: Graph, id: string) =>
+export const into = (graph: Graph, id: string) =>
   graph
     .outgoing(id)
     .map((e) => graph.nodes.get(e.to.node))
@@ -3520,6 +3797,12 @@ const css = `
 .dr-voice-text { font-size: 13px; color: var(--_text); }
 .dr-voice small { color: var(--_muted); }
 .dr-voice-warn { color: #b42318 !important; }
+.dr-clip-stale { font-size: 12px; color: #c92a2a; margin-top: 4px; }
+.dr-scene-clips { display: flex; flex-direction: column; gap: 8px; }
+.dr-scene-clips-intro { margin: 0; font-size: 13px; opacity: .8; }
+.dr-scene-clips-list { display: flex; flex-direction: column; gap: 6px; }
+.dr-scene-clip { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: center; }
+.dr-scene-clip small { grid-column: 2; opacity: .75; }
 .dr-audio { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .dr-audio audio { max-width: 100%; height: 36px; }
 .dr-history { flex-basis: 100%; font-size: 13px; color: var(--_text); }

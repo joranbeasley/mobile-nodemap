@@ -2,7 +2,7 @@ import type { VoiceTrack } from './voices.js';
 import { defineNode, definePack, type GraphEngine } from '../core/registry.js';
 import { Graph } from '../core/graph.js';
 import type { GraphJSON, NodeInstance, NodeResult, NodeType, ParamKind } from '../core/types.js';
-import { DRAMA_DETAILS, GENERATE_EVENT, audioParam, voicePickParam, playSequence, type SequenceItem, viewsParam, SHOT_CLIP_PARAMS, clipFrameParam, dramaImagePrompt, shotClipSuggestion, FRAMINGS, MOVES, TIMES, appearances, dramaEngine, dramaPack, dramaView, imagesParam, sceneInfo, episodeInfo } from './drama.js';
+import { DRAMA_DETAILS, GENERATE_EVENT, audioParam, voicePickParam, sceneClipsParam, type SceneShot, playSequence, type SequenceItem, viewsParam, SHOT_CLIP_PARAMS, clipFrameParam, dramaImagePrompt, shotClipSuggestion, FRAMINGS, MOVES, TIMES, appearances, dramaEngine, dramaPack, dramaView, imagesParam, sceneInfo, episodeInfo } from './drama.js';
 import { getVideoGenerators } from './video-generation.js';
 
 /**
@@ -560,6 +560,31 @@ export function sceneSequence(graph: Graph, scene: NodeInstance): SequenceItem[]
   });
 }
 
+/** The shot before this one in its scene (the first scene it's in). */
+function shotBefore(graph: Graph, shot: NodeInstance): NodeInstance | undefined {
+  for (const sc of graph.nodes.values()) {
+    if (sc.type !== D2.scene) continue;
+    const list = refsOf(graph, sc, 'shots');
+    const i = list.findIndex((x) => x.id === shot.id);
+    if (i >= 0) return i > 0 ? list[i - 1] : undefined;
+  }
+  return undefined;
+}
+/** The stamp of the clip a shot carries on from (set each time that shot gets a new clip). */
+const clipBefore = (graph: Graph, shot: NodeInstance) => Number(shotBefore(graph, shot)?.params.clipAt) || undefined;
+/**
+ * Why a shot's clip is out of date: it carries on from the shot before, whose clip changed after
+ * this one was made (so it no longer starts where that one ends).
+ */
+export function clipOutOfDate(graph: Graph, shot: NodeInstance): string | undefined {
+  const p = shot.params;
+  if (!p.continues || !(p.clipUrl || p.lastFrame)) return undefined;
+  const at = clipBefore(graph, shot);
+  if (!at || p.clipFrom === at) return undefined;
+  const before = shotBefore(graph, shot)!;
+  return `Out of date: ${nodeTitle(graph, before)} has a new clip since. Remake this one to start where it ends.`;
+}
+
 const shotNode = defineNode({
   type: D2.shot,
   title: 'Shot',
@@ -600,6 +625,9 @@ const shotNode = defineNode({
             card: (q: Record<string, unknown>) => !!(q.lastFrame || q.clipUrl || q.clipJob),
             // With a clip, the card shows it big (first frame, ▶ to play), with where and who.
             compact: true,
+            // Carrying on from the shot before: which clip of it, and whether that has changed since.
+            from: (node: NodeInstance, graph: Graph) => clipBefore(graph, node),
+            stale: (node: NodeInstance, graph: Graph) => clipOutOfDate(graph, node),
             // Who's in the shot, with their fixed voices (🎙 Fix voices).
             cast: (node: NodeInstance, graph: Graph) =>
               refsOf(graph, node, 'characters').map((c) => ({
@@ -622,6 +650,8 @@ const sceneNode = defineNode({
   editOnCard: false, // for looking; ✎ Edit opens its sheet
   // ▶ Preview: its shots in order, clips crossfading (stills for shots without one).
   cardActions: [
+    // 🎬 Make the scene: its shots' clips in order, each carrying on from the one before's new last frame.
+    { label: '🎬 Make', param: 'makeClips', title: '🎬 Make the scene', when: () => getVideoGenerators().length > 0 },
     { label: '▶ Preview', run: (scene: NodeInstance, graph: Graph) => playSequence(sceneSequence(graph, scene), { title: `Preview: ${nodeTitle(graph, scene)}` }) },
     // ⬇ Save video: the same preview, recorded as it plays into one file (where the browser can record).
     {
@@ -646,6 +676,22 @@ const sceneNode = defineNode({
     text('description', 'description', 'What happens'),
     wardrobe('What each character wears in this scene, for all its shots (a shot can still change it).'),
     sheetOnly(images('storyboard', 'storyboard')),
+    sheetOnly({
+      name: 'makeClips',
+      label: 'clips',
+      kind: 'scene-clips',
+      default: null,
+      shots: (scene: NodeInstance, graph: Graph): SceneShot[] =>
+        refsOf(graph, scene, 'shots').map((shot, i) => ({
+          id: shot.id,
+          label: nodeTitle(graph, shot),
+          continues: !!shot.params.continues && i > 0,
+          hasClip: !!(shot.params.clipUrl || shot.params.lastFrame),
+          stale: clipOutOfDate(graph, shot),
+          suggest: () => shotClipSuggestion(toDrama(graph), shot.id),
+          from: () => clipBefore(graph, shot),
+        })),
+    }),
   ],
 });
 
@@ -1044,7 +1090,7 @@ const nodes: NodeType[] = [characterNode, propNode, locationNode, shotNode, scen
 export const drama2Pack = definePack({
   id: 'nodemap/drama2',
   title: 'Drama boards',
-  paramKinds: [imagesParam, clipFrameParam, viewsParam, audioParam, voicePickParam, refParam, refsParam, wardrobeParam],
+  paramKinds: [imagesParam, clipFrameParam, viewsParam, audioParam, voicePickParam, sceneClipsParam, refParam, refsParam, wardrobeParam],
   nodes,
   css: (dramaPack.css ?? '') + css,
 });
