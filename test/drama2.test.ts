@@ -469,22 +469,19 @@ describe('Editor views', () => {
     card.querySelector<HTMLButtonElement>('.nm-card-details')!.click();
     expect(document.querySelector('.nm-card')!.textContent).toMatch(/Seedance shot/);
     editor.hideDetails?.();
-    // Other cards edit in place, without the button.
+    // Every card is the same: look-only, ✎ Edit (and ⓘ Details for its info card).
     await editor.setView('cast');
-    expect(el.querySelector('.nm-node[data-id="maya"] .nm-card-edit')).toBeNull();
+    const maya = el.querySelector<HTMLElement>('.nm-node[data-id="maya"]')!;
+    expect(maya.classList.contains('nm-summary')).toBe(true);
+    expect([...maya.querySelectorAll('.nm-card-row button')].map((b) => b.textContent)).toEqual(['ⓘ Details', '✎ Edit']);
     editor.destroy();
   });
 
   it('jumps to a linked node in its view, and back', async () => {
     const { el, editor } = mount();
     await editor.setView('shots');
-    // A shot card is for looking: its chips don't jump (a tap opens its sheet)…
-    el.querySelector<HTMLButtonElement>('.nm-node[data-id="s1a"] [data-nm-open="hall"]')!.click();
-    expect(editor.currentView).toBe('shots');
-    // …its Edit sheet's do.
-    editor.openNodeEditor('s1a');
-    await new Promise((r) => setTimeout(r, 360)); // the sheet's guard against the opening tap
-    const chip = document.querySelector<HTMLButtonElement>('.nm-edit [data-nm-open="hall"]')!;
+    // Chips on a card (look-only or not) jump to what they name.
+    const chip = el.querySelector<HTMLButtonElement>('.nm-node[data-id="s1a"] [data-nm-open="hall"]')!;
     expect(chip.textContent).toBe('School hall');
     chip.click();
     await new Promise((r) => setTimeout(r, 30));

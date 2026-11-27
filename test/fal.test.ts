@@ -419,7 +419,7 @@ describe('🎬 Generate clip on a shot', () => {
     expect(sheet.querySelector('.dr-gen-card')).toBeNull(); // not again inside the sheet
     editor.closePalette();
     await editor.setView('cast');
-    el.querySelector<HTMLButtonElement>('.nm-node[data-id="theo"] .nm-card-action')!.click();
+    el.querySelector<HTMLButtonElement>('.nm-node[data-id="theo"] [data-param="images"] .dr-gen-card')!.click();
     sheet = [...document.querySelectorAll<HTMLElement>('.nm-field-sheet')].pop()!;
     expect(sheet.getAttribute('aria-label')).toBe('✨ Picture · Theo');
     expect(sheet.querySelector('.dr-gen-panel')).not.toBeNull();

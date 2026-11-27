@@ -2,7 +2,6 @@ import { defineNode, definePack, type GraphEngine } from '../core/registry.js';
 import { Graph } from '../core/graph.js';
 import type { GraphJSON, NodeInstance, NodeResult, NodeType, ParamKind } from '../core/types.js';
 import { DRAMA_DETAILS, GENERATE_EVENT, viewsParam, SHOT_CLIP_PARAMS, clipFrameParam, dramaImagePrompt, shotClipSuggestion, FRAMINGS, MOVES, TIMES, appearances, dramaEngine, dramaPack, dramaView, imagesParam, sceneInfo, episodeInfo } from './drama.js';
-import { getImageGenerators } from './image-generation.js';
 import { getVideoGenerators } from './video-generation.js';
 
 /**
@@ -406,10 +405,11 @@ const text = (name: string, label: string, placeholder = '', advanced = false, d
   advanced,
   ...(description ? { description } : {}),
 });
-const images = (name = 'images', label = 'images', advanced = false) => ({
+const images = (name = 'images', label = 'images', advanced = false, cardGenerate?: string) => ({
   name,
   label,
   kind: 'images',
+  ...(cardGenerate ? { cardGenerate } : {}),
   default: [],
   advanced,
   // ✨ Generate suggestions come from the drama model (same ids after toDrama).
@@ -424,8 +424,7 @@ const images = (name = 'images', label = 'images', advanced = false) => ({
  * description, who and where). Everything else is edited in the card's Edit sheet (tap it twice).
  */
 const sheetOnly = <T extends object>(p: T) => ({ ...p, card: false as const });
-/** ✨ Picture on a card: its pictures, with the generate panel, in a sheet (when a picture service is set up). */
-const pictureAction = { label: '✨ Picture', param: 'images', title: undefined, event: GENERATE_EVENT, when: () => getImageGenerators().length > 0 };
+
 /** Once a shot has a clip, its card is the clip: the rest leaves the card (it's in the Edit sheet). */
 const noClip = (q: Record<string, unknown>) => !(q.lastFrame || q.clipUrl);
 const untilClip = <T extends object>(p: T & { card?: (q: Record<string, unknown>) => boolean }) => ({ ...p, card: (q: Record<string, unknown>) => noClip(q) && (p.card ? p.card(q) : true) });
@@ -436,6 +435,7 @@ const wardrobe = (description: string) => sheetOnly({ name: 'wardrobe', label: '
 
 const characterNode = defineNode({
   type: D2.character,
+  editOnCard: false, // for looking; ✎ Edit opens its sheet
   title: 'Character',
   category: 'Cast',
   color: '#e8590c',
@@ -443,11 +443,10 @@ const characterNode = defineNode({
   flavor: 'source',
   width: 250,
   description: 'Someone in the story: name, description, appearance, pictures',
-  cardActions: [pictureAction],
   params: [
     text('description', 'description', 'Who they are'),
     sheetOnly(text('appearance', 'appearance', 'Age, build, hair, face, usual clothes', false, 'Repeated word for word in every video prompt they are in')),
-    images(),
+    images('images', 'images', false, '✨ Picture'),
     sheetOnly({ name: 'actor', label: 'played by', kind: 'text', default: '', placeholder: 'Cast member' }),
   ],
   onCreate: (n) => void (n.label ??= 'New character'),
@@ -458,6 +457,7 @@ const isOutfit = (n: NodeInstance | undefined) => n?.type === D2.prop && n.param
 
 const propNode = defineNode({
   type: D2.prop,
+  editOnCard: false, // for looking; ✎ Edit opens its sheet
   title: 'Prop',
   category: 'Props',
   color: '#ae3ec9',
@@ -465,7 +465,6 @@ const propNode = defineNode({
   flavor: 'source',
   width: 250,
   tags: ['outfit', 'costume', 'object', 'wardrobe', 'item'],
-  cardActions: [pictureAction],
   description: 'An object or an outfit that shots need',
   params: [
     sheetOnly({ name: 'kind', label: 'type', kind: 'select', options: PROP_TYPES, default: 'Object' }),
@@ -476,13 +475,14 @@ const propNode = defineNode({
       when: (p: Record<string, unknown>) => p.kind === 'Outfit',
     },
     text('description', 'description', 'What it is: material, colour, details'),
-    { ...images(), browse: true },
+    { ...images('images', 'images', false, '✨ Picture'), browse: true },
   ],
   onCreate: (n) => void (n.label ??= 'New prop'),
 });
 
 const locationNode = defineNode({
   type: D2.location,
+  editOnCard: false, // for looking; ✎ Edit opens its sheet
   title: 'Location',
   category: 'Places',
   color: '#2f9e44',
@@ -490,11 +490,10 @@ const locationNode = defineNode({
   flavor: 'source',
   width: 250,
   description: 'Where shots happen: name, setting, description, pictures',
-  cardActions: [pictureAction],
   params: [
     sheetOnly({ name: 'setting', label: 'setting', kind: 'select', options: ['INT', 'EXT'], default: 'INT' }),
     text('description', 'description', 'What it looks like'),
-    images(),
+    images('images', 'images', false, '✨ Picture'),
     // Its pictures as named views (from the wings, from the audience…): shots say which they use.
     sheetOnly({ name: 'views', label: 'views', kind: 'views', of: 'images', default: [], description: 'Name each picture’s viewpoint; a shot that uses it (⇄) says so in its prompt.' }),
   ],
@@ -551,7 +550,7 @@ const shotNode = defineNode({
     wardrobe('What each character wears in this shot. Leave it "from scene" to keep what the scene (or episode) says.'),
     untilClip(text('description', 'description', 'What we see and hear')),
     // ✨ Frame beside the frames: a concept picture of the shot, made in a sheet.
-    untilClip({ ...images('images', 'frames'), cardGenerate: '✨ Frame' }),
+    untilClip(images('images', 'frames', false, '✨ Frame')),
     // The clip field: 🎬 Generate clip reads the wired drama model (same ids).
     // On the card once a clip has been tried (one is ready, on its way, or failed: clipJob is then
     // null, not missing), so it shows, is collected, and says what happened.
@@ -575,6 +574,7 @@ const shotNode = defineNode({
 
 const sceneNode = defineNode({
   type: D2.scene,
+  editOnCard: false, // for looking; ✎ Edit opens its sheet
   title: 'Scene',
   category: 'Story',
   color: '#5f3dc4',
@@ -602,6 +602,7 @@ const look = [
 
 const episodeNode = defineNode({
   type: D2.episode,
+  editOnCard: false, // for looking; ✎ Edit opens its sheet
   title: 'Episode',
   category: 'Story',
   color: '#c2255c',
@@ -955,13 +956,17 @@ const css = `
 .nm-node.nm-summary [data-param="location"].dr2-refs::before, .nm-node.nm-summary [data-param="location"] .dr2-refs::before { content: '⌂'; }
 .nm-node.nm-summary [data-param="characters"].dr2-refs::before, .nm-node.nm-summary [data-param="characters"] .dr2-refs::before { content: '☺'; }
 .nm-node.nm-summary [data-param="props"].dr2-refs::before, .nm-node.nm-summary [data-param="props"] .dr2-refs::before { content: '✦'; }
+.nm-node.nm-summary [data-param="shots"].dr2-refs::before { content: '▣'; }
+.nm-node.nm-summary [data-param="scenes"].dr2-refs::before { content: '❏'; }
+.nm-node.nm-summary [data-param="wornBy"].dr2-refs::before { content: '☺'; }
 .nm-node.nm-summary .dr2-chip { border-color: transparent; background: color-mix(in srgb, var(--_accent) 7%, var(--_node)); }
 .nm-node.nm-summary .dr2-chip button { padding: 3px 8px; font-size: 12px; }
 .nm-node.nm-summary .nm-field textarea { font-size: 12px; color: var(--_muted); line-height: 1.4; min-height: 0; padding-block: 2px; field-sizing: content; height: auto; max-height: 2.9em; }
-.nm-node[data-type="drama2/shot"] .nm-field { padding-block: 1px; }
-.nm-node[data-type="drama2/shot"] .nm-field textarea { min-height: 0; height: 2.9em; max-height: 2.9em; resize: none; }
-.nm-node[data-type="drama2/shot"] .dr-thumb { width: 48px; height: 32px; }
-.nm-node[data-type="drama2/shot"] .dr-add { min-width: 32px; height: 32px; padding: 0 8px; }
+.nm-node.nm-summary .nm-field { padding-block: 1px; }
+.nm-node.nm-summary .nm-field textarea { resize: none; }
+.nm-node.nm-summary .dr-thumb { width: 48px; height: 32px; }
+.nm-node.nm-summary .dr-add { min-width: 32px; height: 32px; padding: 0 8px; }
+.nm-node.nm-summary .dr-images { gap: 6px; } /* no room kept for the move arrows (hidden here) */
 .dr2-list ul { list-style: none; margin: 2px 0 4px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .dr2-list li button { all: unset; cursor: pointer; display: block; width: 100%; box-sizing: border-box; padding: 5px 8px; border-radius: 6px; color: var(--_accent); }
 .dr2-list li button:hover, .dr2-list li button:focus-visible { background: color-mix(in srgb, var(--_accent) 12%, transparent); }

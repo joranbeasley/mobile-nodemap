@@ -227,7 +227,8 @@ export const css = /* css */ `
 .nm-overview .nm-card-row { visibility: hidden; }
 .nm-card-row .nm-card-action { margin-right: auto; }
 .nm-card-row .nm-card-action + .nm-card-action { margin-right: 0; }
-.nm-node.nm-summary :is(input, select, textarea, button, label, summary, [data-nm-open]):not([data-nm-live]) { pointer-events: none !important; }
+/* Links to other cards (chips) still jump. */
+.nm-node.nm-summary :is(input, select, textarea, button, label, summary):not([data-nm-live], [data-nm-open]) { pointer-events: none !important; }
 .nm-node.nm-summary :is(textarea, input) { resize: none; caret-color: transparent; }
 .nm-toolbar { position: absolute; right: max(12px, env(safe-area-inset-right, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; gap: 6px; z-index: 4;
   background: var(--_node); border: 1px solid var(--_border); border-radius: 14px; padding: 5px; box-shadow: var(--_shadow); }

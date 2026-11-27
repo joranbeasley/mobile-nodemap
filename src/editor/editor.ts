@@ -1133,8 +1133,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
   /** Anything marked data-nm-open (a link in a node view, a reference chip) jumps to that node. */
   private onOpenLink = (e: Event): void => {
     const t = (e.target as Element | null)?.closest?.<HTMLElement>('[data-nm-open]');
-    // On a look-only card the whole card is one target (its Edit sheet).
-    if (!t || t.closest('.nm-summary')) return;
+    if (!t) return;
     e.preventDefault();
     e.stopPropagation();
     this.closePalette();
@@ -2847,8 +2846,7 @@ export class NodeEditor extends Emitter<EditorEvents> {
   private onDown(e: PointerEvent): void {
     let t = e.target as Element;
     // Links and expanders marked live work even before their node is selected.
-    if (!this.isOverview && t.closest?.('[data-nm-live]')) return;
-    if (!this.isOverview && t.closest?.('[data-nm-open]') && !t.closest('.nm-summary')) return;
+    if (!this.isOverview && t.closest?.('[data-nm-open], [data-nm-live]')) return;
     // In the overview a node is one big target: its fields and ports don't respond.
     const nodeOf = t.closest<HTMLElement>('.nm-node');
     // A node's fields only respond once it is selected (and never in the overview, nor on a
