@@ -1,3 +1,4 @@
+import type { VoiceTrack } from './voices.js';
 import { defineNode, definePack, type GraphEngine } from '../core/registry.js';
 import { Graph } from '../core/graph.js';
 import type { GraphJSON, NodeInstance, NodeResult, NodeType, ParamKind } from '../core/types.js';
@@ -554,6 +555,7 @@ export function sceneSequence(graph: Graph, scene: NodeInstance): SequenceItem[]
       text: `${label}\n${String(p.description ?? '')}`.trim(),
       seconds: Math.min(15, Math.max(1, seconds)),
       continues: !!p.continues,
+      ...(p.voiceTrack && typeof p.voiceTrack === 'object' ? { voices: p.voiceTrack as VoiceTrack } : {}),
     };
   });
 }
@@ -598,6 +600,13 @@ const shotNode = defineNode({
             card: (q: Record<string, unknown>) => !!(q.lastFrame || q.clipUrl || q.clipJob),
             // With a clip, the card shows it big (first frame, ▶ to play), with where and who.
             compact: true,
+            // Who's in the shot, with their fixed voices (🎙 Fix voices).
+            cast: (node: NodeInstance, graph: Graph) =>
+              refsOf(graph, node, 'characters').map((c) => ({
+                id: c.id,
+                name: nodeTitle(graph, c),
+                voice: { ...(c.params.voiceName ? { name: String(c.params.voiceName) } : {}), ...(c.params.voiceSample ? { sample: String(c.params.voiceSample) } : {}) },
+              })),
             summary: (node: NodeInstance, graph: Graph) =>
               [...refsOf(graph, node, 'location'), ...refsOf(graph, node, 'characters')].map((n) => nodeTitle(graph, n)).join(' · '),
           }

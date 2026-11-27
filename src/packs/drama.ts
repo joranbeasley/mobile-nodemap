@@ -4,6 +4,7 @@ import type { ChooseOptions, NodeInstance, NodeResult, NodeType, ParamKind, Port
 import { saveDramaFile, seedancePack, seedanceScript } from './drama-seedance.js';
 import { getImageGenerators, type ImageGenerator } from './image-generation.js';
 import { getVideoGenerators, type VideoGenerator, type VideoJob } from './video-generation.js';
+import { attachVoiceTrack, getVoiceTools, matchSpeakers, quotedLines, speakersOf, type Speaker, type VoiceTrack } from './voices.js';
 import { NM_OPEN_FIELD } from '../core/types.js';
 
 /** Work in progress on a picture or clip: what it's doing, the percent when the service says, and since when. */
@@ -258,7 +259,7 @@ export function confirmSpend(
  */
 export interface GenerationRecord {
   at: number;
-  kind: 'image' | 'clip';
+  kind: 'image' | 'clip' | 'voices';
   /** The node and field it was made for. */
   node: string;
   param: string;
@@ -349,6 +350,8 @@ export interface SequenceItem {
   seconds: number;
   /** Carries straight on from the one before: a cut, not a crossfade. */
   continues?: boolean;
+  /** Its fixed voices (🎙), played instead of the clip's own sound. */
+  voices?: VoiceTrack;
 }
 
 /**
@@ -403,6 +406,8 @@ export function playSequence(items: SequenceItem[], opts: { title?: string; fade
   let advancing = false;
   /** The clip showing now (none while a still shows): only its events move things on. */
   let active: HTMLVideoElement | null = null;
+  /** Stops the fixed voices of the clip showing. */
+  let unvoice: (() => void) | undefined;
   const current = () => vids[layer];
   const hideAll = (except?: HTMLElement) => {
     for (const v of vids) if (v !== except) ((v.style.opacity = '0'), v.pause());
@@ -422,10 +427,13 @@ export function playSequence(items: SequenceItem[], opts: { title?: string; fade
       layer = 1 - layer;
       const v = current();
       active = v;
+      unvoice?.();
+      unvoice = undefined;
       v.src = it.video;
+      if (it.voices?.voices.length) unvoice = attachVoiceTrack(v, it.voices, rec?.audio ?? {});
       if (it.image) v.poster = it.image;
       v.currentTime = 0;
-      v.muted = false;
+      v.muted = !!it.voices?.voices.length;
       v.style.opacity = '1';
       hideAll(v);
       if (!paused) void v.play()?.catch?.(() => undefined);
@@ -473,6 +481,7 @@ export function playSequence(items: SequenceItem[], opts: { title?: string; fade
   let shown = false;
   function done() {
     clearTimeout(timer);
+    unvoice?.();
     rec?.cancel();
     document.removeEventListener('keydown', onKey);
     document.removeEventListener('fullscreenchange', onFull);
@@ -631,6 +640,8 @@ export function playSequence(items: SequenceItem[], opts: { title?: string; fade
         for (const v of vids) v.pause();
       },
       cancel,
+      /** Fixed voices play through this, so they're recorded too. */
+      audio: ac && dest ? { ac, dest } : undefined,
     };
   }
 }
@@ -639,7 +650,7 @@ export function playSequence(items: SequenceItem[], opts: { title?: string; fade
 const readable = (u: string) => !/^https?:\/\//i.test(u) || (typeof location !== 'undefined' && u.startsWith(location.origin + '/'));
 
 /** Play a clip full screen, with sound (from a tap, so browsers allow the sound). */
-export function playClip(url: string, poster?: string): void {
+export function playClip(url: string, poster?: string, voices?: VoiceTrack): void {
   const box = document.createElement('div');
   box.className = 'dr-player';
   box.setAttribute('role', 'dialog');
@@ -653,11 +664,14 @@ export function playClip(url: string, poster?: string): void {
   close.style.cssText = 'position:absolute;top:max(12px,env(safe-area-inset-top));right:12px;width:44px;height:44px;border-radius:50%;border:0;background:rgba(255,255,255,.18);color:#fff;font:20px system-ui,sans-serif;cursor:pointer;';
   box.append(v, close);
   document.body.append(box);
+  // Fixed voices (🎙): they play instead of the clip's own sound.
+  const unvoice = voices?.voices.length ? attachVoiceTrack(v, voices) : undefined;
   let shown = false;
   const done = () => {
     document.removeEventListener('keydown', onKey);
     document.removeEventListener('fullscreenchange', onFull);
     v.pause();
+    unvoice?.();
     if (document.fullscreenElement === box) void document.exitFullscreen?.().catch(() => undefined);
     box.remove();
   };
@@ -966,7 +980,8 @@ export const clipFrameParam: ParamKind = {
         fig.classList.add('dr-clip-making');
         fig.append(pendingTile('dr-clip-tile dr-clip-over', busy));
       } else if (url) {
-        const play = button('▶', 'Play the clip full screen, with sound', () => playClip(url, poster || undefined), 'dr-clip-play');
+        const fixed = ps.voiceTrack as VoiceTrack | undefined;
+        const play = button('▶', 'Play the clip full screen, with sound', () => playClip(url, poster || undefined, fixed), 'dr-clip-play');
         play.dataset.nmLive = ''; // works on a look-only card
         fig.append(play);
       }
@@ -1044,6 +1059,14 @@ export const clipFrameParam: ParamKind = {
           e.setAttribute('aria-expanded', String(!!panel && panelKind === 'edit'));
           wrap.append(e);
         }
+        // 🎙 Fix voices: each speaker in their character's fixed voice (and play it).
+        if (typeof url === 'string' && url && getVoiceTools()) {
+          const fixed = ctx.graph.nodes.get(ctx.node.id)?.params.voiceTrack as VoiceTrack | undefined;
+          const vb = panel && panelKind === 'voices' ? button('✕ Close', 'Close the voices panel', () => openVoices()) : button(fixed?.voices.length ? '🎙 Voices fixed ✓' : '🎙 Fix voices', 'Change each speaker to their character’s fixed voice', () => openVoices());
+          vb.setAttribute('aria-expanded', String(!!panel && panelKind === 'voices'));
+          wrap.append(vb);
+          if (fixed?.voices.length) wrap.append(button('▶ With fixed voices', 'Play the clip with the fixed voices', () => playClip(url, undefined, fixed)));
+        }
       }
       wrap.append(status);
       if (panel) wrap.append(panel);
@@ -1057,7 +1080,7 @@ export const clipFrameParam: ParamKind = {
      */
     const openEdit = () => {
       if (panel) {
-        const was = panelKind;
+        const was = panelKind as string;
         abort?.abort();
         panel = undefined;
         if (was === 'edit') return draw();
@@ -1229,6 +1252,176 @@ export const clipFrameParam: ParamKind = {
       if (globalThis.matchMedia?.('(pointer: fine)').matches) say.focus({ preventScroll: true });
     };
 
+    /**
+     * 🎙 Fix voices: separate the clip's voices from the rest, find who speaks when, match the
+     * speakers to the shot's characters (from the lines quoted in its description; you confirm),
+     * then change each to that character's fixed voice. The result plays with the clip.
+     */
+    const openVoices = () => {
+      if (panel) {
+        const was = panelKind as string;
+        abort?.abort();
+        panel = undefined;
+        if (was === 'voices') return draw();
+      }
+      panelKind = 'voices';
+      const tools = getVoiceTools();
+      const url = ctx.graph.nodes.get(ctx.node.id)?.params.clipUrl;
+      if (!tools || typeof url !== 'string' || !url) return;
+      const ps = ctx.graph.nodes.get(ctx.node.id)!.params;
+      const seconds = Number(ps.clipSeconds) || Number(ps.duration) || 5;
+      type Cast = { id: string; name: string; voice: { name?: string; sample?: string } };
+      let cast: Cast[] = [];
+      try {
+        cast = (ctx.param as { cast?: (node: NodeInstance, graph: Graph) => Cast[] }).cast?.(ctx.node, ctx.graph) ?? [];
+      } catch {
+        cast = [];
+      }
+      const el = (tag: string, attrs: Record<string, string> = {}, text = '') => {
+        const x = document.createElement(tag);
+        for (const [k, v] of Object.entries(attrs)) x.setAttribute(k, v);
+        if (text) x.textContent = text;
+        return x;
+      };
+      const money = (e?: { amount: number; unit: string }) => (e ? (e.unit === 'USD' ? `$${e.amount.toFixed(2)}` : `${e.amount} credits`) : '');
+      const box = el('div', { class: 'dr-gen-panel dr-clip-panel dr-voices-panel', role: 'group', 'aria-label': 'Fix voices' });
+      const st = el('div', { class: 'dr-gen-status', role: 'status' });
+      const list = el('div', { class: 'dr-voices' });
+      const fixed = ps.voiceTrack as VoiceTrack | undefined;
+      const intro = el('small', { class: 'dr-gen-refs-note' }, 'Listens to the clip, finds who says what, and changes each speaker to their character’s fixed voice (set on their card), keeping the timing so the lips still match.');
+      const listen = el('button', { type: 'button', class: 'dr-gen-go' }, `👂 Listen for who speaks · about ${money(tools.estimate?.(seconds, 0)) || 'a few cents'}`) as HTMLButtonElement;
+      const row = el('div', { class: 'dr-gen-row' });
+      row.append(listen);
+      if (fixed?.voices.length) {
+        const remove = el('button', { type: 'button', class: 'dr-gen-cancel' }, 'Remove the fixed voices') as HTMLButtonElement;
+        remove.addEventListener('click', () => {
+          ctx.graph.setParam(ctx.node.id, 'voiceTrack', null);
+          panel = undefined;
+          draw();
+        });
+        row.append(remove);
+      }
+      let parts: { vocals: string; background: string[] } | undefined;
+      let speakers: Speaker[] = [];
+      const picks: Record<string, string> = {};
+      const when = (segs: [number, number][]) => segs.map(([a, b]) => `${a.toFixed(1)}–${b.toFixed(1)} s`).join(', ');
+      const voiceOf = (id: string) => cast.find((c) => c.id === id)?.voice ?? {};
+      const voiceLabel = (id: string) => {
+        const v = voiceOf(id);
+        return v.sample ? 'their own recording' : v.name ? `${v.name} (fixed voice)` : '';
+      };
+      const go = el('button', { type: 'button', class: 'dr-gen-go' }, '🎙 Change the voices') as HTMLButtonElement;
+      const showSpeakers = () => {
+        list.replaceChildren();
+        for (const sp of speakers) {
+          const item = el('div', { class: 'dr-voice' });
+          const sel = el('select', { 'aria-label': `Who is ${sp.id}` }) as HTMLSelectElement;
+          sel.append(Object.assign(document.createElement('option'), { value: '', textContent: 'Leave as it is' }));
+          for (const c of cast) sel.append(Object.assign(document.createElement('option'), { value: c.id, textContent: c.name }));
+          sel.value = picks[sp.id] ?? '';
+          const note = el('small', {});
+          const say = () => {
+            const id = sel.value;
+            note.textContent = !id ? 'Stays as generated.' : voiceLabel(id) ? `→ ${voiceLabel(id)}` : `${cast.find((c) => c.id === id)?.name} has no fixed voice: set one on their card first.`;
+            note.className = id && !voiceLabel(id) ? 'dr-voice-warn' : '';
+          };
+          sel.addEventListener('change', () => ((picks[sp.id] = sel.value), say(), fit()));
+          say();
+          item.append(el('div', { class: 'dr-voice-text' }, `“${sp.text}”`), el('small', {}, `${sp.id.replace(/_/g, ' ')} · ${when(sp.segments)}`), sel, note);
+          list.append(item);
+        }
+        fit();
+      };
+      const fit = () => {
+        const n = speakers.filter((sp) => picks[sp.id] && voiceLabel(picks[sp.id])).length;
+        go.disabled = !n;
+        go.textContent = n ? `🎙 Change ${n} voice${n > 1 ? 's' : ''} · about ${money(tools.estimate?.(seconds, n)) || '?'}` : '🎙 Change the voices';
+      };
+      listen.addEventListener('click', async () => {
+        if (tools.key && !tools.key.get()) return void (st.textContent = `Add your ${tools.key.label} first (in 🎬 Generate clip).`);
+        abort = new AbortController();
+        listen.disabled = true;
+        try {
+          parts = await tools.separate(url, { signal: abort.signal, onProgress: (t) => (st.textContent = t) });
+          const words = await tools.transcribe(parts.vocals, { signal: abort.signal, onProgress: (t) => (st.textContent = t) });
+          speakers = speakersOf(words);
+          if (!speakers.length) {
+            st.textContent = 'No one speaks in this clip.';
+            return;
+          }
+          const lines = quotedLines(String(ps.description ?? ''), cast);
+          Object.assign(picks, matchSpeakers(speakers, lines, cast.map((c) => c.id)));
+          st.textContent = `${speakers.length} speaker${speakers.length > 1 ? 's' : ''}. Check who is who, then change the voices.`;
+          showSpeakers();
+          row.replaceChildren(go);
+        } catch (err) {
+          if ((err as Error).name !== 'AbortError') st.textContent = (err as Error).message || 'Something went wrong';
+          listen.disabled = false;
+        }
+      });
+      go.addEventListener('click', async () => {
+        if (!parts) return;
+        const todo = speakers.filter((sp) => picks[sp.id] && voiceLabel(picks[sp.id]));
+        const e = tools.estimate?.(seconds, todo.length);
+        if (!(await confirmSpend(go, tools.name, Promise.resolve(e && { amount: e.amount, unit: e.unit }), undefined))) return;
+        abort = new AbortController();
+        go.disabled = true;
+        making = { text: 'Changing the voices…', since: Date.now() };
+        share();
+        draw();
+        try {
+          // One change per character (a character heard as two speakers is changed once).
+          const byChar = new Map<string, [number, number][]>();
+          for (const sp of todo) byChar.set(picks[sp.id], [...(byChar.get(picks[sp.id]) ?? []), ...sp.segments]);
+          const changed = await Promise.all(
+            [...byChar].map(async ([character, segments]) => ({ character, segments, url: await tools.convert(parts!.vocals, voiceOf(character), { signal: abort!.signal, onProgress: (t) => (st.textContent = t) }) })),
+          );
+          // Kept where the host keeps clips (service links expire).
+          const keepOne = async (u: string) => (clipKeeper ? await clipKeeper(u, { shotId: ctx.node.id }).catch(() => u) : u);
+          const kept = (s2: string) => keepOne(s2);
+          const left = speakers.filter((sp) => !todo.includes(sp)).flatMap((sp) => sp.segments);
+          const track: VoiceTrack = {
+            at: Date.now(),
+            background: await Promise.all(parts.background.map(kept)),
+            voices: await Promise.all(changed.map(async (c) => ({ ...c, url: await kept(c.url) }))),
+            ...(left.length ? { vocals: await kept(parts.vocals), kept: left } : {}),
+          };
+          ctx.graph.setParam(ctx.node.id, 'voiceTrack', track);
+          logGeneration({
+            at: Date.now(),
+            kind: 'voices',
+            node: ctx.node.id,
+            param: ctx.param.name,
+            service: tools.name,
+            prompt: todo.map((sp) => `“${sp.text}” → ${cast.find((c) => c.id === picks[sp.id])?.name} (${voiceLabel(picks[sp.id])})`).join('\n'),
+            references: [],
+            settings: { from: linkOnly(url), voices: byChar.size },
+            result: track.voices.map((v) => v.url),
+            ...(e ? { cost: `about ${money(e)}` } : {}),
+          });
+          status.textContent = 'Voices fixed: ▶ plays them (the scene preview and saved videos too).';
+          panel = undefined;
+        } catch (err) {
+          if ((err as Error).name !== 'AbortError') st.textContent = (err as Error).message || 'Something went wrong';
+          go.disabled = false;
+        } finally {
+          making = undefined;
+          share();
+          if (wrap.isConnected) draw();
+        }
+      });
+      const missing = cast.filter((c) => !c.voice.name && !c.voice.sample).map((c) => c.name);
+      box.append(
+        intro,
+        ...(missing.length ? [el('small', { class: 'dr-voice-warn' }, `No fixed voice yet for ${missing.join(', ')}: set one on their card (✎ Edit → fixed voice, or their own recording).`)] : []),
+        list,
+        row,
+        st,
+      );
+      panel = box;
+      draw();
+    };
+
     // A clip being generated is kept on the shot (clipJob) until it's collected, so a closed
     // page, a sleeping phone or another device can still pick it up.
     const jobOf = (): VideoJob | undefined => {
@@ -1319,7 +1512,7 @@ export const clipFrameParam: ParamKind = {
     // 🎬 Generate clip: the shot's own Seedance prompt and pictures, sent to a video service.
     let panel: HTMLElement | undefined;
     /** Which panel is open: 🎬 a new clip, or ✏️ a change to this one. */
-    let panelKind: 'gen' | 'edit' = 'gen';
+    let panelKind: 'gen' | 'edit' | 'voices' = 'gen';
     /** The clip being made, shown as a placeholder in the field. */
     let making: Pending | undefined;
     const progress = (text: string, percent?: number) => {
@@ -3245,6 +3438,11 @@ const css = `
 .dr-clip small { flex-basis: 100%; color: var(--_muted); font-size: 11px; }
 .dr-clip small:empty { display: none; }
 .dr-clip-panel { flex-basis: 100%; }
+.dr-voices { display: flex; flex-direction: column; gap: 8px; }
+.dr-voice { display: flex; flex-direction: column; gap: 3px; padding: 8px; border: 1px solid var(--_border); border-radius: 8px; background: var(--_node); }
+.dr-voice-text { font-size: 13px; color: var(--_text); }
+.dr-voice small { color: var(--_muted); }
+.dr-voice-warn { color: #b42318 !important; }
 .dr-audio { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .dr-audio audio { max-width: 100%; height: 36px; }
 .dr-history { flex-basis: 100%; font-size: 13px; color: var(--_text); }

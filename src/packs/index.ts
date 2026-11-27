@@ -11,5 +11,6 @@ export { drama2Pack, drama2Engine, drama2View, drama2Lists, toDrama, fromDrama, 
 export type { Drama2List, Drama2Link } from './drama2.js';
 export { setImageGenerator, setImageGenerators, getImageGenerator, getImageGenerators, meshyImageGenerator, MESHY_IMAGE_MODELS } from './image-generation.js';
 export { setVideoGenerators, getVideoGenerators, type VideoGenerator, type VideoRequest, type VideoResult, type VideoModel, type VideoEstimate, type VideoJob, type VideoEditRequest, type VideoEditModel } from './video-generation.js';
-export { falVideoGenerator, falImageGenerator, FAL_VIDEO_MODELS, FAL_VIDEO_EDIT_MODELS, FAL_IMAGE_MODELS, FAL_PRICE_BASIS, type FalOptions } from './fal.js';
+export { falVideoGenerator, falImageGenerator, falVoiceTools, FAL_VIDEO_MODELS, FAL_VIDEO_EDIT_MODELS, FAL_IMAGE_MODELS, FAL_PRICE_BASIS, type FalOptions } from './fal.js';
 export type { ImageGenerator, ImageRequest, ImageResult } from './image-generation.js';
+export { setVoiceTools, getVoiceTools, speakersOf, quotedLines, matchSpeakers, attachVoiceTrack, type VoiceTools, type VoiceTrack, type SpokenWord, type Speaker, type TargetVoice } from './voices.js';

@@ -9,6 +9,7 @@
  *
  * Model inputs follow the types fal publishes in @fal-ai/client (types/endpoints.d.ts).
  */
+import type { VoiceTools } from './voices.js';
 import type { ImageGenerator } from './image-generation.js';
 import type { VideoGenerator, VideoJob, VideoModel, VideoRequest } from './video-generation.js';
 
@@ -503,6 +504,59 @@ export function falImageGenerator(opts: FalOptions & { model?: string } = {}): I
       const images = ((out?.images ?? []) as { url?: string }[]).map((i) => i.url).filter((u): u is string => !!u);
       if (!images.length) throw new Error('fal returned no picture');
       return { images };
+    },
+  };
+}
+
+/**
+ * 🎙 Fix voices through fal: Demucs splits a clip's sound into the voices and the rest; ElevenLabs
+ * transcribes the voices with who speaks when; ElevenLabs' voice changer (a ready-made voice) or
+ * Chatterbox (an actor's own recording) changes them, keeping the timing. fal's listed prices.
+ */
+export function falVoiceTools(opts: FalOptions = {}): VoiceTools {
+  const fal = falClient(opts);
+  const run = async (endpoint: string, input: Record<string, unknown>, o: { signal?: AbortSignal; onProgress?: (s: string) => void } = {}) => {
+    const job = await fal.submit(endpoint, input, o.signal);
+    return (await fal.wait(job, o.signal, o.onProgress)) as Record<string, any>;
+  };
+  const url = (f: unknown) => (f && typeof f === 'object' && typeof (f as { url?: unknown }).url === 'string' ? (f as { url: string }).url : undefined);
+  return {
+    id: 'fal',
+    name: 'fal',
+    key: { help: 'From fal.ai → Dashboard → Keys. Kept in this browser only and sent only to fal. Billed by fal.', ...fal.key },
+    async separate(media, o = {}) {
+      o.onProgress?.('Sending the clip’s sound to fal…');
+      const src = await fal.fileUrl(media, o.signal);
+      o.onProgress?.('Separating the voices from the music and effects…');
+      const out = await run('fal-ai/demucs', { audio_url: src, model: 'htdemucs', stems: ['vocals', 'drums', 'bass', 'other'], output_format: 'mp3' }, o);
+      const vocals = url(out.vocals);
+      if (!vocals) throw new Error('fal found no voices in this clip');
+      return { vocals, background: ['drums', 'bass', 'other'].map((k) => url(out[k])).filter((x): x is string => !!x) };
+    },
+    async transcribe(audio, o = {}) {
+      o.onProgress?.('Listening for who says what…');
+      const out = await run('fal-ai/elevenlabs/speech-to-text', { audio_url: audio, diarize: true, tag_audio_events: false }, o);
+      const words = Array.isArray(out.words) ? (out.words as { type?: string; text: string; start: number; end: number; speaker_id?: string }[]) : [];
+      return words.filter((w) => (w.type ?? 'word') === 'word' && w.text?.trim()).map((w) => ({ text: w.text.trim(), start: w.start, end: w.end, ...(w.speaker_id ? { speaker: w.speaker_id } : {}) }));
+    },
+    async convert(audio, to, o = {}) {
+      o.onProgress?.(`Changing the voice${to.name ? ` to ${to.name}` : ''}…`);
+      if (to.sample) {
+        const target = await fal.fileUrl(to.sample, o.signal);
+        const out = await run('fal-ai/chatterbox/speech-to-speech', { source_audio_url: audio, target_voice_audio_url: target }, o);
+        const u = url(out.audio);
+        if (!u) throw new Error('fal returned no audio');
+        return u;
+      }
+      const out = await run('fal-ai/elevenlabs/voice-changer', { audio_url: audio, voice: to.name ?? 'Rachel', model_id: 'eleven_multilingual_sts_v2' }, o);
+      const u = url(out.audio);
+      if (!u) throw new Error('fal returned no audio');
+      return u;
+    },
+    // Demucs $0.0007/s, transcription $0.03/min, the voice changer $0.30/min per voice changed.
+    estimate(seconds, voices) {
+      const s = Math.max(1, seconds);
+      return { amount: Math.round((0.0007 * s + (0.03 * s) / 60 + ((0.3 * s) / 60) * Math.max(1, voices)) * 100) / 100, unit: 'USD', basis: FAL_PRICE_BASIS };
     },
   };
 }
