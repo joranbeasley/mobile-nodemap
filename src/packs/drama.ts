@@ -4,6 +4,7 @@ import type { ChooseOptions, NodeInstance, NodeResult, NodeType, ParamKind, Port
 import { saveDramaFile, seedancePack, seedanceScript } from './drama-seedance.js';
 import { getImageGenerators, type ImageGenerator } from './image-generation.js';
 import { getVideoGenerators, type VideoGenerator, type VideoJob } from './video-generation.js';
+import { NM_OPEN_FIELD } from '../core/types.js';
 
 /** Work in progress on a picture or clip: what it's doing, the percent when the service says, and since when. */
 interface Pending {
@@ -1314,6 +1315,22 @@ export const imagesParam: ParamKind = {
           wrap.append(g);
         }
       }
+      // On the board, a field can offer its own ✨ (e.g. ✨ Frame beside a shot's frames): it opens
+      // the field in a sheet with the generate panel, like the cards' ✨ / 🎬 buttons.
+      const cardLabel = (p as { cardGenerate?: string }).cardGenerate;
+      if (gen && cardLabel && ctx.place !== 'sheet' && list.length < max) {
+        const c = document.createElement('button');
+        c.type = 'button';
+        c.className = 'dr-gen-card';
+        c.dataset.nmLive = ''; // works on a look-only card
+        c.textContent = cardLabel;
+        c.setAttribute('aria-label', `${cardLabel}: generate with ${gen.name}`);
+        c.addEventListener('click', (e) => {
+          e.stopPropagation();
+          wrap.dispatchEvent(new CustomEvent(NM_OPEN_FIELD, { bubbles: true, detail: { node: ctx.node.id, param: ctx.param.name, title: cardLabel, event: GENERATE_EVENT } }));
+        });
+        wrap.append(c);
+      }
       // 🔍 (fields that allow it): search the person's existing pictures on the service.
       if (gen?.browse && p.browse && ctx.choose && list.length < max) {
         const s = document.createElement('button');
@@ -2246,6 +2263,10 @@ const css = `
 .dr-clip small { flex-basis: 100%; color: var(--_muted); font-size: 11px; }
 .dr-clip small:empty { display: none; }
 .dr-clip-panel { flex-basis: 100%; }
+.dr-gen-card { all: unset; box-sizing: border-box; align-self: center; padding: 5px 10px; border: 1px solid var(--_border); border-radius: 999px;
+  font: 600 12px/1.2 var(--_font); color: var(--_accent); background: var(--_node); cursor: pointer; white-space: nowrap; }
+.dr-gen-card:hover, .dr-gen-card:focus-visible { border-color: var(--_accent); }
+.nm-overview .dr-gen-card { visibility: hidden; }
 .dr-confirm { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 8px; border: 1px solid var(--_accent);
   background: color-mix(in srgb, var(--_accent) 8%, var(--_node)); }
 .dr-confirm-text { font: 500 13px/1.4 var(--_font); color: var(--_text); }

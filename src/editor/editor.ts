@@ -3,6 +3,7 @@ import { Graph, ConnectionError } from '../core/graph.js';
 import { History } from '../core/history.js';
 import { Registry } from '../core/registry.js';
 import type { BuiltinParamDef, ChooseOptions, Edge, NodeInstance, NodeResult, NodeType, ParamDef, ParamKind, PortDef, PortRef } from '../core/types.js';
+import { NM_OPEN_FIELD } from '../core/types.js';
 import type { Evaluator } from '../runtime/evaluator.js';
 import { formatValue } from '../runtime/stdlib.js';
 import { css, injectPackStyles, injectStyles } from './styles.js';
@@ -307,6 +308,15 @@ export class NodeEditor extends Emitter<EditorEvents> {
 
     this.root = container;
     container.classList.add('nm-root');
+    // A control on a card can ask for one of its node's params in a sheet of its own
+    // (e.g. ✨ Frame next to a shot's frames): dispatch NM_OPEN_FIELD with { node, param, title?, event? }.
+    container.addEventListener(NM_OPEN_FIELD, (e) => {
+      const d = (e as CustomEvent<{ node: string; param: string; title?: string; event?: string }>).detail;
+      if (d?.node && d.param) {
+        this.select({ node: d.node });
+        this.openFieldSheet(d.node, d.param, d.title, d.event);
+      }
+    });
     container.dataset.wires = this.wireStyle;
     container.tabIndex = container.tabIndex >= 0 ? container.tabIndex : 0;
     this.viewportEl = h('div', { class: 'nm-viewport' });

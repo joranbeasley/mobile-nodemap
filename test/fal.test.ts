@@ -409,6 +409,15 @@ describe('🎬 Generate clip on a shot', () => {
     expect(sheet.getAttribute('aria-label')).toBe('🎬 Clip · Shot 2 · Close-up');
     expect(sheet.querySelector('.dr-clip-panel')).not.toBeNull();
     editor.closePalette();
+    // ✨ Frame, beside the shot's frames: a concept picture, made in a sheet.
+    const frame = el.querySelector<HTMLButtonElement>('.nm-node[data-id="s1b"] [data-param="images"] .dr-gen-card')!;
+    expect(frame.textContent).toBe('✨ Frame');
+    frame.click();
+    sheet = [...document.querySelectorAll<HTMLElement>('.nm-field-sheet')].pop()!;
+    expect(sheet.getAttribute('aria-label')).toBe('✨ Frame · Shot 2 · Close-up');
+    expect(sheet.querySelector<HTMLTextAreaElement>('.dr-gen-panel textarea')!.value).toMatch(/^Storyboard frame/);
+    expect(sheet.querySelector('.dr-gen-card')).toBeNull(); // not again inside the sheet
+    editor.closePalette();
     await editor.setView('cast');
     el.querySelector<HTMLButtonElement>('.nm-node[data-id="theo"] .nm-card-action')!.click();
     sheet = [...document.querySelectorAll<HTMLElement>('.nm-field-sheet')].pop()!;

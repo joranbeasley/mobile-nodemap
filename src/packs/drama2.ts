@@ -544,7 +544,8 @@ const shotNode = defineNode({
     untilClip({ ...refs('props', 'props', D2.prop), create: true, chip: wearerPicker, only: (n: NodeInstance) => !isOutfit(n), card: (q: Record<string, unknown>) => Array.isArray(q.props) && q.props.length > 0 }),
     wardrobe('What each character wears in this shot. Leave it "from scene" to keep what the scene (or episode) says.'),
     untilClip(text('description', 'description', 'What we see and hear')),
-    untilClip(images('images', 'frames')),
+    // ✨ Frame beside the frames: a concept picture of the shot, made in a sheet.
+    untilClip({ ...images('images', 'frames'), cardGenerate: '✨ Frame' }),
     // The clip field: 🎬 Generate clip reads the wired drama model (same ids).
     // On the card once a clip has been tried (one is ready, on its way, or failed: clipJob is then
     // null, not missing), so it shows, is collected, and says what happened.

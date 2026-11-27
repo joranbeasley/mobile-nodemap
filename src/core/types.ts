@@ -107,6 +107,9 @@ export interface ParamControlContext {
   place?: 'card' | 'sheet';
 }
 
+/** The event a card's control dispatches (bubbling) to open one of its node's params in a sheet: `{ node, param, title?, event? }`. */
+export const NM_OPEN_FIELD = 'nm-open-field';
+
 export interface CardAction {
   label: string;
   /** The param it opens in a sheet. */
