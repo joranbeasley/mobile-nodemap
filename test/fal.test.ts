@@ -437,7 +437,7 @@ describe('🎬 clips that finish while the page is away', () => {
     // The card is now the clip (no job left on it).
     const field = onCard(el, 's1b', 'lastFrame');
     expect(field.querySelector('.dr-clip-play')).not.toBeNull();
-    expect(field.querySelector('.dr-clip-busy')).toBeNull();
+    expect(field.querySelector('.dr-clip-making')).toBeNull();
     globalThis.fetch = realFetch;
     editor.destroy();
   });
@@ -453,16 +453,24 @@ describe('🎬 clips that finish while the page is away', () => {
     g.setParam('s1b', 'clipJob', job);
     await editor.setView('shots');
     await tick(20);
-    const field = () => onCard(el, 's1b', 'lastFrame');
+    const card = () => onCard(el, 's1b', 'lastFrame');
     expect(g.nodes.get('s1b')!.params.clipJob).toEqual(job);
-    expect(field().querySelector('.dr-clip-job')!.textContent).toMatch(/^⏳ Generating on fake since/);
-    expect(field().textContent).toMatch(/Still generating on Fake/);
-    expect([...field().querySelectorAll('button')].some((b) => b.textContent === '🎬 Generate clip')).toBe(false); // one at a time
+    // The card says so, big: over a 16:9 box, with the service and the time so far, and what it last said.
+    const over = card().querySelector<HTMLElement>('.dr-clip-making .dr-pending.dr-clip-over')!;
+    expect(over.getAttribute('aria-label')).toBe('Generating on fake…');
+    expect(over.querySelector('.dr-pending-time')!.textContent).toMatch(/^\d+:\d\d$/);
+    expect(card().textContent).toMatch(/Still generating on Fake/);
+    // The Edit sheet has the details and Check now; one clip at a time.
+    await openSheet(editor, 's1b');
+    expect(inSheet('lastFrame').querySelector('.dr-clip-job')!.textContent).toMatch(/^⏳ Generating on fake since/);
+    expect([...inSheet('lastFrame').querySelectorAll('button')].some((b) => b.textContent === '🎬 Generate clip')).toBe(false);
     outcome = 'failed';
-    [...field().querySelectorAll('button')].find((b) => b.textContent === 'Check now')!.click();
+    [...inSheet('lastFrame').querySelectorAll('button')].find((b) => b.textContent === 'Check now')!.click();
     await tick(20);
     expect(g.nodes.get('s1b')!.params.clipJob).toBeNull();
-    expect(field().textContent).toMatch(/The clip didn't finish on Fake: Content policy/);
+    expect(inSheet('lastFrame').textContent).toMatch(/The clip didn't finish on Fake: Content policy/);
+    expect(card().querySelector('.dr-clip-making')).toBeNull();
+    editor.closePalette();
     editor.destroy();
   });
 });
@@ -524,11 +532,17 @@ describe('placeholders while generating', () => {
     expect(tile()!.getAttribute('aria-label')).toBe("In fal's queue (2 ahead)…");
     expect(tile()!.classList.contains('dr-indeterminate')).toBe(true); // fal gives no percent
     expect(tile()!.querySelector('.dr-pending-time')!.textContent).toMatch(/^0:0\d$/);
+    // The shot's card on the board says the same, big, as fal reports it.
+    const card = () => document.querySelector<HTMLElement>('.nm-node[data-id="s1b"] .dr-clip-card');
+    expect(card()!.classList.contains('dr-clip-making')).toBe(true);
+    expect(card()!.querySelector('.dr-clip-over')!.getAttribute('aria-label')).toBe("In fal's queue (2 ahead)…");
     finish({ videos: ['https://v/clip.mp4'] });
     await tick(20);
     expect(tile()).toBeNull();
     expect(g.nodes.get('s1b')!.params.clipUrl).toBe('https://v/clip.mp4');
+    expect(card()!.classList.contains('dr-clip-making')).toBe(false);
     globalThis.fetch = realFetch;
+    editor.closePalette();
     editor.destroy();
   });
 });

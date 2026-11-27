@@ -97,6 +97,13 @@ function referenceSwitch(r: Reference, ctx: { node: NodeInstance; graph: Graph; 
 
 /** Service links already offered to the keeper on this page. */
 const keepTried = new Set<string>();
+/**
+ * Clips being made from this page, by shot: what the service says, and the percent. The field
+ * that sent it updates it; the shot's card (another view of the same shot) shows it.
+ */
+const liveClips = new Map<string, Pending>();
+const CLIP_PROGRESS = 'dr-clip-progress';
+
 /** Clips whose first frame was already looked for on this page. */
 const posterTried = new Set<string>();
 
@@ -419,12 +426,17 @@ export const clipFrameParam: ParamKind = {
       if (poster) fig.append(Object.assign(document.createElement('img'), { src: poster, alt: '' }));
       const secs = Number(ps.clipSeconds);
       if (secs > 0) fig.append(Object.assign(document.createElement('span'), { className: 'dr-clip-len', textContent: `${Math.floor(secs / 60)}:${String(Math.round(secs % 60)).padStart(2, '0')}` }));
+      // Being made (a first clip or a newer one): over the picture, clearly, with the service's status and the time.
       const job = jobOf();
-      if (job || making) fig.append(Object.assign(document.createElement('span'), { className: 'dr-clip-busy', textContent: '⏳', title: `A new clip is being made on ${job?.service ?? 'the service'}` }));
-      if (url) fig.append(button('▶', 'Play the clip full screen, with sound', () => playClip(url, poster || undefined), 'dr-clip-play'));
+      const busy = making ?? liveClips.get(ctx.node.id) ?? (job ? { text: `Generating on ${job.service}…`, since: job.startedAt } : undefined);
+      if (busy) {
+        fig.classList.add('dr-clip-making');
+        fig.append(pendingTile('dr-clip-tile dr-clip-over', busy));
+      } else if (url) fig.append(button('▶', 'Play the clip full screen, with sound', () => playClip(url, poster || undefined), 'dr-clip-play'));
       wrap.append(fig);
       const line = (ctx.param as { summary?: (node: NodeInstance, graph: Graph) => string }).summary?.(ctx.node, ctx.graph);
       if (line) wrap.append(Object.assign(document.createElement('div'), { className: 'dr-clip-sum', textContent: line }));
+      wrap.append(status); // what the service said (still generating, failed…)
       // A clip from before first frames were kept: take it now, once per page (only clips this site serves can be read).
       const here = typeof location !== 'undefined' ? location.origin : '';
       if (url && !ps.clipPoster && !posterTried.has(url) && (!/^https?:\/\//i.test(url) || url.startsWith(here))) {
@@ -436,9 +448,20 @@ export const clipFrameParam: ParamKind = {
           .catch(() => undefined);
       }
     };
+    /** Tell the shot's other views (its card) how the clip this field is making is going. */
+    let shared: Pending | undefined;
+    const share = () => {
+      if (making === shared) return;
+      shared = making;
+      if (making) liveClips.set(ctx.node.id, making);
+      else liveClips.delete(ctx.node.id);
+      document.dispatchEvent(new CustomEvent(CLIP_PROGRESS, { detail: ctx.node.id }));
+    };
     const draw = () => {
+      share();
       const ps = ctx.graph.nodes.get(ctx.node.id)?.params ?? {};
-      if (ctx.place !== 'sheet' && (value || ps.clipUrl) && (ctx.param as { compact?: boolean }).compact) return drawCard();
+      const compact = (ctx.param as { compact?: boolean }).compact;
+      if (ctx.place !== 'sheet' && compact && (value || ps.clipUrl || jobOf() || making || liveClips.has(ctx.node.id))) return drawCard();
       wrap.classList.remove('dr-clip-compact');
       wrap.replaceChildren(input);
       if (value) {
@@ -531,6 +554,7 @@ export const clipFrameParam: ParamKind = {
       collecting.add(k);
       status.textContent = '';
       making = { text: 'Checking on the clip…', since: job.startedAt };
+      share();
       draw();
       try {
         const r = await gen.resume(job, { onProgress: (t, pc) => progress(t, pc) });
@@ -545,6 +569,7 @@ export const clipFrameParam: ParamKind = {
       } finally {
         collecting.delete(k);
         making = undefined;
+        share();
         if (wrap.isConnected) draw();
       }
     };
@@ -573,6 +598,7 @@ export const clipFrameParam: ParamKind = {
     const progress = (text: string, percent?: number) => {
       if (!making) return;
       making = { ...making, text, percent: percent ?? making.percent };
+      share();
       if (wrap.isConnected) draw();
     };
     let chosen: VideoGenerator | null = preferred('video', getVideoGenerators());
@@ -752,6 +778,7 @@ export const clipFrameParam: ParamKind = {
         let submitted = false;
         let jobKey = '';
         making = { text: `Asking ${gen.name}…`, since: Date.now() };
+        share();
         draw();
         try {
           // Pictures the service can read: drawings (SVG) and oversized pictures become JPEGs, as in ✨.
@@ -806,6 +833,7 @@ export const clipFrameParam: ParamKind = {
         } finally {
           if (jobKey) collecting.delete(jobKey);
           making = undefined;
+          share();
           if (wrap.isConnected) draw();
         }
       });
@@ -827,6 +855,12 @@ export const clipFrameParam: ParamKind = {
         if (!wrap.isConnected) return queueMicrotask(off);
         if (c.kind === 'node:params' && c.node.id === ctx.node.id) draw();
       });
+      // …and the progress of a clip being made for it elsewhere on the page (its Edit sheet).
+      const onProgress = (e: Event) => {
+        if (!wrap.isConnected) return document.removeEventListener(CLIP_PROGRESS, onProgress);
+        if ((e as CustomEvent).detail === ctx.node.id && !making) draw();
+      };
+      document.addEventListener(CLIP_PROGRESS, onProgress);
     }
     draw();
     return wrap;
@@ -2148,8 +2182,14 @@ const css = `
 .dr-clip.dr-clip-compact { display: block; }
 .dr-clip-card { position: relative; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: #111; }
 .dr-clip-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.dr-clip-len, .dr-clip-busy { position: absolute; bottom: 6px; right: 6px; font: 600 11px/1 var(--_font); color: #fff; background: rgba(0,0,0,.6); padding: 3px 6px; border-radius: 4px; }
-.dr-clip-busy { right: auto; left: 6px; }
+.dr-clip-len { position: absolute; bottom: 6px; right: 6px; font: 600 11px/1 var(--_font); color: #fff; background: rgba(0,0,0,.6); padding: 3px 6px; border-radius: 4px; }
+/* Being made: the picture dimmed under the status, the time and a moving bar; the frame pulses. */
+.dr-clip-card.dr-clip-making { outline: 2px solid var(--_accent); outline-offset: 2px; animation: dr-pulse 1.6s ease-in-out infinite; }
+.dr-clip-card .dr-pending.dr-clip-over { position: absolute; inset: 0; max-width: none; border: 0; border-radius: 0; background: rgba(12, 14, 24, .66); color: #fff; }
+.dr-clip-card .dr-pending.dr-clip-over .dr-pending-label { color: #fff; font-size: 13px; }
+.dr-clip-card .dr-pending.dr-clip-over .dr-pending-time { color: #fff; opacity: .8; }
+.dr-clip-card .dr-pending.dr-clip-over::before { font-size: 26px; }
+@keyframes dr-pulse { 50% { outline-color: color-mix(in srgb, var(--_accent) 30%, transparent); } }
 .dr-clip-play { all: unset; position: absolute; inset: 0; margin: auto; width: 56px; height: 56px; border-radius: 50%; background: rgba(0,0,0,.55); color: #fff;
   font-size: 22px; display: none; place-items: center; cursor: pointer; box-shadow: 0 2px 12px rgba(0,0,0,.4); }
 .nm-root:not(.nm-overview) .nm-node.nm-selected .dr-clip-play { display: grid; }
