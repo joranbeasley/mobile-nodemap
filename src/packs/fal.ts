@@ -30,10 +30,12 @@ export interface FalOptions {
 /** Seedance on fal: one model, three endpoints (text, first frame, reference pictures). */
 interface FalVideoModel extends VideoModel {
   endpoints: { text: string; image: string; reference: string };
+  /** fal's listed price, USD per second of video, by resolution (the same for all three endpoints). */
+  perSecond: Record<string, number>;
 }
 
 const SEEDANCE_ASPECTS = ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'];
-export const FAL_VIDEO_MODELS: FalVideoModel[] = [
+export const FAL_VIDEO_MODELS: FalVideoModel[] = (<Omit<FalVideoModel, 'aspects' | 'maxReferences' | 'firstFrame' | 'audio'>[]>[
   {
     id: 'seedance-2.0',
     label: 'Seedance 2.0',
@@ -42,6 +44,7 @@ export const FAL_VIDEO_MODELS: FalVideoModel[] = [
     minDuration: 4,
     maxDuration: 15,
     resolutions: ['480p', '720p', '1080p', '4k'],
+    perSecond: { '480p': 0.1406, '720p': 0.3024, '1080p': 0.7484, '4k': 1.5552 },
   },
   {
     id: 'seedance-2.0-fast',
@@ -51,6 +54,8 @@ export const FAL_VIDEO_MODELS: FalVideoModel[] = [
     minDuration: 4,
     maxDuration: 15,
     resolutions: ['480p', '720p'],
+    // fal lists 720p only; 480p from its token price ($0.0112 per 1,000 tokens) at Mini's 480p token count.
+    perSecond: { '480p': 0.1154, '720p': 0.2419 },
   },
   {
     id: 'seedance-2.0-mini',
@@ -60,6 +65,7 @@ export const FAL_VIDEO_MODELS: FalVideoModel[] = [
     minDuration: 4,
     maxDuration: 15,
     resolutions: ['480p', '720p'],
+    perSecond: { '480p': 0.0721, '720p': 0.1547 },
   },
   {
     id: 'seedance-2.5',
@@ -69,14 +75,18 @@ export const FAL_VIDEO_MODELS: FalVideoModel[] = [
     minDuration: 4,
     maxDuration: 30,
     resolutions: ['480p', '720p', '1080p'],
+    perSecond: { '480p': 0.2205, '720p': 0.473, '1080p': 1.164 },
   },
-].map((m) => ({ ...m, aspects: SEEDANCE_ASPECTS, maxReferences: 9, firstFrame: true, audio: true }));
+]).map((m) => ({ ...m, aspects: SEEDANCE_ASPECTS, maxReferences: 9, firstFrame: true, audio: true }));
+/** Where the prices come from (each model's https://fal.ai/models/<endpoint>/llms.txt, Nov 2026). They change: fal bills what it bills. */
+export const FAL_PRICE_BASIS = "fal's listed price";
 
 /** Nano Banana (Google's Gemini image models) on fal: `edit` takes reference pictures. */
 export const FAL_IMAGE_MODELS = [
-  { id: 'fal-ai/nano-banana-2', label: 'Nano Banana 2', edit: 'fal-ai/nano-banana-2/edit' },
-  { id: 'fal-ai/nano-banana-pro', label: 'Nano Banana Pro', edit: 'fal-ai/nano-banana-pro/edit' },
-  { id: 'fal-ai/nano-banana', label: 'Nano Banana', edit: 'fal-ai/nano-banana/edit' },
+  // fal's listed price per picture (at the default 1K size), the same with or without references.
+  { id: 'fal-ai/nano-banana-2', label: 'Nano Banana 2', edit: 'fal-ai/nano-banana-2/edit', perImage: 0.08 },
+  { id: 'fal-ai/nano-banana-pro', label: 'Nano Banana Pro', edit: 'fal-ai/nano-banana-pro/edit', perImage: 0.15 },
+  { id: 'fal-ai/nano-banana', label: 'Nano Banana', edit: 'fal-ai/nano-banana/edit', perImage: 0.0398 },
 ];
 const IMAGE_ASPECTS = ['21:9', '16:9', '3:2', '4:3', '5:4', '1:1', '4:5', '3:4', '2:3', '9:16'];
 
@@ -189,8 +199,16 @@ export function falVideoGenerator(opts: FalOptions & { model?: string } = {}): V
     id: 'fal',
     name: 'fal',
     site: 'https://fal.ai/models',
-    models: FAL_VIDEO_MODELS.map(({ endpoints, ...m }) => (void endpoints, m)),
+    models: FAL_VIDEO_MODELS.map(({ endpoints, perSecond, ...m }) => (void endpoints, void perSecond, m)),
     defaultModel: opts.model ?? 'seedance-2.0-fast',
+    // The price depends only on the model, resolution and length (not the prompt, pictures or sound).
+    estimate({ model, duration, resolution }) {
+      const m = FAL_VIDEO_MODELS.find((x) => x.id === (model ?? opts.model ?? 'seedance-2.0-fast'));
+      const rate = m && m.perSecond[nearest(m.resolutions, resolution, '720p')];
+      if (!m || rate == null) return undefined;
+      const seconds = Math.round(Math.min(m.maxDuration ?? 15, Math.max(m.minDuration ?? 4, duration ?? 5)));
+      return { amount: Math.round(rate * seconds * 100) / 100, unit: 'USD', basis: FAL_PRICE_BASIS };
+    },
     key: { help: 'From fal.ai → Dashboard → Keys. Kept in this browser only and sent only to fal. Billed by fal.', ...fal.key },
     async generate(req: VideoRequest) {
       const m = FAL_VIDEO_MODELS.find((x) => x.id === (req.model ?? opts.model)) ?? FAL_VIDEO_MODELS.find((x) => x.id === 'seedance-2.0-fast')!;
@@ -235,6 +253,10 @@ export function falImageGenerator(opts: FalOptions & { model?: string } = {}): I
     defaultModel: opts.model ?? 'fal-ai/nano-banana-2',
     maxReferences: 9,
     key: { help: 'From fal.ai → Dashboard → Keys. Kept in this browser only and sent only to fal. Billed by fal.', ...fal.key },
+    async estimate({ model } = {}) {
+      const m = FAL_IMAGE_MODELS.find((x) => x.id === (model ?? opts.model)) ?? FAL_IMAGE_MODELS[0];
+      return { credits: m.perImage, unit: 'USD', basis: FAL_PRICE_BASIS };
+    },
     async generate({ prompt, aspect, model, references, signal, onProgress }) {
       const m = FAL_IMAGE_MODELS.find((x) => x.id === (model ?? opts.model)) ?? FAL_IMAGE_MODELS[0];
       const refs = (references ?? []).filter(Boolean).slice(0, 9);

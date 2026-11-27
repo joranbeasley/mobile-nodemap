@@ -32,7 +32,10 @@ export interface ImageResult {
 
 /** What a picture will probably cost, and why we think so. */
 export interface ImageEstimate {
+  /** The amount, in `unit` (credits unless it says otherwise). */
   credits: number;
+  /** 'USD' for services billed in dollars (fal); credits otherwise. */
+  unit?: 'credits' | 'USD';
   /** e.g. "what your last one cost" */
   basis: string;
 }

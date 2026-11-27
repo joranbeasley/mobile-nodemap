@@ -338,13 +338,24 @@ export const clipFrameParam: ParamKind = {
         keep(res, m?.resolutions, '720p');
         audio.disabled = !m?.audio;
       };
-      model.addEventListener('change', fit);
+      // What it will cost: the model, resolution and length decide it (not the prompt).
+      const price = el('small', { class: 'dr-gen-cost', role: 'status' });
+      const money = (e: { amount: number; unit: string }) => (e.unit === 'USD' ? `$${e.amount.toFixed(2)}` : `${e.amount} credits`);
+      const quote = () => gen.estimate?.({ model: model.value, duration: Number(dur.value), resolution: res.value, aspect: aspect.value });
+      const showPrice = () => {
+        const e = quote();
+        price.textContent = e ? `About ${money(e)} for ${dur.value} s at ${res.value} (${e.basis})` : '';
+      };
+      model.addEventListener('change', () => (fit(), showPrice()));
+      for (const x of [dur, res, aspect]) x.addEventListener('change', showPrice);
+      dur.addEventListener('input', showPrice);
       fit();
+      showPrice();
       const sound = el('label', { class: 'dr-clip-sound' });
       sound.append(audio, ' sound');
       const secs = el('label', { class: 'dr-clip-dur' });
       secs.append(dur, ' s');
-      box.append(row(model, secs, aspect, res, sound), hint);
+      box.append(row(model, secs, aspect, res, sound), hint, price);
       const prompt = el('textarea', { rows: '6', 'aria-label': 'Clip prompt', placeholder: 'Describe the shot' }) as HTMLTextAreaElement;
       prompt.value = s?.prompt ?? '';
       box.append(prompt);
@@ -398,16 +409,18 @@ export const clipFrameParam: ParamKind = {
           });
           const clip = result.videos[0];
           if (!clip) throw new Error(`${gen.name} returned no clip`);
+          const e = quote();
+          const spent = result.cost ?? (e ? `about ${money(e)}` : '');
           ctx.graph.setParam(ctx.node.id, 'clipUrl', clip);
           // Keep its last frame, as if the clip had been added by hand.
           st.textContent = 'Taking the last frame…';
           try {
             value = await lastFrameOf(await (await fetch(clip, { signal: abort.signal })).blob());
             ctx.set(value);
-            status.textContent = `Clip ready${result.cost ? ` · ${result.cost}` : ''}. Its link may expire: download it to keep it.`;
+            status.textContent = `Clip ready${spent ? ` · ${spent}` : ''}. Its link may expire: download it to keep it.`;
           } catch (err) {
             if ((err as Error).name === 'AbortError') throw err;
-            status.textContent = 'Clip ready. Its last frame couldn’t be taken here: download it and add it with 🎞.';
+            status.textContent = `Clip ready${spent ? ` · ${spent}` : ''}. Its last frame couldn’t be taken here: download it and add it with 🎞.`;
           }
           panel = undefined;
           draw();
@@ -581,7 +594,11 @@ export const imagesParam: ParamKind = {
           if (ask !== costAsk) return;
           const label = gen.models?.find((x) => x.id === m)?.label ?? m ?? gen.name;
           cost.textContent = [
-            est ? `About ${est.credits} credit${est.credits === 1 ? '' : 's'} (${est.basis})` : `Cost with ${label} not known yet: it shows after the first one`,
+            est
+              ? est.unit === 'USD'
+                ? `About $${est.credits.toFixed(2)} (${est.basis})`
+                : `About ${est.credits} credit${est.credits === 1 ? '' : 's'} (${est.basis})`
+              : `Cost with ${label} not known yet: it shows after the first one`,
             bal != null ? `${bal.toLocaleString()} left` : '',
           ]
             .filter(Boolean)

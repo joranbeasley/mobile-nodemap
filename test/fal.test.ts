@@ -98,6 +98,15 @@ describe('fal video (Seedance)', () => {
     expect(fal.calls.some((c) => c.url === 'https://queue.fal.run/x/y/requests/req-1/status')).toBe(true);
   });
 
+  it('estimates from fal’s listed prices: model, resolution and length decide it', () => {
+    const gen = falVideoGenerator({ apiKey: 'k' });
+    expect(gen.estimate!({ model: 'seedance-2.0-mini', duration: 5, resolution: '480p' })).toEqual({ amount: 0.36, unit: 'USD', basis: "fal's listed price" });
+    expect(gen.estimate!({ model: 'seedance-2.0', duration: 7, resolution: '720p' })!.amount).toBe(2.12); // 7 × $0.3024
+    expect(gen.estimate!({ model: 'seedance-2.0-fast', duration: 10, resolution: '1080p' })!.amount).toBe(2.42); // Fast stops at 720p
+    expect(gen.estimate!({ model: 'seedance-2.5', duration: 40, resolution: '1080p' })!.amount).toBe(34.92); // 30 s at most
+    expect(gen.estimate!({ model: 'nope' })).toBeUndefined();
+  });
+
   it('explains failures', async () => {
     await expect(falVideoGenerator({ fetch: fakeFal({}).fetch }).generate({ prompt: 'x' })).rejects.toThrow('Add your fal API key first');
     const bad = (status: number, body: unknown) => falVideoGenerator({ apiKey: 'k', fetch: fakeFal({}, { fail: { status, body } }).fetch }).generate({ prompt: 'x' });
@@ -121,6 +130,12 @@ describe('fal pictures (Nano Banana)', () => {
     expect(b.url).toBe('https://queue.fal.run/fal-ai/nano-banana-pro/edit');
     expect(b.body).toMatchObject({ image_urls: ['https://cdn.test/theo.jpg'], aspect_ratio: '21:9' });
     expect(fal.calls.some((c) => c.url === 'https://queue.fal.run/fal-ai/nano-banana-pro/requests/req-1/status')).toBe(true);
+  });
+
+  it('estimates a picture at fal’s listed price', async () => {
+    const gen = falImageGenerator({ apiKey: 'k' });
+    expect(await gen.estimate!({ model: 'fal-ai/nano-banana-2' })).toEqual({ credits: 0.08, unit: 'USD', basis: "fal's listed price" });
+    expect((await gen.estimate!({ model: 'fal-ai/nano-banana-pro', references: 2 }))!.credits).toBe(0.15);
   });
 });
 
@@ -164,6 +179,7 @@ describe('🎬 Generate clip on a shot', () => {
     expect([...panel.querySelectorAll('.dr-gen-ref')].map((b) => b.getAttribute('aria-label'))).toEqual(expected.refs.map((r) => r.label));
     expect(panel.querySelector<HTMLInputElement>('input[aria-label="Seconds"]')!.value).toBe(String(expected.duration));
     panel.querySelector<HTMLInputElement>('input[aria-label="With sound"]')!.checked = true;
+    expect(panel.querySelector('.dr-gen-cost')!.textContent).toBe(''); // this fake has no prices
     panel.querySelector<HTMLButtonElement>('.dr-gen-go')!.click();
     await tick(30);
     expect(asked).toMatchObject({ prompt: expected.prompt, references: expected.refs.map((r) => r.src), duration: expected.duration, aspect: '16:9', resolution: '720p', model: 'm', audio: true });
@@ -171,7 +187,7 @@ describe('🎬 Generate clip on a shot', () => {
     // happy-dom can't decode video: the field says what to do instead, and links the clip.
     expect(field().querySelector('.dr-clip-panel')).toBeNull();
     expect(field().querySelector<HTMLAnchorElement>('.dr-clip-watch')!.href).toBe('https://v/clip.mp4');
-    expect(field().textContent).toMatch(/Clip ready. Its last frame couldn’t be taken here/);
+    expect(field().textContent).toMatch(/Clip ready · \$0\.70\. Its last frame couldn’t be taken here/);
     globalThis.fetch = realFetch;
     editor.destroy();
   });
@@ -200,6 +216,33 @@ describe('🎬 Generate clip on a shot', () => {
     service().dispatchEvent(new Event('change'));
     expect(field().querySelector('.dr-gen-panel')!.getAttribute('aria-label')).toBe('Generate an image with FAL');
     expect(localStorage.getItem('nodemap:image-generator')).toBe('fal');
+    editor.destroy();
+  });
+});
+
+describe('🎬 price in the clip panel', () => {
+  it('shows fal’s price for the settings, and follows them', async () => {
+    setVideoGenerators([falVideoGenerator({ apiKey: 'k' })]);
+    const g = Graph.fromJSON(drama2Graph.examples![0].graph, drama2Graph.createRegistry());
+    const el = document.createElement('div');
+    document.body.append(el);
+    const editor = new NodeEditor(el, { graph: g, registry: g.registry!, views: drama2Graph.editor!.views });
+    await editor.setView('shots');
+    const field = el.querySelector<HTMLElement>('.nm-node[data-id="s1b"] [data-param="lastFrame"]')!;
+    [...field.querySelectorAll('button')].find((b) => b.textContent === '🎬 Generate clip')!.click();
+    const panel = field.querySelector<HTMLElement>('.dr-clip-panel')!;
+    const set = (sel: string, v: string) => {
+      const x = panel.querySelector<HTMLInputElement | HTMLSelectElement>(sel)!;
+      x.value = v;
+      x.dispatchEvent(new Event('change'));
+    };
+    const price = () => panel.querySelector('.dr-gen-cost')!.textContent;
+    set('select[aria-label="Model"]', 'seedance-2.0-mini');
+    set('input[aria-label="Seconds"]', '5');
+    set('select[aria-label="Resolution"]', '480p');
+    expect(price()).toBe("About $0.36 for 5 s at 480p (fal's listed price)");
+    set('select[aria-label="Resolution"]', '720p');
+    expect(price()).toBe("About $0.77 for 5 s at 720p (fal's listed price)");
     editor.destroy();
   });
 });

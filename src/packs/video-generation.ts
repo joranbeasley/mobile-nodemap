@@ -38,6 +38,14 @@ export interface VideoResult {
   cost?: string;
 }
 
+export interface VideoEstimate {
+  amount: number;
+  /** 'USD', or 'credits'. */
+  unit: 'USD' | 'credits';
+  /** Where the figure comes from, e.g. "fal's listed price". */
+  basis: string;
+}
+
 export interface VideoModel {
   id: string;
   label: string;
@@ -65,6 +73,8 @@ export interface VideoGenerator {
   /** An API key the person gives once; the host decides where it is kept. */
   key?: { label: string; help?: string; get(): string | null | undefined; set(value: string): void };
   generate(req: VideoRequest): Promise<VideoResult>;
+  /** What a clip with these settings will probably cost; undefined when unknown. */
+  estimate?(req: { model?: string; duration?: number; resolution?: string; aspect?: string }): VideoEstimate | undefined;
   /** Where to see prices and make clips by hand. */
   site?: string;
 }
