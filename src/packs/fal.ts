@@ -332,8 +332,9 @@ export function falImageGenerator(opts: FalOptions & { model?: string } = {}): I
       const refs = (references ?? []).filter(Boolean).slice(0, 9);
       const input: Record<string, unknown> = { prompt, num_images: 1, aspect_ratio: nearest(IMAGE_ASPECTS, aspect, '1:1') };
       if (refs.length) input.image_urls = await Promise.all(refs.map((r) => fal.fileUrl(r, signal)));
-      onProgress?.(10);
-      const out = await fal.run(refs.length ? m.edit : m.id, input, signal, () => onProgress?.(50));
+      // fal reports queued / in progress, not a percent: the placeholder shows the time instead.
+      void onProgress;
+      const out = await fal.run(refs.length ? m.edit : m.id, input, signal);
       const images = ((out?.images ?? []) as { url?: string }[]).map((i) => i.url).filter((u): u is string => !!u);
       if (!images.length) throw new Error('fal returned no picture');
       return { images };

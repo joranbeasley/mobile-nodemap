@@ -5,6 +5,50 @@ import { saveDramaFile, seedancePack, seedanceScript } from './drama-seedance.js
 import { getImageGenerators, type ImageGenerator } from './image-generation.js';
 import { getVideoGenerators, type VideoGenerator, type VideoJob } from './video-generation.js';
 
+/** Work in progress on a picture or clip: what it's doing, the percent when the service says, and since when. */
+interface Pending {
+  text: string;
+  percent?: number;
+  since: number;
+}
+const elapsed = (since: number) => {
+  const sec = Math.max(0, Math.round((Date.now() - since) / 1000));
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+};
+let ticker: ReturnType<typeof setInterval> | undefined;
+/** One clock for every placeholder on the page: elapsed times tick each second. */
+function tick() {
+  if (ticker) return;
+  ticker = setInterval(() => {
+    const clocks = document.querySelectorAll<HTMLElement>('.dr-pending [data-since]');
+    if (!clocks.length) {
+      clearInterval(ticker);
+      ticker = undefined;
+      return;
+    }
+    clocks.forEach((c) => (c.textContent = elapsed(Number(c.dataset.since))));
+  }, 1000);
+}
+/**
+ * A placeholder where a picture (`dr-thumb`) or clip (`dr-clip-tile`) is being made: a ring or bar
+ * filled to the percent when the service reports one (Meshy does), else moving, with the time so far.
+ */
+function pendingTile(cls: string, p: Pending): HTMLElement {
+  const pc = typeof p.percent === 'number' && p.percent > 0 ? Math.max(1, Math.min(99, Math.round(p.percent))) : undefined;
+  const t = document.createElement('div');
+  t.className = `dr-pending ${cls}${pc == null ? ' dr-indeterminate' : ''}`;
+  t.setAttribute('role', 'status');
+  t.setAttribute('aria-label', `${p.text}${pc != null ? ` ${pc}%` : ''}`);
+  t.title = p.text;
+  t.style.setProperty('--pc', String(pc ?? 0));
+  const span = (c: string, text = '') => Object.assign(document.createElement('span'), { className: c, textContent: text });
+  const clock = span('dr-pending-time', elapsed(p.since));
+  clock.dataset.since = String(p.since);
+  t.append(span('dr-pending-meter'), span('dr-pending-pc', pc != null ? `${pc}%` : ''), span('dr-pending-label', p.text), clock);
+  tick();
+  return t;
+}
+
 /** Clips being collected right now (shot id + job start), so redraws don't ask twice. */
 const collecting = new Set<string>();
 
@@ -268,6 +312,7 @@ export const clipFrameParam: ParamKind = {
         wrap.append(watch);
       }
       const job = jobOf();
+      if (making || job) wrap.append(pendingTile('dr-clip-tile', making ?? { text: `Generating on ${job!.service}`, since: job!.startedAt }));
       if (job) {
         const since = new Date(job.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         wrap.append(
@@ -313,9 +358,11 @@ export const clipFrameParam: ParamKind = {
       const k = `${ctx.node.id}:${job.startedAt}`;
       if (collecting.has(k)) return;
       collecting.add(k);
-      status.textContent = 'Checking on the clip…';
+      status.textContent = '';
+      making = { text: 'Checking on the clip…', since: job.startedAt };
+      draw();
       try {
-        const r = await gen.resume(job, { onProgress: (t) => (status.textContent = t) });
+        const r = await gen.resume(job, { onProgress: (t, pc) => progress(t, pc) });
         if (!r.videos[0]) throw new Error(`${gen.name} returned no clip`);
         await collect(r.videos[0], r.cost ?? '');
       } catch (err) {
@@ -326,6 +373,7 @@ export const clipFrameParam: ParamKind = {
         }
       } finally {
         collecting.delete(k);
+        making = undefined;
         if (wrap.isConnected) draw();
       }
     };
@@ -341,6 +389,13 @@ export const clipFrameParam: ParamKind = {
 
     // 🎬 Generate clip: the shot's own Seedance prompt and pictures, sent to a video service.
     let panel: HTMLElement | undefined;
+    /** The clip being made, shown as a placeholder in the field. */
+    let making: Pending | undefined;
+    const progress = (text: string, percent?: number) => {
+      if (!making) return;
+      making = { ...making, text, percent: percent ?? making.percent };
+      if (wrap.isConnected) draw();
+    };
     let chosen: VideoGenerator | null = preferred('video', getVideoGenerators());
     let abort: AbortController | undefined;
     const el = (tag: string, attrs: Record<string, string> = {}, text = '') => {
@@ -471,11 +526,17 @@ export const clipFrameParam: ParamKind = {
         st.textContent = `Asking ${gen.name}…`;
         let submitted = false;
         let jobKey = '';
+        making = { text: `Asking ${gen.name}…`, since: Date.now() };
+        draw();
         try {
           // Pictures the service can read: drawings (SVG) and oversized pictures become JPEGs, as in ✨.
           st.textContent = 'Preparing pictures…';
-          const picked = await Promise.all(refs.filter((r) => on.has(r.src)).map((r) => referencePicture(r.src)));
-          const first = s?.firstFrame && on.has(s.firstFrame) ? await referencePicture(s.firstFrame) : undefined;
+          const ready = (src: string) =>
+            referencePicture(src).catch((err) => {
+              throw new Error(`A reference picture couldn’t be prepared (${(err as Error).message}). Switch it off and try again.`);
+            });
+          const picked = await Promise.all(refs.filter((r) => on.has(r.src)).map((r) => ready(r.src)));
+          const first = s?.firstFrame && on.has(s.firstFrame) ? await ready(s.firstFrame) : undefined;
           st.textContent = `Asking ${gen.name}…`;
           const result = await gen.generate({
             prompt: prompt.value.trim(),
@@ -487,7 +548,10 @@ export const clipFrameParam: ParamKind = {
             model: model.value,
             audio: audio.checked && !audio.disabled,
             signal: abort.signal,
-            onProgress: (t) => (st.textContent = t),
+            onProgress: (t, pc) => {
+              st.textContent = pc != null ? `${t} ${Math.round(pc)}%` : t;
+              progress(t, pc);
+            },
             // Accepted: keep the job on the shot, so the clip can be collected even if this page can't wait.
             onSubmitted: (job) => {
               submitted = true;
@@ -516,6 +580,8 @@ export const clipFrameParam: ParamKind = {
           go.disabled = false;
         } finally {
           if (jobKey) collecting.delete(jobKey);
+          making = undefined;
+          if (wrap.isConnected) draw();
         }
       });
       box.append(row(go, cancel, ...(gen.site ? [el('a', { href: gen.site, target: '_blank', rel: 'noopener', class: 'dr-gen-cancel dr-gen-link' }, 'Prices')] : [])), st);
@@ -591,6 +657,8 @@ export const imagesParam: ParamKind = {
     };
     let panel: HTMLElement | undefined;
     let note = '';
+    /** A picture being made: a placeholder thumbnail in the strip, where it will land. */
+    let making: Pending | undefined;
     const closePanel = () => {
       panel?.remove();
       panel = undefined;
@@ -756,7 +824,9 @@ export const imagesParam: ParamKind = {
       let abort: AbortController | undefined;
       cancel.addEventListener('click', () => {
         abort?.abort();
+        making = undefined;
         closePanel();
+        draw();
       });
       go.addEventListener('click', async () => {
         if (gen.key && keyInput.value.trim()) gen.key.set(cleanKey(keyInput.value));
@@ -765,6 +835,8 @@ export const imagesParam: ParamKind = {
         abort = new AbortController();
         go.disabled = true;
         status.textContent = `Asking ${gen.name}…`;
+        making = { text: `Asking ${gen.name}…`, since: Date.now() };
+        draw();
         try {
           // Chosen references in their order, made readable for the service; the prompt says
           // which is which, so the model knows whose face and which room it is looking at.
@@ -777,7 +849,11 @@ export const imagesParam: ParamKind = {
             aspect: aspect.value,
             model: gen.models?.length ? model.value : undefined,
             signal: abort.signal,
-            onProgress: (pc) => (status.textContent = `Generating with ${gen.name}… ${Math.round(pc)}%`),
+            onProgress: (pc) => {
+              status.textContent = `Generating with ${gen.name}… ${Math.round(pc)}%`;
+              making = { ...making!, text: `Generating with ${gen.name}`, percent: pc };
+              draw();
+            },
           });
           status.textContent = 'Copying the picture in…';
           // The service's links expire: keep a copy, shrunk like added photos.
@@ -790,9 +866,12 @@ export const imagesParam: ParamKind = {
           }
           if (!added.length) throw new Error(`${gen.name} returned no picture`);
           note = `Added ${added.length} from ${gen.name}${result.credits != null ? ` · ${result.credits} credits` : ''}${result.balance != null ? ` · ${result.balance.toLocaleString()} left` : ''}${kept < added.length ? ' · linked, not copied: the link expires' : ''}`;
+          making = undefined;
           closePanel();
           commit([...list, ...added]);
         } catch (err) {
+          making = undefined;
+          draw();
           if ((err as Error).name === 'AbortError') return;
           status.textContent = (err as Error).message || 'Something went wrong';
           go.disabled = false;
@@ -862,6 +941,7 @@ export const imagesParam: ParamKind = {
         }
         wrap.append(t);
       });
+      if (making) wrap.append(pendingTile('dr-thumb', making));
       if (list.length < max) {
         const add = document.createElement('label');
         add.className = 'dr-add';
@@ -1791,6 +1871,30 @@ const css = `
 .dr-clip-sound { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
 .dr-clip-watch { text-decoration: none; }
 .dr-clip-job { font-size: 12px; color: var(--_text); }
+/* Placeholders while a picture or clip is being made. --pc: percent done (0: unknown, moving). */
+.dr-pending { position: relative; flex: none; box-sizing: border-box; border-radius: 6px; overflow: hidden; color: var(--_text);
+  background: color-mix(in srgb, var(--_accent) 10%, var(--_node)); border: 1.5px dashed color-mix(in srgb, var(--_accent) 55%, var(--_border)); }
+.dr-pending.dr-thumb { display: grid; place-items: center; }
+.dr-pending.dr-thumb .dr-pending-meter { width: 30px; height: 30px; border-radius: 50%;
+  background: conic-gradient(var(--_accent) calc(var(--pc) * 1%), color-mix(in srgb, var(--_muted) 25%, transparent) 0);
+  -webkit-mask: radial-gradient(circle, transparent 10px, #000 11px); mask: radial-gradient(circle, transparent 10px, #000 11px); }
+.dr-pending.dr-thumb.dr-indeterminate .dr-pending-meter { background: conic-gradient(var(--_accent) 0 25%, color-mix(in srgb, var(--_muted) 25%, transparent) 0); animation: dr-spin 1s linear infinite; }
+.dr-pending.dr-thumb .dr-pending-pc, .dr-pending.dr-thumb .dr-pending-time { position: absolute; inset: 0; display: grid; place-items: center; font: 600 9px/1 var(--_mono, var(--_font)); }
+.dr-pending.dr-thumb .dr-pending-label, .dr-pending.dr-thumb:not(.dr-indeterminate) .dr-pending-time, .dr-pending.dr-thumb.dr-indeterminate .dr-pending-pc { display: none; }
+.dr-pending.dr-clip-tile { flex-basis: 100%; max-width: 240px; aspect-ratio: 16 / 9; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 2px; padding: 8px 10px 12px; text-align: center;
+  background: linear-gradient(110deg, color-mix(in srgb, var(--_accent) 8%, var(--_node)) 30%, color-mix(in srgb, var(--_accent) 20%, var(--_node)) 50%, color-mix(in srgb, var(--_accent) 8%, var(--_node)) 70%) 0 0 / 300% 100%;
+  animation: dr-shimmer 2.4s linear infinite; }
+.dr-pending.dr-clip-tile::before { content: '🎬'; font-size: 20px; line-height: 1; }
+.dr-pending.dr-clip-tile .dr-pending-label { font: 600 12px/1.3 var(--_font); }
+.dr-pending.dr-clip-tile .dr-pending-pc { font: 700 16px/1 var(--_font); color: var(--_accent); }
+.dr-pending.dr-clip-tile .dr-pending-pc:empty { display: none; }
+.dr-pending.dr-clip-tile .dr-pending-time { font: 11px/1 var(--_mono, var(--_font)); opacity: .7; }
+.dr-pending.dr-clip-tile .dr-pending-meter { position: absolute; left: 0; bottom: 0; height: 4px; width: calc(var(--pc) * 1%); background: var(--_accent); transition: width .4s; }
+.dr-pending.dr-clip-tile.dr-indeterminate .dr-pending-meter { width: 30%; animation: dr-slide 1.6s ease-in-out infinite; }
+@keyframes dr-spin { to { transform: rotate(1turn); } }
+@keyframes dr-shimmer { from { background-position: 100% 0; } to { background-position: -50% 0; } }
+@keyframes dr-slide { 0% { left: -30%; } 100% { left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .dr-pending, .dr-pending * { animation: none !important; } }
 .dr-gen-link { text-decoration: none; display: inline-block; }
 .dr-file { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 0; }
 .dr-status { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--_text); }

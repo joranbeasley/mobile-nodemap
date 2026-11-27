@@ -337,6 +337,71 @@ describe('🎬 clips that finish while the page is away', () => {
   });
 });
 
+describe('placeholders while generating', () => {
+  const mount = () => {
+    const g = Graph.fromJSON(drama2Graph.examples![0].graph, drama2Graph.createRegistry());
+    const el = document.createElement('div');
+    document.body.append(el);
+    const editor = new NodeEditor(el, { graph: g, registry: g.registry!, views: drama2Graph.editor!.views });
+    return { g, el, editor };
+  };
+
+  it('shows a picture being made in the strip, with the percent the service reports', async () => {
+    let finish!: (v: { images: string[] }) => void;
+    let report!: (pc: number) => void;
+    setImageGenerators([{ id: 'meshy', name: 'Meshy', async generate(req) {
+      report = (pc) => req.onProgress?.(pc);
+      return new Promise((r) => (finish = r));
+    } }]);
+    const { el, editor } = mount();
+    const field = () => el.querySelector<HTMLElement>('.nm-node[data-id="theo"] [data-param="images"]')!;
+    field().querySelector<HTMLButtonElement>('.dr-gen')!.click();
+    field().querySelector<HTMLButtonElement>('.dr-gen-go')!.click();
+    await tick();
+    const tile = () => field().querySelector<HTMLElement>('.dr-pending.dr-thumb');
+    expect(tile()!.classList.contains('dr-indeterminate')).toBe(true); // no percent yet: it moves
+    report(42);
+    expect(tile()!.getAttribute('aria-label')).toBe('Generating with Meshy 42%');
+    expect(tile()!.style.getPropertyValue('--pc')).toBe('42');
+    expect(tile()!.querySelector('.dr-pending-pc')!.textContent).toBe('42%');
+    finish({ images: ['data:image/png;base64,QUJD'] });
+    await tick(20);
+    expect(tile()).toBeNull();
+    editor.destroy();
+  });
+
+  it('shows a clip being made where it will go, with what the service says and the time', async () => {
+    let finish!: (v: { videos: string[] }) => void;
+    setVideoGenerators([{ id: 'fal', name: 'fal', models: [{ id: 'm', label: 'M', minDuration: 4, maxDuration: 15 }], async generate(req) {
+      req.onSubmitted?.({ service: 'fal', startedAt: Date.now(), request: 'r' });
+      req.onProgress?.("In fal's queue (2 ahead)…");
+      return new Promise((r) => (finish = r));
+    } }]);
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      throw new TypeError('offline');
+    }) as typeof fetch;
+    const { g, el, editor } = mount();
+    // Photos (PNG), which need no canvas to send (happy-dom has none for the example's drawings).
+    for (const n of g.nodes.values()) if (Array.isArray(n.params.images) && n.params.images.length) g.setParam(n.id, 'images', [`data:image/png;base64,${btoa(n.id)}`]);
+    await editor.setView('shots');
+    const field = () => el.querySelector<HTMLElement>('.nm-node[data-id="s1b"] [data-param="lastFrame"]')!;
+    [...field().querySelectorAll('button')].find((b) => b.textContent === '🎬 Generate clip')!.click();
+    field().querySelector<HTMLButtonElement>('.dr-gen-go')!.click();
+    await tick(20);
+    const tile = () => field().querySelector<HTMLElement>('.dr-pending.dr-clip-tile');
+    expect(tile()!.getAttribute('aria-label')).toBe("In fal's queue (2 ahead)…");
+    expect(tile()!.classList.contains('dr-indeterminate')).toBe(true); // fal gives no percent
+    expect(tile()!.querySelector('.dr-pending-time')!.textContent).toMatch(/^0:0\d$/);
+    finish({ videos: ['https://v/clip.mp4'] });
+    await tick(20);
+    expect(tile()).toBeNull();
+    expect(g.nodes.get('s1b')!.params.clipUrl).toBe('https://v/clip.mp4');
+    globalThis.fetch = realFetch;
+    editor.destroy();
+  });
+});
+
 describe('🎬 price in the clip panel', () => {
   it('shows fal’s price for the settings, and follows them', async () => {
     setVideoGenerators([falVideoGenerator({ apiKey: 'k' })]);

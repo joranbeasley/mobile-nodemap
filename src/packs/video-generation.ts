@@ -27,8 +27,8 @@ export interface VideoRequest {
   /** Generate sound (speech, effects) where the model can. */
   audio?: boolean;
   signal?: AbortSignal;
-  /** What it's doing, e.g. "In queue (3 ahead)", "Generating…". */
-  onProgress?: (status: string) => void;
+  /** What it's doing, e.g. "In queue (3 ahead)", "Generating…", and the percent done when the service says. */
+  onProgress?: (status: string, percent?: number) => void;
   /**
    * The service accepted the job. Keep it (it holds no key): if waiting is cut short (the page
    * closes, the phone sleeps, the connection drops), `resume(job)` collects the clip later.
@@ -91,7 +91,7 @@ export interface VideoGenerator {
    * Wait for a job sent earlier and return its clip. Rejects with `code: 'pending'` when it is
    * still running (or the service can't be reached yet): keep the job and try again later.
    */
-  resume?(job: VideoJob, opts?: { signal?: AbortSignal; onProgress?: (status: string) => void }): Promise<VideoResult>;
+  resume?(job: VideoJob, opts?: { signal?: AbortSignal; onProgress?: (status: string, percent?: number) => void }): Promise<VideoResult>;
   /** What a clip with these settings will probably cost; undefined when unknown. */
   estimate?(req: { model?: string; duration?: number; resolution?: string; aspect?: string }): VideoEstimate | undefined;
   /** Where to see prices and make clips by hand. */
