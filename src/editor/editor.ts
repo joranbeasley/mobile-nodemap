@@ -1920,6 +1920,67 @@ export class NodeEditor extends Emitter<EditorEvents> {
     return b;
   }
 
+  /** A card action: opens one of the node's params in a sheet of its own. */
+  private actionButton(id: string, a: import('../core/types.js').CardAction): HTMLElement {
+    const b = h('button', { type: 'button', class: 'nm-card-edit nm-card-action', 'data-nm-live': '', 'aria-label': a.label, title: a.label }, a.label);
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.select({ node: id });
+      this.openFieldSheet(id, a.param, a.title ?? a.label, a.event);
+    });
+    return b;
+  }
+
+  /**
+   * One param of a node in a bottom sheet of its own (full width, above everything), e.g. a
+   * pictures field with its ✨ panel. `event` is dispatched on its control once it's shown.
+   */
+  openFieldSheet(id: string, param: string, title?: string, event?: string): void {
+    if (this.ro) return;
+    const node = this.graph.nodes.get(id);
+    const p = node && this.registry.get(node.type)?.params?.find((x) => x.name === param);
+    if (!node || !p) return;
+    this.closePalette();
+    this.hideDetails();
+    this.sheetGuard = this.pointers.size ? Infinity : performance.now() + 350;
+    const name = title ?? p.label ?? p.name;
+    const done = h('button', { type: 'button', class: 'nm-card-btn nm-card-primary' }, 'Done');
+    done.addEventListener('click', () => this.closePalette());
+    const head = h('div', { class: 'nm-sheet-head nm-edit-head' }, h('div', {}, h('strong', {}, name), h('small', {}, this.titleOf(node))), done);
+    const control = this.paramControl(node, p, 'sheet');
+    const form = h('div', { class: 'nm-sheet-list nm-form' }, h(control.dataset.paramKind ? 'div' : 'label', { class: 'nm-edit-field' }, control));
+    const backdrop = h('div', { class: 'nm-sheet-backdrop' });
+    backdrop.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      if (performance.now() < this.sheetGuard) return;
+      this.closePalette();
+    });
+    const sheet = h('div', { class: 'nm-sheet nm-edit nm-field-sheet', role: 'dialog', 'aria-label': `${name} · ${this.titleOf(node)}` }, h('div', { class: 'nm-sheet-grip' }), head, form);
+    sheet.addEventListener('pointerdown', (e) => e.stopPropagation());
+    sheet.addEventListener(
+      'click',
+      (e) => {
+        if (performance.now() < this.sheetGuard) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      },
+      true,
+    );
+    sheet.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') this.closePalette();
+    });
+    const off = this.graph.on('change', (c) => {
+      if ((c.kind === 'node:remove' && c.node.id === id) || c.kind === 'load') this.closePalette();
+      else if (c.kind === 'node:params' && c.node.id === id) this.syncControlsIn(sheet, c.node);
+    });
+    (sheet as any)._off = off;
+    this.overlay().append(backdrop, sheet);
+    this.sheet = sheet;
+    (sheet as any)._backdrop = backdrop;
+    if (event) control.dispatchEvent(new CustomEvent(event));
+  }
+
   /** ✎ Edit on a look-only card: the way into its Edit sheet. */
   private editButton(id: string): HTMLElement {
     const b = h('button', { type: 'button', class: 'nm-card-edit nm-card-pencil', 'data-nm-live': '', 'aria-label': 'Edit', title: 'Edit' }, '✎ Edit');
@@ -2014,11 +2075,22 @@ export class NodeEditor extends Emitter<EditorEvents> {
       body.append(row);
     }
     el.append(body, h('div', { class: 'nm-view' }), h('div', { class: 'nm-error' }));
-    // A look-only card's buttons, on their own row under it (the header is all title).
-    if (def?.editOnCard === false) {
+    // Buttons on their own row under the card (the header is all title): its actions, and on a
+    // look-only card its details and ✎ Edit.
+    {
       const row = h('div', { class: 'nm-card-row' });
-      if (def.details) row.append(this.detailsButton(node.id, def.detailsLabel ?? 'Details', def.detailsIcon));
-      if (!this.ro) row.append(this.editButton(node.id));
+      if (!this.ro)
+        for (const a of def?.cardActions ?? []) {
+          let ok = true;
+          try {
+            ok = !a.when || a.when(node);
+          } catch {
+            ok = false;
+          }
+          if (ok) row.append(this.actionButton(node.id, a));
+        }
+      if (def?.editOnCard === false && def.details) row.append(this.detailsButton(node.id, def.detailsLabel ?? 'Details', def.detailsIcon));
+      if (def?.editOnCard === false && !this.ro) row.append(this.editButton(node.id));
       if (row.childElementCount) el.append(row);
     }
     // Many ports on one edge (top to bottom) would crowd their labels: show only the linked ones until selected.

@@ -347,6 +347,36 @@ describe('🎬 Generate clip on a shot', () => {
     editor.destroy();
   });
 
+  it('opens ✨ Picture and 🎬 Clip from the cards, in a sheet with the panel open', async () => {
+    // No services set up: no buttons.
+    const none = mount();
+    await none.editor.setView('shots');
+    expect(none.el.querySelector('.nm-node[data-id="s1b"] .nm-card-action')).toBeNull();
+    none.editor.destroy();
+    setVideoGenerators([{ id: 'fake', name: 'Fake', models: [{ id: 'm', label: 'M' }], async generate() {
+      return { videos: [] };
+    } }]);
+    setImageGenerators([{ id: 'img', name: 'Img', async generate() {
+      return { images: [] };
+    } }]);
+    const { el, editor } = mount();
+    await editor.setView('shots');
+    const clip = el.querySelector<HTMLButtonElement>('.nm-node[data-id="s1b"] .nm-card-action')!;
+    expect(clip.textContent).toBe('🎬 Clip');
+    clip.click();
+    let sheet = [...document.querySelectorAll<HTMLElement>('.nm-field-sheet')].pop()!;
+    expect(sheet.getAttribute('aria-label')).toBe('🎬 Clip · Shot 2 · Close-up');
+    expect(sheet.querySelector('.dr-clip-panel')).not.toBeNull();
+    editor.closePalette();
+    await editor.setView('cast');
+    el.querySelector<HTMLButtonElement>('.nm-node[data-id="theo"] .nm-card-action')!.click();
+    sheet = [...document.querySelectorAll<HTMLElement>('.nm-field-sheet')].pop()!;
+    expect(sheet.getAttribute('aria-label')).toBe('✨ Picture · Theo');
+    expect(sheet.querySelector('.dr-gen-panel')).not.toBeNull();
+    editor.closePalette();
+    editor.destroy();
+  });
+
   it('folds the panels away again from the button that opened them', async () => {
     setVideoGenerators([{ id: 'fake', name: 'Fake', models: [{ id: 'm', label: 'M' }], async generate() {
       return { videos: [] };

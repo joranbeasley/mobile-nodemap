@@ -1,7 +1,9 @@
 import { defineNode, definePack, type GraphEngine } from '../core/registry.js';
 import { Graph } from '../core/graph.js';
 import type { GraphJSON, NodeInstance, NodeResult, NodeType, ParamKind } from '../core/types.js';
-import { DRAMA_DETAILS, SHOT_CLIP_PARAMS, clipFrameParam, dramaImagePrompt, shotClipSuggestion, FRAMINGS, MOVES, TIMES, appearances, dramaEngine, dramaPack, dramaView, imagesParam, sceneInfo, episodeInfo } from './drama.js';
+import { DRAMA_DETAILS, GENERATE_EVENT, SHOT_CLIP_PARAMS, clipFrameParam, dramaImagePrompt, shotClipSuggestion, FRAMINGS, MOVES, TIMES, appearances, dramaEngine, dramaPack, dramaView, imagesParam, sceneInfo, episodeInfo } from './drama.js';
+import { getImageGenerators } from './image-generation.js';
+import { getVideoGenerators } from './video-generation.js';
 
 /**
  * Drama 2: the same production model as the drama graph type, edited as boards instead of
@@ -422,6 +424,8 @@ const images = (name = 'images', label = 'images', advanced = false) => ({
  * description, who and where). Everything else is edited in the card's Edit sheet (tap it twice).
  */
 const sheetOnly = <T extends object>(p: T) => ({ ...p, card: false as const });
+/** ✨ Picture on a card: its pictures, with the generate panel, in a sheet (when a picture service is set up). */
+const pictureAction = { label: '✨ Picture', param: 'images', title: undefined, event: GENERATE_EVENT, when: () => getImageGenerators().length > 0 };
 /** Once a shot has a clip, its card is the clip: the rest leaves the card (it's in the Edit sheet). */
 const noClip = (q: Record<string, unknown>) => !(q.lastFrame || q.clipUrl);
 const untilClip = <T extends object>(p: T & { card?: (q: Record<string, unknown>) => boolean }) => ({ ...p, card: (q: Record<string, unknown>) => noClip(q) && (p.card ? p.card(q) : true) });
@@ -439,6 +443,7 @@ const characterNode = defineNode({
   flavor: 'source',
   width: 250,
   description: 'Someone in the story: name, description, appearance, pictures',
+  cardActions: [pictureAction],
   params: [
     text('description', 'description', 'Who they are'),
     sheetOnly(text('appearance', 'appearance', 'Age, build, hair, face, usual clothes', false, 'Repeated word for word in every video prompt they are in')),
@@ -460,6 +465,7 @@ const propNode = defineNode({
   flavor: 'source',
   width: 250,
   tags: ['outfit', 'costume', 'object', 'wardrobe', 'item'],
+  cardActions: [pictureAction],
   description: 'An object or an outfit that shots need',
   params: [
     sheetOnly({ name: 'kind', label: 'type', kind: 'select', options: PROP_TYPES, default: 'Object' }),
@@ -484,6 +490,7 @@ const locationNode = defineNode({
   flavor: 'source',
   width: 250,
   description: 'Where shots happen: name, setting, description, pictures',
+  cardActions: [pictureAction],
   params: [sheetOnly({ name: 'setting', label: 'setting', kind: 'select', options: ['INT', 'EXT'], default: 'INT' }), text('description', 'description', 'What it looks like'), images()],
   onCreate: (n) => void (n.label ??= 'New location'),
 });
@@ -521,6 +528,8 @@ const shotNode = defineNode({
   description: 'One camera set-up: one location, any characters',
   // Its card is for looking: a tap opens the Edit sheet, where shots are edited.
   editOnCard: false,
+  // 🎬 Clip: its clip field, with the generate panel, in a sheet (when a video service is set up).
+  cardActions: [{ label: '🎬 Clip', param: 'lastFrame', title: undefined, event: GENERATE_EVENT, when: () => getVideoGenerators().length > 0 }],
   // Its Seedance export (prompt, pictures, .zip) opens from a button, not on every tap.
   detailsLabel: 'Export',
   detailsIcon: '⇩',

@@ -103,6 +103,8 @@ const keepTried = new Set<string>();
  */
 const liveClips = new Map<string, Pending>();
 const CLIP_PROGRESS = 'dr-clip-progress';
+/** Dispatched on a picture or clip field to open its generate panel (the cards' ✨ / 🎬 buttons). */
+export const GENERATE_EVENT = 'dr-generate';
 
 /** Clips whose first frame was already looked for on this page. */
 const posterTried = new Set<string>();
@@ -852,6 +854,8 @@ export const clipFrameParam: ParamKind = {
       const next = typeof v === 'string' ? v : '';
       if (next !== value) ((value = next), draw());
     };
+    // A card's 🎬 Clip button opens this field in a sheet, with its panel open.
+    wrap.addEventListener(GENERATE_EVENT, () => !panel && !jobOf() && openGen());
     // On the board the field shows more of the shot than its last frame (a job, the first frame,
     // the length): follow every change to the shot.
     if (ctx.place !== 'sheet') {
@@ -1191,6 +1195,8 @@ export const imagesParam: ParamKind = {
       // Not on touch screens: focusing would pop up the keyboard over the panel.
       if (globalThis.matchMedia?.('(pointer: fine)').matches) prompt.focus({ preventScroll: true });
     };
+    // A card's ✨ Picture button opens this field in a sheet, with its panel open.
+    wrap.addEventListener(GENERATE_EVENT, () => !panel && openPanel());
     const draw = () => {
       const gen = chosenGen;
       wrap.replaceChildren();

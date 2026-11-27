@@ -225,6 +225,8 @@ export const css = /* css */ `
 .nm-card-edit:hover, .nm-card-edit:focus-visible { border-color: var(--_accent); }
 /* Zoomed out they can't be tapped: keep the row's place, hide the buttons. */
 .nm-overview .nm-card-row { visibility: hidden; }
+.nm-card-row .nm-card-action { margin-right: auto; }
+.nm-card-row .nm-card-action + .nm-card-action { margin-right: 0; }
 .nm-node.nm-summary :is(input, select, textarea, button, label, summary, [data-nm-open]):not([data-nm-live]) { pointer-events: none !important; }
 .nm-node.nm-summary :is(textarea, input) { resize: none; caret-color: transparent; }
 .nm-toolbar { position: absolute; right: max(12px, env(safe-area-inset-right, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; gap: 6px; z-index: 4;

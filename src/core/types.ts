@@ -107,6 +107,17 @@ export interface ParamControlContext {
   place?: 'card' | 'sheet';
 }
 
+export interface CardAction {
+  label: string;
+  /** The param it opens in a sheet. */
+  param: string;
+  /** The sheet's title (default: the label; the node's name goes under it). */
+  title?: string;
+  event?: string;
+  /** Only when it says so (e.g. once a service is set up). */
+  when?: (node: NodeInstance) => boolean;
+}
+
 export interface ChooseOptions {
   title: string;
   placeholder?: string;
@@ -165,6 +176,12 @@ export interface NodeType {
   detailsLabel?: string;
   /** …and its icon (default ⓘ). */
   detailsIcon?: string;
+  /**
+   * Buttons on a row under the card (shown zoomed in), each opening one of its params in a
+   * sheet of its own, e.g. ✨ Picture opening the pictures field with its generate panel.
+   * `event`: dispatched on the field's control once it's in the sheet (a control can open a panel on it).
+   */
+  cardActions?: CardAction[];
   /** Short text, an emoji or an inline `<svg>` shown in the header and the add menu. */
   icon?: string;
   /** Extra search words for the add menu. */
