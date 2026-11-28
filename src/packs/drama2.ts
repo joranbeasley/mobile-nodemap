@@ -2,7 +2,7 @@ import type { VoiceTrack } from './voices.js';
 import { defineNode, definePack, type GraphEngine } from '../core/registry.js';
 import { Graph } from '../core/graph.js';
 import type { GraphJSON, NodeInstance, NodeResult, NodeType, ParamKind } from '../core/types.js';
-import { DRAMA_DETAILS, GENERATE_EVENT, audioParam, voicePickParam, sceneClipsParam, type SceneShot, playSequence, type SequenceItem, viewsParam, SHOT_CLIP_PARAMS, clipFrameParam, dramaImagePrompt, shotClipSuggestion, FRAMINGS, MOVES, TIMES, appearances, dramaEngine, dramaPack, dramaView, imagesParam, sceneInfo, episodeInfo } from './drama.js';
+import { DRAMA_DETAILS, GENERATE_EVENT, SCENE_TRANSITIONS, audioParam, voicePickParam, sceneClipsParam, type SceneShot, playSequence, type SequenceItem, viewsParam, SHOT_CLIP_PARAMS, clipFrameParam, dramaImagePrompt, shotClipSuggestion, FRAMINGS, MOVES, TIMES, appearances, dramaEngine, dramaPack, dramaView, imagesParam, sceneInfo, episodeInfo } from './drama.js';
 import { getVideoGenerators } from './video-generation.js';
 
 /**
@@ -645,6 +645,9 @@ const shotNode = defineNode({
   ],
 });
 
+/** A scene's transitions, as the player takes them. */
+const transitionOf = (scene: NodeInstance) => SCENE_TRANSITIONS.find((t) => t.label === scene.params.transition)?.value ?? 'crossfade';
+
 const sceneNode = defineNode({
   type: D2.scene,
   editOnCard: false, // for looking; ✎ Edit opens its sheet
@@ -652,12 +655,12 @@ const sceneNode = defineNode({
   cardActions: [
     // 🎬 Make the scene: its shots' clips in order, each carrying on from the one before's new last frame.
     { label: '🎬 Make', param: 'makeClips', title: '🎬 Make the scene', when: () => getVideoGenerators().length > 0 },
-    { label: '▶ Preview', run: (scene: NodeInstance, graph: Graph) => playSequence(sceneSequence(graph, scene), { title: `Preview: ${nodeTitle(graph, scene)}` }) },
+    { label: '▶ Preview', run: (scene: NodeInstance, graph: Graph) => playSequence(sceneSequence(graph, scene), { title: `Preview: ${nodeTitle(graph, scene)}`, transition: transitionOf(scene) }) },
     // ⬇ Save video: the same preview, recorded as it plays into one file (where the browser can record).
     {
       label: '⬇ Save video',
       when: () => typeof MediaRecorder !== 'undefined' && typeof HTMLCanvasElement !== 'undefined' && 'captureStream' in HTMLCanvasElement.prototype,
-      run: (scene: NodeInstance, graph: Graph) => playSequence(sceneSequence(graph, scene), { title: nodeTitle(graph, scene), record: true }),
+      run: (scene: NodeInstance, graph: Graph) => playSequence(sceneSequence(graph, scene), { title: nodeTitle(graph, scene), record: true, transition: transitionOf(scene) }),
     },
   ],
   title: 'Scene',
@@ -671,6 +674,8 @@ const sceneNode = defineNode({
   params: [
     sheetOnly(number()),
     sheetOnly({ name: 'time', label: 'time', kind: 'select', options: TIMES, default: 'DAY' }),
+    // How the preview and saved video go from shot to shot (shots that carry straight on always cut).
+    sheetOnly({ name: 'transition', label: 'transitions', kind: 'select', options: SCENE_TRANSITIONS.map((t) => t.label), default: 'Crossfade', description: 'Between shots in ▶ Preview and ⬇ Save video. Shots that carry straight on from the one before always cut.' }),
     // A shot with a clip shows its first frame on its chip.
     { ...refs('shots', 'shots', D2.shot, true), create: true, movable: true, sortable: true, renumber: 'number', chipImage: (_g: Graph, _sc: NodeInstance, shot: NodeInstance) => shotPoster(shot) },
     text('description', 'description', 'What happens'),

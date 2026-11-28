@@ -627,9 +627,28 @@ export interface SequenceItem {
  * where a shot continues the one before), shots without a clip show their frame (or their
  * words) for their length, like an animatic. ⏮ ⏯ ⏭ and ✕; Esc or leaving full screen closes it.
  */
-export function playSequence(items: SequenceItem[], opts: { title?: string; fade?: number; record?: boolean } = {}): void {
+/** How a scene's shots change: a crossfade, a straight cut, or a fade to black and back. */
+export type SceneTransition = 'crossfade' | 'cut' | 'black';
+export const SCENE_TRANSITIONS: { value: SceneTransition; label: string }[] = [
+  { value: 'crossfade', label: 'Crossfade' },
+  { value: 'cut', label: 'Cut (none)' },
+  { value: 'black', label: 'Fade to black' },
+];
+
+export function playSequence(items: SequenceItem[], opts: { title?: string; fade?: number; record?: boolean; transition?: SceneTransition } = {}): void {
   if (!items.length) return;
   const fade = opts.fade ?? 0.6;
+  const mode = opts.transition ?? 'crossfade';
+  /** Whether shot n comes in on a cut: every shot with "Cut", else a shot that carries straight on. */
+  const cutTo = (n: number) => mode === 'cut' || !!items[n]?.continues;
+  /** On to shot n with its transition: a crossfade, or (fade to black) out first, then in. */
+  const goTo = (n: number) => {
+    if (cutTo(n)) return show(n, true);
+    if (mode !== 'black') return show(n, false);
+    for (const el of [...vids, still]) ((el.style.transition = `opacity ${fade}s`), (el.style.opacity = '0'));
+    clearTimeout(timer);
+    timer = setTimeout(() => show(n, false), fade * 1000);
+  };
   const box = document.createElement('div');
   box.className = 'dr-player dr-sequence';
   box.setAttribute('role', 'dialog');
@@ -765,15 +784,14 @@ export function playSequence(items: SequenceItem[], opts: { title?: string; fade
   // A still moves on after its length (less the fade, so the next fades in as it ends).
   const runStill = () => {
     stillFrom = Date.now();
-    const nextCut = items[i + 1]?.continues;
-    timer = setTimeout(() => show(i + 1, !!nextCut), Math.max(200, stillLeft - (nextCut ? 0 : fade * 1000)));
+    const nextCut = cutTo(i + 1);
+    timer = setTimeout(() => goTo(i + 1), Math.max(200, stillLeft - (nextCut ? 0 : fade * 1000)));
   };
   // A clip hands over a fade before its end (or at its end, for a cut).
   for (const v of vids)
     v.addEventListener('timeupdate', () => {
       if (v !== active || advancing || paused || !Number.isFinite(v.duration)) return;
-      const nextCut = items[i + 1]?.continues;
-      if (!nextCut && v.duration - v.currentTime <= fade) ((advancing = true), show(i + 1, false));
+      if (!cutTo(i + 1) && v.duration - v.currentTime <= fade) ((advancing = true), goTo(i + 1));
     });
   for (const v of vids)
     v.addEventListener('ended', () => {
