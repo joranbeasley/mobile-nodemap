@@ -676,9 +676,19 @@ export function playSequence(items: SequenceItem[], opts: { title?: string; fade
   let active: HTMLVideoElement | null = null;
   /** Stops the fixed voices of the clip showing. */
   let unvoice: (() => void) | undefined;
+  /** The layer holding the next clip, loaded ahead. */
+  let preloaded: HTMLVideoElement | null = null;
+  /** Counts shots shown: a slow load for one that's been skipped past does nothing. */
+  let showing = 0;
   const current = () => vids[layer];
   const hideAll = (except?: HTMLElement) => {
-    for (const v of vids) if (v !== except) ((v.style.opacity = '0'), v.pause());
+    // A clip fading out keeps playing until it has faded (a cut stops it at once).
+    for (const v of vids)
+      if (v !== except) {
+        v.style.opacity = '0';
+        if (v.style.transition === 'none') v.pause();
+        else setTimeout(() => v !== active && v.pause(), fade * 1000);
+      }
     if (still !== except) still.style.opacity = '0';
   };
   const show = (to: number, cut: boolean) => {
@@ -691,20 +701,40 @@ export function playSequence(items: SequenceItem[], opts: { title?: string; fade
     cap.textContent = `${rec ? '● Recording · ' : ''}${it.label} · ${i + 1}/${items.length}`;
     if (rec) rec.still(it.video ? undefined : it);
     for (const el of [...vids, still]) el.style.transition = cut ? 'none' : `opacity ${fade}s`;
+    const token = ++showing;
     if (it.video) {
       layer = 1 - layer;
       const v = current();
       active = v;
       unvoice?.();
       unvoice = undefined;
-      v.src = it.video;
+      // Loaded already (it was readied while the one before played), else load it now.
+      if (preloaded !== v || v.dataset.src !== it.video) {
+        v.dataset.src = it.video;
+        v.src = it.video;
+      }
+      preloaded = null;
+      v.removeAttribute('poster');
       if (it.voices?.voices.length) unvoice = attachVoiceTrack(v, it.voices, rec?.audio ?? {});
-      if (it.image) v.poster = it.image;
-      v.currentTime = 0;
       v.muted = !!it.voices?.voices.length;
-      v.style.opacity = '1';
-      hideAll(v);
-      if (!paused) void v.play()?.catch?.(() => undefined);
+      if (v.currentTime) v.currentTime = 0;
+      // Shown once its first frame is ready: until then the shot before stays on screen (its
+      // last frame, for a cut), never a thumbnail or black.
+      const reveal = () => {
+        if (token !== showing) return;
+        v.style.opacity = '1';
+        hideAll(v);
+        if (!paused) void v.play()?.catch?.(() => undefined);
+        // Ready the next clip in the other layer once this one has faded in.
+        setTimeout(() => token === showing && readyNext(i + 1), (cut ? 0 : fade * 1000) + 50);
+      };
+      if (v.readyState >= 2) reveal();
+      else {
+        const go = () => (v.removeEventListener('loadeddata', go), v.removeEventListener('error', go), reveal());
+        v.addEventListener('loadeddata', go);
+        v.addEventListener('error', go);
+        v.load?.();
+      }
     } else {
       still.style.backgroundImage = it.image ? `url("${it.image.replace(/"/g, '%22')}")` : 'none';
       still.textContent = it.image ? '' : it.text ?? it.label;
@@ -713,9 +743,25 @@ export function playSequence(items: SequenceItem[], opts: { title?: string; fade
       hideAll(still);
       stillLeft = it.seconds * 1000;
       if (!paused) runStill();
+      setTimeout(() => token === showing && readyNext(i + 1), (cut ? 0 : fade * 1000) + 50);
     }
     advancing = false;
   };
+  /** Load the next clip into the layer not showing, so it's ready the moment it's needed. */
+  function readyNext(n: number) {
+    const it = items[n];
+    const url = it && !(rec && it.video && !readable(it.video)) ? it.video : undefined;
+    const v = vids[1 - layer];
+    if (!url || v === active) return;
+    v.pause();
+    v.style.opacity = '0';
+    if (v.dataset.src !== url) {
+      v.dataset.src = url;
+      v.src = url;
+      v.load?.();
+    } else if (v.currentTime) v.currentTime = 0;
+    preloaded = v;
+  }
   // A still moves on after its length (less the fade, so the next fades in as it ends).
   const runStill = () => {
     stillFrom = Date.now();
