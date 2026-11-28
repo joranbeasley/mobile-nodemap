@@ -794,6 +794,8 @@ export function playSequence(items: SequenceItem[], opts: { title?: string; fade
   };
   let shown = false;
   function done() {
+    loading.abort();
+    setTimeout(() => blobs.forEach((b) => URL.revokeObjectURL(b)), 1000);
     clearTimeout(timer);
     unvoice?.();
     rec?.cancel();
@@ -816,15 +818,60 @@ export function playSequence(items: SequenceItem[], opts: { title?: string; fade
   pause.addEventListener('click', () => setPaused(!paused));
   next.addEventListener('click', () => show(i + 1, true));
   prev.addEventListener('click', () => show(i - 1, true));
-  // Let the second layer play with sound later: start it now, in the tap, muted, then stop.
-  const other = vids[1];
-  other.muted = true;
-  void other.play()?.catch?.(() => undefined);
-  other.pause();
+  // Let both layers play with sound later (after loading): start them now, in the tap, muted, then stop.
+  for (const v of vids) {
+    v.muted = true;
+    void v.play()?.catch?.(() => undefined);
+    v.pause();
+  }
   const rec = opts.record ? recorder() : undefined;
   if (rec) for (const b of [prev, pause, next]) b.hidden = true; // the recording plays straight through
   if (box.requestFullscreen) void box.requestFullscreen().catch(() => undefined);
-  show(0, true);
+  // Every clip (and its fixed voices) loaded before the first plays, so nothing stalls mid-scene.
+  // Each is held in memory for the preview; one that can't be fetched here plays from its link.
+  const loading = new AbortController();
+  const blobs: string[] = [];
+  void (async () => {
+    const urls = [...new Set(items.flatMap((it) => [it.video, ...(it.voices ? [...it.voices.background, ...it.voices.voices.map((x) => x.url), ...(it.voices.vocals ? [it.voices.vocals] : [])] : [])]).filter((u): u is string => !!u))];
+    const map = new Map<string, string>();
+    if (urls.length) {
+      let n = 0;
+      const say = () => {
+        still.style.transition = 'none';
+        still.style.backgroundImage = 'none';
+        still.style.opacity = '1';
+        still.textContent = `Loading the clips… ${n} of ${urls.length}`;
+        cap.textContent = opts.title ?? '';
+      };
+      say();
+      await Promise.all(
+        urls.map(async (u) => {
+          try {
+            const r = await fetch(u, { credentials: 'same-origin', signal: loading.signal });
+            if (r.ok) {
+              const b = URL.createObjectURL(await r.blob());
+              blobs.push(b);
+              map.set(u, b);
+            }
+          } catch {
+            /* plays from its link */
+          }
+          n++;
+          if (!loading.signal.aborted) say();
+        }),
+      );
+    }
+    if (loading.signal.aborted) return;
+    const local = (u: string) => map.get(u) ?? u;
+    items = items.map((it) => ({
+      ...it,
+      ...(it.video ? { video: local(it.video) } : {}),
+      ...(it.voices ? { voices: { ...it.voices, background: it.voices.background.map(local), voices: it.voices.voices.map((x) => ({ ...x, url: local(x.url) })), ...(it.voices.vocals ? { vocals: local(it.voices.vocals) } : {}) } } : {}),
+    }));
+    still.textContent = '';
+    rec?.begin();
+    show(0, true);
+  })();
 
   /**
    * ⬇ Save video: what plays is drawn onto a canvas (crossfades too) and recorded with the
@@ -858,7 +905,7 @@ export function playSequence(items: SequenceItem[], opts: { title?: string; fade
     const chunks: Blob[] = [];
     mr.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     let keep = true;
-    const started = Date.now();
+    let started = Date.now();
     // Fit a picture into the frame (letterboxed), like the player shows it.
     const fit = (el: CanvasImageSource, w: number, h: number) => {
       if (!w || !h) return;
@@ -939,9 +986,13 @@ export function playSequence(items: SequenceItem[], opts: { title?: string; fade
       cap.textContent = '';
       close.addEventListener('click', () => URL.revokeObjectURL(url));
     };
-    mr.start(1000);
-    raf = requestAnimationFrame(frame);
     return {
+      /** Start recording (once every clip has loaded). */
+      begin() {
+        started = Date.now();
+        mr.start(1000);
+        raf = requestAnimationFrame(frame);
+      },
       /** The still showing now (or none while a clip plays). */
       still(it: SequenceItem | undefined) {
         stillItem = it;

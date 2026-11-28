@@ -314,8 +314,14 @@ describe('Editor views', () => {
     expect(chipImg()!.getAttribute('src')).toBe('data:image/jpeg;base64,MQ==');
     // ▶ Preview: full screen, shot by shot.
     const preview = [...el.querySelectorAll<HTMLButtonElement>('.nm-node[data-id="sc1"] .nm-card-row button')].find((b) => b.textContent === '▶ Preview')!;
+    // Every clip is loaded first (here, from a stand-in), then the first plays.
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(new Blob(['x'], { type: 'video/mp4' }))) as typeof fetch;
     preview.click();
     const box = document.querySelector<HTMLElement>('.dr-sequence')!;
+    expect(box.textContent).toContain('Loading the clips… 0 of 1');
+    await new Promise((r) => setTimeout(r, 20));
+    globalThis.fetch = realFetch;
     expect(box.textContent).toContain('Shot 1 · Wide · 1/3');
     box.querySelector<HTMLButtonElement>('[aria-label="Next shot"]')!.click();
     expect(box.textContent).toContain('Shot 2 · Close-up · 2/3');
